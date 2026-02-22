@@ -6,6 +6,7 @@
 #include <ShlObj.h>
 #include <commdlg.h>
 #include <dwmapi.h>
+#include <gdiplus.h>
 #include <shellapi.h>
 #include <wincodec.h>
 

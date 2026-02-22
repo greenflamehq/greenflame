@@ -122,10 +122,9 @@ void Fill_magnifier_checkerboard(HDC dc, int left, int top, int src_x,
             int const cell_left = left + x;
             int const cell_right =
                 std::min(left + x + kMagnifierCheckerTile, left + kMagnifierSize);
-            bool const dark =
-                (((x / kMagnifierCheckerTile) + phase_x +
-                  (y / kMagnifierCheckerTile) + phase_y) &
-                 1) != 0;
+            bool const dark = (((x / kMagnifierCheckerTile) + phase_x +
+                                (y / kMagnifierCheckerTile) + phase_y) &
+                               1) != 0;
             SetDCBrushColor(dc, dark ? kMagnifierCheckerDark : kMagnifierCheckerLight);
             RECT cell = {cell_left, cell_top, cell_right, cell_bottom};
             FillRect(dc, &cell, dc_brush);
@@ -296,18 +295,18 @@ void Draw_dimension_labels(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
                                                     center_box_left + center_box_w,
                                                     center_box_top + center_box_h);
 
-            constexpr unsigned char kSideBoxAlpha = 150;
-            constexpr unsigned char kCenterBoxAlpha = kCoordTooltipAlpha / 2;
+            constexpr unsigned char side_box_alpha = 150;
+            constexpr unsigned char center_box_alpha = kCoordTooltipAlpha / 2;
             greenflame::core::Blend_rect_onto_pixels(
                 pixels, w, h, row_bytes, width_box_rect, kCoordTooltipBgR,
-                kCoordTooltipBgG, kCoordTooltipBgB, kSideBoxAlpha);
+                kCoordTooltipBgG, kCoordTooltipBgB, side_box_alpha);
             greenflame::core::Blend_rect_onto_pixels(
                 pixels, w, h, row_bytes, height_box_rect, kCoordTooltipBgR,
-                kCoordTooltipBgG, kCoordTooltipBgB, kSideBoxAlpha);
+                kCoordTooltipBgG, kCoordTooltipBgB, side_box_alpha);
             if (center_fits) {
                 greenflame::core::Blend_rect_onto_pixels(
                     pixels, w, h, row_bytes, center_box_rect, kCoordTooltipBgR,
-                    kCoordTooltipBgG, kCoordTooltipBgB, kCenterBoxAlpha);
+                    kCoordTooltipBgG, kCoordTooltipBgB, center_box_alpha);
             }
             SetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
                       reinterpret_cast<BITMAPINFO *>(&bmi_dim), DIB_RGB_COLORS);

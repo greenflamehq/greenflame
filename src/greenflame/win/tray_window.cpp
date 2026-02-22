@@ -3,8 +3,6 @@
 #include "win/tray_window.h"
 #include "win/ui_palette.h"
 
-#include <gdiplus.h>
-
 namespace {
 
 constexpr wchar_t kTrayWindowClass[] = L"GreenflameTray";
@@ -14,6 +12,9 @@ constexpr UINT kDeferredCopyWindowMessage = WM_APP + 2;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kModNoRepeat = 0x4000u;
 constexpr UINT kDefaultDpi = 96;
+constexpr int kAppIconResourceId = 1;
+constexpr int kMaxDeferredCopyWindowRetries = 50;
+constexpr BYTE kOpaqueAlpha = 0xFF;
 
 enum CommandId : int {
     StartCapture = 1,
@@ -80,13 +81,13 @@ void CALLBACK Foreground_changed_hook(HWINEVENTHOOK, DWORD, HWND hwnd, LONG id_o
 [[nodiscard]] COLORREF Toast_accent_color(greenflame::TrayBalloonIcon icon) {
     switch (icon) {
     case greenflame::TrayBalloonIcon::Info:
-        return RGB(0x2E, 0x8B, 0x57);
+        return greenflame::winui::kToastAccentInfo;
     case greenflame::TrayBalloonIcon::Warning:
-        return RGB(0xF0, 0xAD, 0x4E);
+        return greenflame::winui::kToastAccentWarning;
     case greenflame::TrayBalloonIcon::Error:
-        return RGB(0xD9, 0x53, 0x4F);
+        return greenflame::winui::kToastAccentError;
     }
-    return RGB(0x2E, 0x8B, 0x57);
+    return greenflame::winui::kToastAccentInfo;
 }
 
 bool Ensure_gdiplus() {
@@ -99,10 +100,12 @@ bool Ensure_gdiplus() {
     return ok;
 }
 
-Gdiplus::Color Gdiplus_color(COLORREF c, BYTE alpha = 255) {
+Gdiplus::Color Gdiplus_color(COLORREF c, BYTE alpha = kOpaqueAlpha) {
     return Gdiplus::Color(alpha, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
+// Icon glyphs are vector paths normalized to [0,1] and scaled at draw-time.
+// NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 void Draw_info_icon(HDC hdc, int x, int y, int size, COLORREF color) {
     if (!Ensure_gdiplus()) {
         return;
@@ -117,7 +120,7 @@ void Draw_info_icon(HDC hdc, int x, int y, int size, COLORREF color) {
     g.FillEllipse(&fill, fx, fy, fs, fs);
 
     auto const stroke = static_cast<Gdiplus::REAL>(std::max(2, size / 8));
-    Gdiplus::Pen pen(Gdiplus::Color(255, 255, 255), stroke);
+    Gdiplus::Pen pen(Gdiplus_color(greenflame::winui::kToastIconGlyphLight), stroke);
     pen.SetStartCap(Gdiplus::LineCapRound);
     pen.SetEndCap(Gdiplus::LineCapRound);
     pen.SetLineJoin(Gdiplus::LineJoinRound);
@@ -144,7 +147,8 @@ void Draw_warning_icon(HDC hdc, int x, int y, int size, COLORREF color) {
     Gdiplus::SolidBrush fill(Gdiplus_color(color));
     g.FillPolygon(&fill, triangle, 3);
 
-    Gdiplus::Color bang_color(0x40, 0x30, 0x00);
+    Gdiplus::Color const bang_color =
+        Gdiplus_color(greenflame::winui::kToastIconGlyphWarning);
     auto const stroke = static_cast<Gdiplus::REAL>(std::max(2, size / 8));
     float const cx = x + size * 0.5f;
 
@@ -183,12 +187,13 @@ void Draw_error_icon(HDC hdc, int x, int y, int size, COLORREF color) {
 
     auto const stroke = static_cast<Gdiplus::REAL>(std::max(2, size / 8));
     float const m = size * 0.30f;
-    Gdiplus::Pen pen(Gdiplus::Color(255, 255, 255), stroke);
+    Gdiplus::Pen pen(Gdiplus_color(greenflame::winui::kToastIconGlyphLight), stroke);
     pen.SetStartCap(Gdiplus::LineCapRound);
     pen.SetEndCap(Gdiplus::LineCapRound);
     g.DrawLine(&pen, x + m, y + m, x + size - m, y + size - m);
     g.DrawLine(&pen, x + size - m, y + m, x + m, y + size - m);
 }
+// NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 
 void Draw_severity_icon(HDC hdc, int x, int y, int size,
                         greenflame::TrayBalloonIcon icon) {
@@ -577,8 +582,8 @@ class TrayWindow::ToastPopup final {
                               DT_END_ELLIPSIS);
 
                 HICON loaded_app_icon = static_cast<HICON>(LoadImageW(
-                    hinstance_, MAKEINTRESOURCEW(1), IMAGE_ICON, title_app_icon_size,
-                    title_app_icon_size, LR_DEFAULTCOLOR));
+                    hinstance_, MAKEINTRESOURCEW(kAppIconResourceId), IMAGE_ICON,
+                    title_app_icon_size, title_app_icon_size, LR_DEFAULTCOLOR));
                 if (loaded_app_icon != nullptr) {
                     int const app_icon_x = content_right - title_app_icon_size;
                     int const app_icon_y =
@@ -715,7 +720,7 @@ bool TrayWindow::Create(HINSTANCE hinstance, bool enable_testing_hotkeys) {
     notify_data.uID = kTrayIconId;
     notify_data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     notify_data.uCallbackMessage = kTrayCallbackMessage;
-    notify_data.hIcon = LoadIconW(hinstance, MAKEINTRESOURCEW(1));
+    notify_data.hIcon = LoadIconW(hinstance, MAKEINTRESOURCEW(kAppIconResourceId));
     wcscpy_s(notify_data.szTip, L"Greenflame");
     if (!Shell_NotifyIconW(NIM_ADD, &notify_data)) {
         DestroyWindow(hwnd);
@@ -916,9 +921,10 @@ LRESULT TrayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
         if (msg == kDeferredCopyWindowMessage) {
             HWND overflow = FindWindowW(L"NotifyIconOverflowWindow", nullptr);
             int retries = static_cast<int>(wparam);
-            if (overflow != nullptr && IsWindowVisible(overflow) && retries < 50) {
-                PostMessage(hwnd_, kDeferredCopyWindowMessage,
-                            static_cast<WPARAM>(retries + 1), 0);
+            if (overflow != nullptr && IsWindowVisible(overflow) &&
+                retries < kMaxDeferredCopyWindowRetries) {
+                WPARAM const next_retry = static_cast<WPARAM>(retries) + 1;
+                PostMessage(hwnd_, kDeferredCopyWindowMessage, next_retry, 0);
                 return 0;
             }
             Notify_copy_window_to_clipboard();
