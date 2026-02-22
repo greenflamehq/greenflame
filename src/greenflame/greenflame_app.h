@@ -25,7 +25,8 @@ class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
     void On_selection_copied_to_clipboard(core::RectPx screen_rect,
                                           std::optional<HWND> window) override;
     void On_selection_saved_to_file(core::RectPx screen_rect,
-                                    std::optional<HWND> window) override;
+                                    std::optional<HWND> window,
+                                    HBITMAP thumbnail) override;
 
     void Store_last_capture(core::RectPx screen_rect, std::optional<HWND> window);
 

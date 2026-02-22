@@ -31,7 +31,8 @@ class TrayWindow final {
     [[nodiscard]] static bool Register_window_class(HINSTANCE hinstance);
     [[nodiscard]] bool Create(HINSTANCE hinstance, bool enable_testing_hotkeys = false);
     void Destroy();
-    void Show_balloon(TrayBalloonIcon icon, wchar_t const *message);
+    void Show_balloon(TrayBalloonIcon icon, wchar_t const *message,
+                      HBITMAP thumbnail = nullptr);
 
     [[nodiscard]] bool Is_open() const;
 

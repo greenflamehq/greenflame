@@ -7,6 +7,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# cmake-scripts (pulled by Catch2/CPM) sets CMAKE_COMPILE_WARNING_AS_ERROR=ON
+# which adds /WX globally, breaking builds on warnings in third-party headers.
+# We control warnings per-target already, so disable it.
+set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
+
 # Keep the app as a GUI subsystem executable on Windows.
 set(CMAKE_WIN32_EXECUTABLE ON)
 
@@ -139,4 +144,5 @@ target_link_libraries(greenflame PRIVATE
         comdlg32
         Windowscodecs
         ole32
+        gdiplus
 )

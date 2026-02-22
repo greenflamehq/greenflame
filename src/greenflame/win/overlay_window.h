@@ -13,7 +13,8 @@ class IOverlayEvents {
     virtual void On_selection_copied_to_clipboard(core::RectPx screen_rect,
                                                   std::optional<HWND> window) = 0;
     virtual void On_selection_saved_to_file(core::RectPx screen_rect,
-                                            std::optional<HWND> window) = 0;
+                                            std::optional<HWND> window,
+                                            HBITMAP thumbnail) = 0;
 };
 
 class OverlayWindow final {

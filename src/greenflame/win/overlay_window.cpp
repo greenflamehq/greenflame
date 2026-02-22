@@ -28,6 +28,60 @@ constexpr int kCenterFontHeight = 36;
     return (GetKeyState(VK_MENU) & 0x8000) == 0;
 }
 
+constexpr int kThumbnailMaxWidth = 320;
+constexpr int kThumbnailMaxHeight = 120;
+
+[[nodiscard]] HBITMAP Create_thumbnail_from_capture(
+    greenflame::GdiCaptureResult const &capture) {
+    if (!capture.Is_valid()) {
+        return nullptr;
+    }
+    float const scale_w =
+        static_cast<float>(kThumbnailMaxWidth) / capture.width;
+    float const scale_h =
+        static_cast<float>(kThumbnailMaxHeight) / capture.height;
+    float scale = (std::min)(scale_w, scale_h);
+    if (scale > 1.0f) {
+        scale = 1.0f;
+    }
+    int tw = static_cast<int>(capture.width * scale);
+    int th = static_cast<int>(capture.height * scale);
+    if (tw <= 0) {
+        tw = 1;
+    }
+    if (th <= 0) {
+        th = 1;
+    }
+    HBITMAP result = nullptr;
+    HDC const screen_dc = GetDC(nullptr);
+    if (screen_dc != nullptr) {
+        HDC const src_dc = CreateCompatibleDC(screen_dc);
+        HDC const dst_dc = CreateCompatibleDC(screen_dc);
+        result = CreateCompatibleBitmap(screen_dc, tw, th);
+        if (src_dc != nullptr && dst_dc != nullptr && result != nullptr) {
+            HGDIOBJ const old_src = SelectObject(src_dc, capture.bitmap);
+            HGDIOBJ const old_dst = SelectObject(dst_dc, result);
+            SetStretchBltMode(dst_dc, HALFTONE);
+            SetBrushOrgEx(dst_dc, 0, 0, nullptr);
+            StretchBlt(dst_dc, 0, 0, tw, th, src_dc, 0, 0, capture.width,
+                       capture.height, SRCCOPY);
+            SelectObject(dst_dc, old_dst);
+            SelectObject(src_dc, old_src);
+        } else if (result != nullptr) {
+            DeleteObject(result);
+            result = nullptr;
+        }
+        if (dst_dc != nullptr) {
+            DeleteDC(dst_dc);
+        }
+        if (src_dc != nullptr) {
+            DeleteDC(src_dc);
+        }
+        ReleaseDC(nullptr, screen_dc);
+    }
+    return result;
+}
+
 [[nodiscard]] POINT To_point(greenflame::core::PointPx p) {
     POINT out{};
     out.x = p.x;
@@ -504,6 +558,7 @@ void OverlayWindow::Save_directly_and_close() {
         saved = Save_capture_to_png(cropped, full_path.c_str());
     }
 
+    HBITMAP thumb = saved ? Create_thumbnail_from_capture(cropped) : nullptr;
     cropped.Free();
     if (saved) {
         if (config_) {
@@ -512,7 +567,11 @@ void OverlayWindow::Save_directly_and_close() {
         }
         if (events_) {
             events_->On_selection_saved_to_file(Selection_screen_rect(),
-                                                state_->selection_window);
+                                                state_->selection_window, thumb);
+            thumb = nullptr;
+        }
+        if (thumb != nullptr) {
+            DeleteObject(thumb);
         }
     }
     Destroy();
@@ -574,6 +633,7 @@ void OverlayWindow::Save_as_and_close() {
         saved = Save_capture_to_png(cropped, path_buffer);
     }
 
+    HBITMAP thumb = saved ? Create_thumbnail_from_capture(cropped) : nullptr;
     cropped.Free();
     if (saved) {
         wchar_t *last_slash = wcsrchr(path_buffer, L'\\');
@@ -586,7 +646,11 @@ void OverlayWindow::Save_as_and_close() {
         }
         if (events_) {
             events_->On_selection_saved_to_file(Selection_screen_rect(),
-                                                state_->selection_window);
+                                                state_->selection_window, thumb);
+            thumb = nullptr;
+        }
+        if (thumb != nullptr) {
+            DeleteObject(thumb);
         }
         Destroy();
     }

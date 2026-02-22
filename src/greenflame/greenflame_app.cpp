@@ -16,6 +16,68 @@ constexpr wchar_t kLastWindowClosedMessage[] =
     L"Previously captured window is no longer available.";
 constexpr wchar_t kLastWindowMinimizedMessage[] =
     L"Previously captured window is minimized.";
+constexpr int kThumbnailMaxWidth = 320;
+constexpr int kThumbnailMaxHeight = 120;
+
+[[nodiscard]] HBITMAP Create_thumbnail_from_clipboard() {
+    if (OpenClipboard(nullptr) == 0) {
+        return nullptr;
+    }
+    HBITMAP clip_bmp = static_cast<HBITMAP>(GetClipboardData(CF_BITMAP));
+    if (clip_bmp == nullptr) {
+        CloseClipboard();
+        return nullptr;
+    }
+    BITMAP bm{};
+    if (GetObject(clip_bmp, sizeof(bm), &bm) == 0 || bm.bmWidth <= 0 ||
+        bm.bmHeight <= 0) {
+        CloseClipboard();
+        return nullptr;
+    }
+    float const scale_w = static_cast<float>(kThumbnailMaxWidth) / bm.bmWidth;
+    float const scale_h = static_cast<float>(kThumbnailMaxHeight) / bm.bmHeight;
+    float scale = (std::min)(scale_w, scale_h);
+    if (scale > 1.0f) {
+        scale = 1.0f;
+    }
+    int thumb_w = static_cast<int>(bm.bmWidth * scale);
+    int thumb_h = static_cast<int>(bm.bmHeight * scale);
+    if (thumb_w <= 0) {
+        thumb_w = 1;
+    }
+    if (thumb_h <= 0) {
+        thumb_h = 1;
+    }
+    HBITMAP result = nullptr;
+    HDC const screen_dc = GetDC(nullptr);
+    if (screen_dc != nullptr) {
+        HDC const src_dc = CreateCompatibleDC(screen_dc);
+        HDC const dst_dc = CreateCompatibleDC(screen_dc);
+        result = CreateCompatibleBitmap(screen_dc, thumb_w, thumb_h);
+        if (src_dc != nullptr && dst_dc != nullptr && result != nullptr) {
+            HGDIOBJ const old_src = SelectObject(src_dc, clip_bmp);
+            HGDIOBJ const old_dst = SelectObject(dst_dc, result);
+            SetStretchBltMode(dst_dc, HALFTONE);
+            SetBrushOrgEx(dst_dc, 0, 0, nullptr);
+            StretchBlt(dst_dc, 0, 0, thumb_w, thumb_h, src_dc, 0, 0, bm.bmWidth,
+                       bm.bmHeight, SRCCOPY);
+            SelectObject(dst_dc, old_dst);
+            SelectObject(src_dc, old_src);
+        } else if (result != nullptr) {
+            DeleteObject(result);
+            result = nullptr;
+        }
+        if (dst_dc != nullptr) {
+            DeleteDC(dst_dc);
+        }
+        if (src_dc != nullptr) {
+            DeleteDC(src_dc);
+        }
+        ReleaseDC(nullptr, screen_dc);
+    }
+    CloseClipboard();
+    return result;
+}
 
 void Enable_per_monitor_dpi_awareness_v2() {
     HMODULE user32 = GetModuleHandleW(L"user32.dll");
@@ -216,7 +278,8 @@ void GreenflameApp::On_copy_window_to_clipboard_requested(HWND target_window) {
         Store_last_capture(result->screen_rect, result->hwnd);
         if (config_.show_balloons) {
             tray_window_.Show_balloon(TrayBalloonIcon::Info,
-                                      kClipboardCopiedBalloonMessage);
+                                      kClipboardCopiedBalloonMessage,
+                                      Create_thumbnail_from_clipboard());
         }
     }
 }
@@ -230,7 +293,8 @@ void GreenflameApp::On_copy_monitor_to_clipboard_requested() {
         Store_last_capture(*rect, std::nullopt);
         if (config_.show_balloons) {
             tray_window_.Show_balloon(TrayBalloonIcon::Info,
-                                      kClipboardCopiedBalloonMessage);
+                                      kClipboardCopiedBalloonMessage,
+                                      Create_thumbnail_from_clipboard());
         }
     }
 }
@@ -244,7 +308,8 @@ void GreenflameApp::On_copy_desktop_to_clipboard_requested() {
         Store_last_capture(*rect, std::nullopt);
         if (config_.show_balloons) {
             tray_window_.Show_balloon(TrayBalloonIcon::Info,
-                                      kClipboardCopiedBalloonMessage);
+                                      kClipboardCopiedBalloonMessage,
+                                      Create_thumbnail_from_clipboard());
         }
     }
 }
@@ -260,7 +325,8 @@ void GreenflameApp::On_copy_last_region_to_clipboard_requested() {
     if (Copy_screen_rect_to_clipboard(*last_capture_screen_rect_)) {
         if (config_.show_balloons) {
             tray_window_.Show_balloon(TrayBalloonIcon::Info,
-                                      kClipboardCopiedBalloonMessage);
+                                      kClipboardCopiedBalloonMessage,
+                                      Create_thumbnail_from_clipboard());
         }
     } else {
         tray_window_.Show_balloon(TrayBalloonIcon::Warning, kNoLastRegionMessage);
@@ -296,7 +362,8 @@ void GreenflameApp::On_copy_last_window_to_clipboard_requested() {
         Store_last_capture(*rect, hwnd);
         if (config_.show_balloons) {
             tray_window_.Show_balloon(TrayBalloonIcon::Info,
-                                      kClipboardCopiedBalloonMessage);
+                                      kClipboardCopiedBalloonMessage,
+                                      Create_thumbnail_from_clipboard());
         }
     }
 }
@@ -315,15 +382,20 @@ void GreenflameApp::On_selection_copied_to_clipboard(core::RectPx screen_rect,
     Store_last_capture(screen_rect, window);
     if (config_.show_balloons) {
         tray_window_.Show_balloon(TrayBalloonIcon::Info,
-                                  kClipboardCopiedBalloonMessage);
+                                  kClipboardCopiedBalloonMessage,
+                                  Create_thumbnail_from_clipboard());
     }
 }
 
 void GreenflameApp::On_selection_saved_to_file(core::RectPx screen_rect,
-                                               std::optional<HWND> window) {
+                                               std::optional<HWND> window,
+                                               HBITMAP thumbnail) {
     Store_last_capture(screen_rect, window);
     if (config_.show_balloons) {
-        tray_window_.Show_balloon(TrayBalloonIcon::Info, kSelectionSavedBalloonMessage);
+        tray_window_.Show_balloon(TrayBalloonIcon::Info, kSelectionSavedBalloonMessage,
+                                  thumbnail);
+    } else if (thumbnail != nullptr) {
+        DeleteObject(thumbnail);
     }
 }
 
