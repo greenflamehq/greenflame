@@ -76,7 +76,16 @@ AppConfig AppConfig::Load() {
                     }
                 }
             };
-            read_string("last_save_dir", config.last_save_dir);
+            std::wstring legacy_last_save_dir = {};
+            read_string("default_save_dir", config.default_save_dir);
+            read_string("last_save_as_dir", config.last_save_as_dir);
+            read_string("last_save_dir", legacy_last_save_dir);
+            if (config.default_save_dir.empty() && !legacy_last_save_dir.empty()) {
+                config.default_save_dir = legacy_last_save_dir;
+            }
+            if (config.last_save_as_dir.empty() && !legacy_last_save_dir.empty()) {
+                config.last_save_as_dir = legacy_last_save_dir;
+            }
             read_string("filename_pattern_region", config.filename_pattern_region);
             read_string("filename_pattern_desktop", config.filename_pattern_desktop);
             read_string("filename_pattern_monitor", config.filename_pattern_monitor);
@@ -105,8 +114,11 @@ bool AppConfig::Save() const {
         }
 
         // Save section: only write non-default values.
-        if (!last_save_dir.empty()) {
-            root["save"]["last_save_dir"] = To_utf8(last_save_dir);
+        if (!default_save_dir.empty()) {
+            root["save"]["default_save_dir"] = To_utf8(default_save_dir);
+        }
+        if (!last_save_as_dir.empty()) {
+            root["save"]["last_save_as_dir"] = To_utf8(last_save_as_dir);
         }
         auto write_if_set = [&](char const *key, std::wstring const &value) {
             if (!value.empty()) {
@@ -131,8 +143,11 @@ bool AppConfig::Save() const {
 }
 
 void AppConfig::Normalize() {
-    if (last_save_dir.size() >= MAX_PATH) {
-        last_save_dir.resize(MAX_PATH - 1);
+    if (default_save_dir.size() >= MAX_PATH) {
+        default_save_dir.resize(MAX_PATH - 1);
+    }
+    if (last_save_as_dir.size() >= MAX_PATH) {
+        last_save_as_dir.resize(MAX_PATH - 1);
     }
     auto clamp_pattern = [](std::wstring &s) {
         if (s.size() > 256) s.resize(256);

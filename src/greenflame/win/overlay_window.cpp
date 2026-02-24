@@ -341,10 +341,26 @@ LRESULT OverlayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
     }
 }
 
-std::wstring OverlayWindow::Resolve_save_directory() const {
+std::wstring OverlayWindow::Resolve_default_save_directory() const {
     std::wstring dir;
-    if (config_ && !config_->last_save_dir.empty()) {
-        dir = config_->last_save_dir;
+    if (config_ && !config_->default_save_dir.empty()) {
+        dir = config_->default_save_dir;
+    } else {
+        wchar_t pictures_dir[MAX_PATH] = {};
+        SHGetFolderPathW(nullptr, CSIDL_MYPICTURES, nullptr, 0, pictures_dir);
+        dir = pictures_dir;
+        dir += L"\\greenflame";
+    }
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir;
+}
+
+std::wstring OverlayWindow::Resolve_save_as_initial_directory() const {
+    std::wstring dir;
+    if (config_ && !config_->last_save_as_dir.empty()) {
+        dir = config_->last_save_as_dir;
+    } else if (config_ && !config_->default_save_dir.empty()) {
+        dir = config_->default_save_dir;
     } else {
         wchar_t pictures_dir[MAX_PATH] = {};
         SHGetFolderPathW(nullptr, CSIDL_MYPICTURES, nullptr, 0, pictures_dir);
@@ -375,7 +391,8 @@ OverlayWindow::List_directory_filenames(std::wstring_view dir) {
     return result;
 }
 
-void OverlayWindow::Build_default_save_name(wchar_t *out, size_t out_chars) const {
+void OverlayWindow::Build_default_save_name(std::wstring_view save_dir_for_num_scan,
+                                            wchar_t *out, size_t out_chars) const {
     if (!out || out_chars == 0) {
         return;
     }
@@ -422,8 +439,8 @@ void OverlayWindow::Build_default_save_name(wchar_t *out, size_t out_chars) cons
         pattern.empty() ? core::Default_filename_pattern(state_->selection_source)
                         : pattern;
     if (core::Pattern_uses_num(effective_pattern)) {
-        std::wstring const save_dir = Resolve_save_directory();
-        std::vector<std::wstring> const files = List_directory_filenames(save_dir);
+        std::vector<std::wstring> const files =
+            List_directory_filenames(save_dir_for_num_scan);
         ctx.incrementing_number =
             core::Find_next_num_for_pattern(effective_pattern, ctx, files);
     }
@@ -522,10 +539,10 @@ void OverlayWindow::Save_directly_and_close() {
         return;
     }
 
-    std::wstring const save_dir = Resolve_save_directory();
+    std::wstring const save_dir = Resolve_default_save_directory();
 
     wchar_t default_name[256] = {};
-    Build_default_save_name(default_name, 256);
+    Build_default_save_name(save_dir, default_name, 256);
 
     // Determine extension from config.
     std::wstring_view ext = L".png";
@@ -569,7 +586,7 @@ void OverlayWindow::Save_directly_and_close() {
     cropped.Free();
     if (saved) {
         if (config_) {
-            config_->last_save_dir = save_dir;
+            config_->default_save_dir = save_dir;
             config_->Normalize();
         }
         if (events_) {
@@ -600,8 +617,10 @@ void OverlayWindow::Save_as_and_close() {
         return;
     }
 
+    std::wstring const initial_dir = Resolve_save_as_initial_directory();
+
     wchar_t default_name[256] = {};
-    Build_default_save_name(default_name, 256);
+    Build_default_save_name(initial_dir, default_name, 256);
 
     OPENFILENAMEW ofn = {};
     wchar_t path_buffer[MAX_PATH] = {};
@@ -615,7 +634,6 @@ void OverlayWindow::Save_as_and_close() {
     ofn.lpstrDefExt = L"png";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
 
-    std::wstring const initial_dir = Resolve_save_directory();
     if (!initial_dir.empty()) {
         ofn.lpstrInitialDir = initial_dir.c_str();
     }
@@ -647,7 +665,7 @@ void OverlayWindow::Save_as_and_close() {
         if (last_slash && config_) {
             size_t const dir_len = static_cast<size_t>(last_slash - path_buffer);
             if (dir_len < MAX_PATH) {
-                config_->last_save_dir.assign(path_buffer, dir_len);
+                config_->last_save_as_dir.assign(path_buffer, dir_len);
                 config_->Normalize();
             }
         }

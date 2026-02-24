@@ -180,8 +180,8 @@ void Write_console_line(std::wstring_view text, bool to_stderr) {
 [[nodiscard]] std::wstring
 Resolve_save_directory_from_config(greenflame::AppConfig const &config) {
     std::wstring dir;
-    if (!config.last_save_dir.empty()) {
-        dir = config.last_save_dir;
+    if (!config.default_save_dir.empty()) {
+        dir = config.default_save_dir;
     } else {
         wchar_t pictures_dir[MAX_PATH] = {};
         SHGetFolderPathW(nullptr, CSIDL_MYPICTURES, nullptr, 0, pictures_dir);
@@ -304,13 +304,13 @@ Resolve_output_path(greenflame::AppConfig const &config,
                                      window_title);
 }
 
-void Update_last_save_dir_from_path(greenflame::AppConfig &config,
-                                    std::wstring_view full_path) {
+void Update_default_save_dir_from_path(greenflame::AppConfig &config,
+                                       std::wstring_view full_path) {
     size_t const slash = full_path.find_last_of(L"\\/");
     if (slash == std::wstring::npos) {
         return;
     }
-    config.last_save_dir = std::wstring(full_path.substr(0, slash));
+    config.default_save_dir = std::wstring(full_path.substr(0, slash));
     config.Normalize();
 }
 
@@ -881,7 +881,7 @@ int GreenflameApp::Run_cli_capture_mode() {
         return kCliExitCaptureSaveFailed;
     }
 
-    Update_last_save_dir_from_path(config_, output_path);
+    Update_default_save_dir_from_path(config_, output_path);
     Store_last_capture(target_rect, captured_window);
     config_.Normalize();
 

@@ -39,10 +39,12 @@ class OverlayWindow final {
                                             LPARAM lparam);
     LRESULT Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam);
 
-    void Build_default_save_name(wchar_t *out, size_t out_chars) const;
+    void Build_default_save_name(std::wstring_view save_dir_for_num_scan, wchar_t *out,
+                                 size_t out_chars) const;
     void Build_snap_edges_from_windows();
     void Update_modifier_preview(bool shift, bool ctrl);
-    [[nodiscard]] std::wstring Resolve_save_directory() const;
+    [[nodiscard]] std::wstring Resolve_default_save_directory() const;
+    [[nodiscard]] std::wstring Resolve_save_as_initial_directory() const;
     [[nodiscard]] static std::vector<std::wstring>
     List_directory_filenames(std::wstring_view dir);
     [[nodiscard]] core::RectPx Selection_screen_rect() const;

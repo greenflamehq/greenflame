@@ -140,6 +140,22 @@ The `default_save_format` setting controls which format **Ctrl-S** uses. Accepte
 }
 ```
 
+### Save directories
+
+Save paths are configured independently:
+
+- `default_save_dir`: used by **Ctrl-S** and CLI captures that do not pass `--output`.
+- `last_save_as_dir`: used as the initial folder for **Ctrl-Shift-S** (Save As).
+
+```json
+{
+  "save": {
+    "default_save_dir": "C:\\Users\\you\\Pictures\\greenflame",
+    "last_save_as_dir": "D:\\shots\\scratch"
+  }
+}
+```
+
 ---
 
 ## Build and test
