@@ -21,6 +21,8 @@ set(CMAKE_WIN32_EXECUTABLE ON)
 add_library(greenflame_core STATIC
     src/greenflame_core/rect_px.cpp
     src/greenflame_core/rect_px.h
+    src/greenflame_core/cli_options.cpp
+    src/greenflame_core/cli_options.h
     src/greenflame_core/monitor_rules.cpp
     src/greenflame_core/monitor_rules.h
     src/greenflame_core/pixel_ops.cpp

@@ -101,6 +101,43 @@ bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
     return SUCCEEDED(hr);
 }
 
+[[nodiscard]] std::wstring Build_suffixed_path(std::wstring_view path,
+                                               uint32_t suffix) {
+    size_t const last_separator = path.find_last_of(L"\\/");
+    size_t const last_dot = path.find_last_of(L'.');
+    bool const has_extension =
+        last_dot != std::wstring_view::npos &&
+        (last_separator == std::wstring_view::npos || last_dot > last_separator + 0);
+
+    std::wstring out;
+    if (has_extension) {
+        out.assign(path.substr(0, last_dot));
+    } else {
+        out.assign(path);
+    }
+    out += L"-";
+    out += std::to_wstring(suffix);
+    if (has_extension) {
+        out += path.substr(last_dot);
+    }
+    return out;
+}
+
+[[nodiscard]] std::wstring Try_reserve_exact_path(std::wstring_view path) noexcept {
+    if (path.empty()) {
+        return {};
+    }
+    std::wstring path_string(path);
+    HANDLE const handle =
+        CreateFileW(path_string.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ,
+                    nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle != INVALID_HANDLE_VALUE) {
+        CloseHandle(handle);
+        return path_string;
+    }
+    return {};
+}
+
 } // namespace
 
 bool Save_capture_to_png(GdiCaptureResult const &capture, wchar_t const *path) {
@@ -109,6 +146,34 @@ bool Save_capture_to_png(GdiCaptureResult const &capture, wchar_t const *path) {
 
 bool Save_capture_to_jpeg(GdiCaptureResult const &capture, wchar_t const *path) {
     return Save_capture_via_wic(capture, path, GUID_ContainerFormatJpeg);
+}
+
+std::wstring Reserve_unique_file_path(std::wstring_view desired_path) noexcept {
+    if (desired_path.empty()) {
+        return {};
+    }
+    if (std::wstring const exact = Try_reserve_exact_path(desired_path);
+        !exact.empty()) {
+        return exact;
+    }
+    DWORD const first_error = GetLastError();
+    if (first_error != ERROR_FILE_EXISTS && first_error != ERROR_ALREADY_EXISTS) {
+        return {};
+    }
+
+    constexpr uint32_t k_max_suffix = 10000;
+    for (uint32_t suffix = 1; suffix <= k_max_suffix; ++suffix) {
+        std::wstring const candidate = Build_suffixed_path(desired_path, suffix);
+        if (std::wstring const reserved = Try_reserve_exact_path(candidate);
+            !reserved.empty()) {
+            return reserved;
+        }
+        DWORD const error = GetLastError();
+        if (error != ERROR_FILE_EXISTS && error != ERROR_ALREADY_EXISTS) {
+            return {};
+        }
+    }
+    return {};
 }
 
 } // namespace greenflame

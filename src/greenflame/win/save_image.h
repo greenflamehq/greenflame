@@ -10,4 +10,11 @@ namespace greenflame {
 bool Save_capture_to_png(GdiCaptureResult const &capture, wchar_t const *path);
 bool Save_capture_to_jpeg(GdiCaptureResult const &capture, wchar_t const *path);
 
+// Atomically reserves a writable file path. The returned file path exists
+// (created as an empty placeholder) and is unique at reservation time.
+// If the requested path is already taken, a numeric suffix is appended.
+// Returns empty string on failure.
+[[nodiscard]] std::wstring
+Reserve_unique_file_path(std::wstring_view desired_path) noexcept;
+
 } // namespace greenflame

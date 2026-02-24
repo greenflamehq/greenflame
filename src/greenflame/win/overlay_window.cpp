@@ -31,15 +31,13 @@ constexpr int kCenterFontHeight = 36;
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
 
-[[nodiscard]] HBITMAP Create_thumbnail_from_capture(
-    greenflame::GdiCaptureResult const &capture) {
+[[nodiscard]] HBITMAP
+Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     if (!capture.Is_valid()) {
         return nullptr;
     }
-    float const scale_w =
-        static_cast<float>(kThumbnailMaxWidth) / capture.width;
-    float const scale_h =
-        static_cast<float>(kThumbnailMaxHeight) / capture.height;
+    float const scale_w = static_cast<float>(kThumbnailMaxWidth) / capture.width;
+    float const scale_h = static_cast<float>(kThumbnailMaxHeight) / capture.height;
     float scale = (std::min)(scale_w, scale_h);
     if (scale > 1.0f) {
         scale = 1.0f;
@@ -548,14 +546,23 @@ void OverlayWindow::Save_directly_and_close() {
     }
     full_path += default_name;
     full_path += ext;
+    std::wstring const reserved_path = Reserve_unique_file_path(full_path);
+    if (reserved_path.empty()) {
+        cropped.Free();
+        Destroy();
+        return;
+    }
 
     bool saved = false;
     if (format == core::ImageSaveFormat::Jpeg) {
-        saved = Save_capture_to_jpeg(cropped, full_path.c_str());
+        saved = Save_capture_to_jpeg(cropped, reserved_path.c_str());
     } else if (format == core::ImageSaveFormat::Bmp) {
-        saved = Save_capture_to_bmp(cropped, full_path.c_str());
+        saved = Save_capture_to_bmp(cropped, reserved_path.c_str());
     } else {
-        saved = Save_capture_to_png(cropped, full_path.c_str());
+        saved = Save_capture_to_png(cropped, reserved_path.c_str());
+    }
+    if (!saved) {
+        (void)DeleteFileW(reserved_path.c_str());
     }
 
     HBITMAP thumb = saved ? Create_thumbnail_from_capture(cropped) : nullptr;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app_config.h"
+#include "greenflame_core/cli_options.h"
 #include "greenflame_core/rect_px.h"
 #include "win/overlay_window.h"
 #include "win/tray_window.h"
@@ -9,11 +10,13 @@ namespace greenflame {
 
 class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
   public:
-    explicit GreenflameApp(HINSTANCE hinstance);
+    explicit GreenflameApp(HINSTANCE hinstance,
+                           core::CliOptions const &cli_options = {});
 
     [[nodiscard]] int Run();
 
   private:
+    [[nodiscard]] int Run_cli_capture_mode();
     void On_start_capture_requested() override;
     void On_copy_window_to_clipboard_requested(HWND target_window) override;
     void On_copy_monitor_to_clipboard_requested() override;
@@ -31,6 +34,7 @@ class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
     void Store_last_capture(core::RectPx screen_rect, std::optional<HWND> window);
 
     HINSTANCE hinstance_ = nullptr;
+    core::CliOptions cli_options_ = {};
     AppConfig config_ = {};
     TrayWindow tray_window_;
     OverlayWindow overlay_window_;

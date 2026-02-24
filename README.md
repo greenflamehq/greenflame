@@ -54,6 +54,39 @@ The last two hotkeys require a previous capture in the current session. If no pr
 
 ---
 
+## Command-line mode
+
+With no parameters, Greenflame starts normally in the tray.
+
+You can also run one-shot capture commands (exactly one capture mode per invocation):
+
+| Option | Meaning |
+|---|---|
+| `-r, --region <x,y,w,h>` | Capture an explicit physical-pixel region |
+| `-w, --window <name>` | Capture a visible top-level window whose title matches `<name>` (case-insensitive contains) |
+| `-m, --monitor <id>` | Capture monitor by 1-based id |
+| `-d, --desktop` | Capture the full virtual desktop |
+| `-h, --help` | Show help and exit |
+
+Optional:
+
+| Option | Meaning |
+|---|---|
+| `-o, --output <path>` | Output file path (valid only with a capture mode) |
+
+Both `--option=value` and `--option value` forms are supported.
+
+Examples:
+
+```bat
+greenflame.exe --desktop
+greenflame.exe --monitor 2 --output "D:\shots\monitor2.png"
+greenflame.exe --window="Notepad" --output "D:\shots\note"
+greenflame.exe --region -1200,100,800,600
+```
+
+---
+
 ## Filename patterns
 
 Saved files are named using configurable patterns with Greenshot-style `${VARIABLE}` placeholders. Each capture type has its own pattern, editable in `%APPDATA%\greenflame\greenflame.json` under the `"save"` section.

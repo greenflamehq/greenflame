@@ -169,4 +169,54 @@ void Get_visible_top_level_window_rects(HWND exclude_hwnd,
     }
 }
 
+WindowObscuration Get_window_obscuration(HWND hwnd) {
+    if (hwnd == nullptr) {
+        return WindowObscuration::None;
+    }
+    if (IsWindow(hwnd) == 0 || !IsWindowVisible(hwnd) || GetParent(hwnd) != nullptr ||
+        IsIconic(hwnd) != 0) {
+        return WindowObscuration::None;
+    }
+
+    RECT target_rect{};
+    if (!Try_get_window_bounds(hwnd, target_rect)) {
+        return WindowObscuration::None;
+    }
+
+    std::vector<RECT> occluders;
+    HWND scan = GetTopWindow(nullptr);
+    while (scan != nullptr && scan != hwnd) {
+        if (IsWindowVisible(scan) != 0 && GetParent(scan) == nullptr &&
+            IsIconic(scan) == 0) {
+            RECT occluder_rect{};
+            if (Try_get_window_bounds(scan, occluder_rect)) {
+                occluders.push_back(occluder_rect);
+            }
+        }
+        scan = GetWindow(scan, GW_HWNDNEXT);
+    }
+
+    if (scan == nullptr) {
+        return WindowObscuration::None;
+    }
+
+    bool has_overlap = false;
+    for (RECT const &occluder_rect : occluders) {
+        RECT overlap{};
+        if (IntersectRect(&overlap, &target_rect, &occluder_rect) != 0 &&
+            !Is_empty_rect(overlap)) {
+            has_overlap = true;
+            break;
+        }
+    }
+
+    if (Is_fully_occluded(target_rect, occluders)) {
+        return WindowObscuration::Full;
+    }
+    if (has_overlap) {
+        return WindowObscuration::Partial;
+    }
+    return WindowObscuration::None;
+}
+
 } // namespace greenflame

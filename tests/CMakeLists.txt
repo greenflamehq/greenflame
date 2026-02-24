@@ -22,6 +22,7 @@ add_executable(greenflame_tests
     snap_to_edges_tests.cpp
     snap_edge_builder_tests.cpp
     save_image_policy_tests.cpp
+    cli_options_tests.cpp
 )
 set_target_properties(greenflame_tests PROPERTIES WIN32_EXECUTABLE FALSE)  # console app (main), not GUI (WinMain)
 target_precompile_headers(greenflame_tests PRIVATE

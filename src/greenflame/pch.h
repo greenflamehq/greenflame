@@ -14,11 +14,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cwctype>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <wchar.h>
