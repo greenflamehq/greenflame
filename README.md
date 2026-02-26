@@ -96,7 +96,7 @@ greenflame.exe --region 1200,100,800,600
 
 1. If `--output` has a supported extension (`.png`, `.jpg`, `.jpeg`, `.bmp`), that extension defines the format.
 2. Otherwise, if `--format` is provided, `--format` defines the format.
-3. Otherwise, `save.default_save_format` defines the format.
+3. Otherwise, `default_save_format` (from `[save]` in the config) defines the format.
 4. If `--output` extension conflicts with `--format`, the command fails.
 5. If `--output` has an unsupported extension (for example `.tiff`), the command fails.
 6. If `--output` has no extension, Greenflame appends one based on the resolved format.
@@ -127,38 +127,35 @@ codes are unique and not reused.
 
 ## Configuration
 
-Greenflame reads `%APPDATA%\greenflame\greenflame.json`.
+Greenflame reads `~/.config/greenflame/greenflame.ini` (i.e. `%USERPROFILE%\.config\greenflame\greenflame.ini`).
 
 ### All config keys
 
-| Key | Type | Default | Meaning |
+| Section | Key | Default | Meaning |
 |---|---|---|---|
-| `ui.show_balloons` | `boolean` | `true` | Show tray toast notifications after copy/save actions. |
-| `save.default_save_dir` | `string` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
-| `save.last_save_as_dir` | `string` | Falls back to `save.default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
-| `save.default_save_format` | `string` | `"png"` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `"png"`, `"jpg"`/`"jpeg"`, `"bmp"`. |
-| `save.filename_pattern_region` | `string` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for region captures. |
-| `save.filename_pattern_desktop` | `string` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for desktop captures. |
-| `save.filename_pattern_monitor` | `string` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}` | Default filename pattern for monitor captures. |
-| `save.filename_pattern_window` | `string` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}` | Default filename pattern for window captures. |
+| `[ui]` | `show_balloons` | `true` | Show tray toast notifications after copy/save actions. |
+| `[save]` | `default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
+| `[save]` | `last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
+| `[save]` | `default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
+| `[save]` | `filename_pattern_region` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for region captures. |
+| `[save]` | `filename_pattern_desktop` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for desktop captures. |
+| `[save]` | `filename_pattern_monitor` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}` | Default filename pattern for monitor captures. |
+| `[save]` | `filename_pattern_window` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}` | Default filename pattern for window captures. |
 
 Example:
 
-```json
-{
-  "ui": {
-    "show_balloons": true
-  },
-  "save": {
-    "default_save_dir": "C:\\Users\\you\\Pictures\\greenflame",
-    "last_save_as_dir": "D:\\shots\\scratch",
-    "default_save_format": "png",
-    "filename_pattern_region": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}",
-    "filename_pattern_desktop": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}",
-    "filename_pattern_monitor": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}",
-    "filename_pattern_window": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}"
-  }
-}
+```ini
+[ui]
+show_balloons=true
+
+[save]
+default_save_dir=C:\Users\you\Pictures\greenflame
+last_save_as_dir=D:\shots\scratch
+default_save_format=png
+filename_pattern_region=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}
+filename_pattern_desktop=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}
+filename_pattern_monitor=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}
+filename_pattern_window=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}
 ```
 
 ### Save filenames

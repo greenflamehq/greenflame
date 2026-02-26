@@ -1,19 +1,18 @@
 #include "app_config.h"
 
-#include <easyjson.h>
-
 namespace greenflame {
 
 namespace {
 
 std::filesystem::path Get_config_path() {
-    wchar_t app_data[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, app_data))) {
+    wchar_t home[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home))) {
         return {};
     }
-    std::filesystem::path path(app_data);
+    std::filesystem::path path(home);
+    path /= L".config";
     path /= L"greenflame";
-    path /= L"greenflame.json";
+    path /= L"greenflame.ini";
     return path;
 }
 
@@ -46,6 +45,20 @@ std::string To_utf8(std::wstring const &value) {
     return out;
 }
 
+std::string_view Trim(std::string_view s) {
+    size_t begin = 0;
+    while (begin < s.size() &&
+           (s[begin] == ' ' || s[begin] == '\t' || s[begin] == '\r')) {
+        ++begin;
+    }
+    size_t end = s.size();
+    while (end > begin &&
+           (s[end - 1] == ' ' || s[end - 1] == '\t' || s[end - 1] == '\r')) {
+        --end;
+    }
+    return s.substr(begin, end - begin);
+}
+
 } // namespace
 
 AppConfig AppConfig::Load() {
@@ -55,34 +68,49 @@ AppConfig AppConfig::Load() {
         return config;
     }
     try {
-        easyjson::JSON root = easyjson::JSON::load_file(path.string());
-        if (root.has_key("ui")) {
-            easyjson::JSON const &ui = root["ui"];
-            if (ui.has_key("show_balloons")) {
-                easyjson::JSON const &value = ui["show_balloons"];
-                if (value.JSON_type() == easyjson::JSON::Class::Boolean) {
-                    config.show_balloons = value.to_bool();
-                }
-            }
+        std::ifstream file(path);
+        if (!file) {
+            return config;
         }
-        if (root.has_key("save")) {
-            easyjson::JSON const &save = root["save"];
-            auto read_string = [&](char const *key, std::wstring &target) {
-                if (save.has_key(key)) {
-                    easyjson::JSON const &value = save[key];
-                    if (value.JSON_type() == easyjson::JSON::Class::String &&
-                        value.Internal.String.has_value()) {
-                        target = To_wide(*value.Internal.String.value());
-                    }
+        std::string section;
+        std::string line;
+        while (std::getline(file, line)) {
+            std::string_view sv = Trim(line);
+            if (sv.empty() || sv[0] == ';' || sv[0] == '#') {
+                continue;
+            }
+            if (sv[0] == '[') {
+                size_t const close = sv.find(']');
+                if (close != std::string_view::npos) {
+                    section = std::string(sv.substr(1, close - 1));
                 }
-            };
-            read_string("default_save_dir", config.default_save_dir);
-            read_string("last_save_as_dir", config.last_save_as_dir);
-            read_string("filename_pattern_region", config.filename_pattern_region);
-            read_string("filename_pattern_desktop", config.filename_pattern_desktop);
-            read_string("filename_pattern_monitor", config.filename_pattern_monitor);
-            read_string("filename_pattern_window", config.filename_pattern_window);
-            read_string("default_save_format", config.default_save_format);
+                continue;
+            }
+            size_t const eq = sv.find('=');
+            if (eq == std::string_view::npos) {
+                continue;
+            }
+            std::string const key{Trim(sv.substr(0, eq))};
+            std::string const value{Trim(sv.substr(eq + 1))};
+
+            if (section == "ui") {
+                if (key == "show_balloons") {
+                    config.show_balloons = (value == "true" || value == "1");
+                }
+            } else if (section == "save") {
+                auto read = [&](char const *name, std::wstring &target) {
+                    if (key == name) {
+                        target = To_wide(value);
+                    }
+                };
+                read("default_save_dir", config.default_save_dir);
+                read("last_save_as_dir", config.last_save_as_dir);
+                read("filename_pattern_region", config.filename_pattern_region);
+                read("filename_pattern_desktop", config.filename_pattern_desktop);
+                read("filename_pattern_monitor", config.filename_pattern_monitor);
+                read("filename_pattern_window", config.filename_pattern_window);
+                read("default_save_format", config.default_save_format);
+            }
         }
     } catch (...) {
         // Parse error or file read error: return default config.
@@ -98,36 +126,36 @@ bool AppConfig::Save() const {
     }
     try {
         std::filesystem::create_directories(path.parent_path());
-        easyjson::JSON root = easyjson::object();
-
-        // UI section: only write non-default values.
-        if (!show_balloons) { // default: true
-            root["ui"]["show_balloons"] = show_balloons;
-        }
-
-        // Save section: only write non-default values.
-        if (!default_save_dir.empty()) {
-            root["save"]["default_save_dir"] = To_utf8(default_save_dir);
-        }
-        if (!last_save_as_dir.empty()) {
-            root["save"]["last_save_as_dir"] = To_utf8(last_save_as_dir);
-        }
-        auto write_if_set = [&](char const *key, std::wstring const &value) {
-            if (!value.empty()) {
-                root["save"][key] = To_utf8(value);
-            }
-        };
-        write_if_set("filename_pattern_region", filename_pattern_region);
-        write_if_set("filename_pattern_desktop", filename_pattern_desktop);
-        write_if_set("filename_pattern_monitor", filename_pattern_monitor);
-        write_if_set("filename_pattern_window", filename_pattern_window);
-        write_if_set("default_save_format", default_save_format);
-
         std::ofstream file(path);
         if (!file) {
             return false;
         }
-        file << root.dump();
+
+        // UI section: only write non-default values.
+        if (!show_balloons) { // default: true
+            file << "[ui]\n";
+            file << "show_balloons=false\n";
+        }
+
+        // Save section: only write non-default values.
+        bool wrote_save_header = false;
+        auto write_string = [&](char const *key, std::wstring const &value) {
+            if (!value.empty()) {
+                if (!wrote_save_header) {
+                    file << "\n[save]\n";
+                    wrote_save_header = true;
+                }
+                file << key << "=" << To_utf8(value) << "\n";
+            }
+        };
+        write_string("default_save_dir", default_save_dir);
+        write_string("last_save_as_dir", last_save_as_dir);
+        write_string("filename_pattern_region", filename_pattern_region);
+        write_string("filename_pattern_desktop", filename_pattern_desktop);
+        write_string("filename_pattern_monitor", filename_pattern_monitor);
+        write_string("filename_pattern_window", filename_pattern_window);
+        write_string("default_save_format", default_save_format);
+
         return file.good();
     } catch (...) {
         return false;
