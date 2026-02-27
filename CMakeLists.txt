@@ -37,6 +37,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/snap_edge_builder.h
     src/greenflame_core/save_image_policy.cpp
     src/greenflame_core/save_image_policy.h
+    src/greenflame_core/overlay_controller.cpp
+    src/greenflame_core/overlay_controller.h
 )
 
 # Allow includes like: #include "greenflame_core/rect_px.h"

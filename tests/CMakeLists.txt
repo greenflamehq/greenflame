@@ -25,6 +25,13 @@ add_executable(greenflame_tests
     snap_edge_builder_tests.cpp
     save_image_policy_tests.cpp
     cli_options_tests.cpp
+    overlay_controller_tests.cpp
+)
+target_compile_definitions(greenflame_tests PRIVATE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    UNICODE
+    _UNICODE
 )
 set_target_properties(greenflame_tests PROPERTIES
     WIN32_EXECUTABLE FALSE  # console app (main), not GUI (WinMain)

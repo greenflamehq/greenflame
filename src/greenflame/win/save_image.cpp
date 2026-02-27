@@ -176,4 +176,23 @@ std::wstring Reserve_unique_file_path(std::wstring_view desired_path) noexcept {
     return {};
 }
 
+std::vector<std::wstring> List_directory_filenames(std::wstring_view dir) {
+    std::vector<std::wstring> result;
+    std::wstring search_path(dir);
+    if (!search_path.empty() && search_path.back() != L'\\') {
+        search_path += L'\\';
+    }
+    search_path += L'*';
+    WIN32_FIND_DATAW fd{};
+    HANDLE const h = FindFirstFileW(search_path.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return result;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+            result.emplace_back(fd.cFileName);
+        }
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return result;
+}
+
 } // namespace greenflame
