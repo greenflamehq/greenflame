@@ -189,11 +189,17 @@ bool Copy_capture_to_clipboard(GdiCaptureResult const &capture, HWND owner_windo
             void *const raw = GlobalLock(memory);
             bool ok = false;
             if (raw != nullptr) {
-                memcpy(raw, &info, sizeof(BITMAPINFOHEADER));
-                uint8_t *bits = static_cast<uint8_t *>(raw) + sizeof(BITMAPINFOHEADER);
+                std::vector<uint8_t> buf(dib_size);
+                std::span<uint8_t> buf_span(buf);
+                std::copy_n(reinterpret_cast<uint8_t const *>(&info),
+                            sizeof(BITMAPINFOHEADER), buf_span.begin());
                 ok = GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                               bits, reinterpret_cast<BITMAPINFO *>(&info),
+                               buf_span.subspan(sizeof(BITMAPINFOHEADER)).data(),
+                               reinterpret_cast<BITMAPINFO *>(&info),
                                DIB_RGB_COLORS) != 0;
+                if (ok) {
+                    std::copy(buf.begin(), buf.end(), static_cast<uint8_t *>(raw));
+                }
                 GlobalUnlock(memory);
             }
             if (!ok) {

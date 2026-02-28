@@ -51,8 +51,8 @@ class OverlayWindow final {
     LRESULT On_mouse_move();
     LRESULT On_l_button_up();
 
-    void Build_default_save_name(std::wstring_view save_dir_for_num_scan, wchar_t *out,
-                                 size_t out_chars) const;
+    void Build_default_save_name(std::wstring_view save_dir_for_num_scan,
+                                 std::span<wchar_t> out) const;
     [[nodiscard]] std::wstring Resolve_default_save_directory() const;
     [[nodiscard]] std::wstring Resolve_save_as_initial_directory() const;
     [[nodiscard]] core::RectPx Selection_screen_rect() const;

@@ -18,9 +18,19 @@ constexpr wchar_t kTrayInstanceMutexName[] = L"Local\\greenflame.tray.single_ins
     if (argv == nullptr) {
         return args;
     }
-    args.reserve(static_cast<size_t>(argc > 1 ? argc - 1 : 0));
+    std::vector<LPWSTR> argv_vec;
+    argv_vec.reserve(static_cast<size_t>(argc));
+
+    CLANG_WARN_IGNORE_PUSH("-Wunsafe-buffer-usage")
+    for (int i = 0; i < argc; ++i) {
+        argv_vec.push_back(argv[i]);
+    }
+    CLANG_WARN_IGNORE_POP()
+
+    std::span<LPWSTR> const argv_span(argv_vec);
+    args.reserve(argc > 1 ? static_cast<size_t>(argc - 1) : 0u);
     for (int i = 1; i < argc; ++i) {
-        args.emplace_back(argv[i]);
+        args.emplace_back(argv_span[static_cast<size_t>(i)]);
     }
     LocalFree(argv);
     return args;
@@ -103,8 +113,6 @@ class ScopedHandle final {
         }
         handle_ = handle;
     }
-
-    [[nodiscard]] HANDLE Get() const noexcept { return handle_; }
 
   private:
     HANDLE handle_ = nullptr;

@@ -65,10 +65,9 @@ void CALLBACK Foreground_changed_hook(HWINEVENTHOOK, DWORD, HWND hwnd, LONG id_o
     }
     wchar_t cls[256] = {};
     GetClassNameW(hwnd, cls, 256);
-    if (wcscmp(cls, L"NotifyIconOverflowWindow") == 0 ||
-        wcscmp(cls, L"Shell_TrayWnd") == 0 ||
-        wcscmp(cls, L"Shell_SecondaryTrayWnd") == 0 ||
-        wcscmp(cls, kTrayWindowClass) == 0) {
+    std::wstring_view const cls_sv(cls);
+    if (cls_sv == L"NotifyIconOverflowWindow" || cls_sv == L"Shell_TrayWnd" ||
+        cls_sv == L"Shell_SecondaryTrayWnd" || cls_sv == kTrayWindowClass) {
         return;
     }
     s_last_foreground_hwnd = hwnd;
@@ -107,8 +106,6 @@ Gdiplus::Color Gdiplus_color(COLORREF c, BYTE alpha = kOpaqueAlpha) {
 // Icon glyphs are vector paths normalized to [0,1] and scaled at draw-time.
 // NOLINTBEGIN(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 void Draw_info_icon(HDC hdc, int x, int y, int size, COLORREF color) {
-#pragma warning(push)
-#pragma warning(disable : 5219)
     if (!Ensure_gdiplus()) {
         return;
     }
@@ -126,26 +123,29 @@ void Draw_info_icon(HDC hdc, int x, int y, int size, COLORREF color) {
     pen.SetStartCap(Gdiplus::LineCapRound);
     pen.SetEndCap(Gdiplus::LineCapRound);
     pen.SetLineJoin(Gdiplus::LineJoinRound);
+    float size_f = static_cast<float>(size);
+    float x_f = static_cast<float>(x);
+    float y_f = static_cast<float>(y);
     Gdiplus::PointF check[3] = {
-        {x + size * 0.25f, y + size * 0.52f},
-        {x + size * 0.42f, y + size * 0.68f},
-        {x + size * 0.75f, y + size * 0.32f},
+        {x_f + size_f * 0.25f, y_f + size_f * 0.52f},
+        {x_f + size_f * 0.42f, y_f + size_f * 0.68f},
+        {x_f + size_f * 0.75f, y_f + size_f * 0.32f},
     };
     g.DrawLines(&pen, check, 3);
-#pragma warning(pop)
 }
 
 void Draw_warning_icon(HDC hdc, int x, int y, int size, COLORREF color) {
-#pragma warning(push)
-#pragma warning(disable : 5219)
     if (!Ensure_gdiplus()) {
         return;
     }
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
+    float x_f = static_cast<float>(x);
+    float y_f = static_cast<float>(y);
+    float size_f = static_cast<float>(size);
     Gdiplus::PointF triangle[3] = {
-        {x + size * 0.5f, static_cast<Gdiplus::REAL>(y)},
+        {x_f + size_f * 0.5f, static_cast<Gdiplus::REAL>(y)},
         {static_cast<Gdiplus::REAL>(x), static_cast<Gdiplus::REAL>(y + size)},
         {static_cast<Gdiplus::REAL>(x + size), static_cast<Gdiplus::REAL>(y + size)},
     };
@@ -155,52 +155,52 @@ void Draw_warning_icon(HDC hdc, int x, int y, int size, COLORREF color) {
     Gdiplus::Color const bang_color =
         Gdiplus_color(greenflame::winui::kToastIconGlyphWarning);
     auto const stroke = static_cast<Gdiplus::REAL>(std::max(2, size / 8));
-    float const cx = x + size * 0.5f;
+    float const cx = x_f + size_f * 0.5f;
 
-    float const nudge = size * 0.10f;
+    float const nudge = size_f * 0.10f;
     Gdiplus::Pen stem_pen(bang_color, stroke);
     stem_pen.SetStartCap(Gdiplus::LineCapRound);
     stem_pen.SetEndCap(Gdiplus::LineCapRound);
-    g.DrawLine(&stem_pen, cx, y + size * 0.35f + nudge, cx, y + size * 0.60f + nudge);
+    g.DrawLine(&stem_pen, cx, y_f + size_f * 0.35f + nudge, cx,
+               y_f + size_f * 0.60f + nudge);
 
-    float const dot_r = std::max(1.2f, size * 0.055f);
-    float const dot_y = y + size * 0.72f + nudge;
+    float const dot_r = std::max(1.2f, size_f * 0.055f);
+    float const dot_y = y_f + size_f * 0.72f + nudge;
     Gdiplus::SolidBrush dot_brush(bang_color);
     g.FillEllipse(&dot_brush, cx - dot_r, dot_y - dot_r, dot_r * 2, dot_r * 2);
-#pragma warning(pop)
 }
 
 void Draw_error_icon(HDC hdc, int x, int y, int size, COLORREF color) {
-#pragma warning(push)
-#pragma warning(disable : 5219)
     if (!Ensure_gdiplus()) {
         return;
     }
     Gdiplus::Graphics g(hdc);
     g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
 
-    float const s = size * 0.30f;
+    float x_f = static_cast<float>(x);
+    float y_f = static_cast<float>(y);
+    float size_f = static_cast<float>(size);
+    float const s = size_f * 0.30f;
     Gdiplus::PointF octagon[8] = {
-        {x + s, static_cast<Gdiplus::REAL>(y)},
-        {x + size - s, static_cast<Gdiplus::REAL>(y)},
-        {static_cast<Gdiplus::REAL>(x + size), y + s},
-        {static_cast<Gdiplus::REAL>(x + size), y + size - s},
-        {x + size - s, static_cast<Gdiplus::REAL>(y + size)},
-        {x + s, static_cast<Gdiplus::REAL>(y + size)},
-        {static_cast<Gdiplus::REAL>(x), y + size - s},
-        {static_cast<Gdiplus::REAL>(x), y + s},
+        {x_f + s, static_cast<Gdiplus::REAL>(y)},
+        {x_f + size_f - s, static_cast<Gdiplus::REAL>(y)},
+        {static_cast<Gdiplus::REAL>(x_f + size_f), y_f + s},
+        {static_cast<Gdiplus::REAL>(x_f + size_f), y_f + size_f - s},
+        {x_f + size_f - s, static_cast<Gdiplus::REAL>(y + size)},
+        {x_f + s, static_cast<Gdiplus::REAL>(y + size)},
+        {static_cast<Gdiplus::REAL>(x_f), y_f + size_f - s},
+        {static_cast<Gdiplus::REAL>(x_f), y_f + s},
     };
     Gdiplus::SolidBrush fill(Gdiplus_color(color));
     g.FillPolygon(&fill, octagon, 8);
 
     auto const stroke = static_cast<Gdiplus::REAL>(std::max(2, size / 8));
-    float const m = size * 0.30f;
+    float const m = size_f * 0.30f;
     Gdiplus::Pen pen(Gdiplus_color(greenflame::winui::kToastIconGlyphLight), stroke);
     pen.SetStartCap(Gdiplus::LineCapRound);
     pen.SetEndCap(Gdiplus::LineCapRound);
-    g.DrawLine(&pen, x + m, y + m, x + size - m, y + size - m);
-    g.DrawLine(&pen, x + size - m, y + m, x + m, y + size - m);
-#pragma warning(pop)
+    g.DrawLine(&pen, x_f + m, y_f + m, x_f + size_f - m, y_f + size_f - m);
+    g.DrawLine(&pen, x_f + size_f - m, y_f + m, x_f + m, y_f + size_f - m);
 }
 // NOLINTEND(readability-magic-numbers,cppcoreguidelines-avoid-magic-numbers)
 
@@ -349,19 +349,18 @@ class TrayWindow::ToastPopup final {
         int const body_row_height = std::max(icon_size, body_height);
         int height = padding + title_height + header_gap + body_row_height + padding;
 
-#pragma warning(push)
-#pragma warning(disable : 5219)
         if (thumbnail_ != nullptr && thumbnail_width_ > 0 && thumbnail_height_ > 0) {
-            float const scale_w = static_cast<float>(content_width) / thumbnail_width_;
-            float const scale_h =
-                static_cast<float>(thumbnail_max_height) / thumbnail_height_;
+            float const scale_w = static_cast<float>(content_width) /
+                                  static_cast<float>(thumbnail_width_);
+            float const scale_h = static_cast<float>(thumbnail_max_height) /
+                                  static_cast<float>(thumbnail_height_);
             float scale = (std::min)(scale_w, scale_h);
             if (scale > 1.0f) {
                 scale = 1.0f;
             }
-            height += thumbnail_gap + static_cast<int>(thumbnail_height_ * scale);
+            height += thumbnail_gap +
+                      static_cast<int>(static_cast<float>(thumbnail_height_) * scale);
         }
-#pragma warning(pop)
 
         height = std::clamp(height, min_height, max_height);
 
@@ -634,23 +633,22 @@ class TrayWindow::ToastPopup final {
                 if (thumbnail_ != nullptr && thumbnail_width_ > 0 &&
                     thumbnail_height_ > 0) {
 
-#pragma warning(push)
-#pragma warning(disable : 5219)
-                    float const scale_w =
-                        static_cast<float>(content_width) / thumbnail_width_;
-                    float const scale_h =
-                        static_cast<float>(thumbnail_max_height) / thumbnail_height_;
+                    float const scale_w = static_cast<float>(content_width) /
+                                          static_cast<float>(thumbnail_width_);
+                    float const scale_h = static_cast<float>(thumbnail_max_height) /
+                                          static_cast<float>(thumbnail_height_);
                     float scale = (std::min)(scale_w, scale_h);
                     if (scale > 1.0f) {
                         scale = 1.0f;
                     }
-                    int const thumb_w = static_cast<int>(thumbnail_width_ * scale);
-                    int const thumb_h = static_cast<int>(thumbnail_height_ * scale);
+                    int const thumb_w =
+                        static_cast<int>(static_cast<float>(thumbnail_width_) * scale);
+                    int const thumb_h =
+                        static_cast<int>(static_cast<float>(thumbnail_height_) * scale);
                     int const thumb_top =
                         std::max(body_text_bottom, body_top + icon_size) +
                         thumbnail_gap;
                     int const thumb_left = content_left;
-#pragma warning(pop)
 
                     RECT thumb_border_rect{};
                     thumb_border_rect.left = thumb_left - 1;
@@ -737,7 +735,11 @@ bool TrayWindow::Create(HINSTANCE hinstance, bool enable_testing_hotkeys) {
     notify_data.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     notify_data.uCallbackMessage = kTrayCallbackMessage;
     notify_data.hIcon = LoadIconW(hinstance, MAKEINTRESOURCEW(kAppIconResourceId));
-    wcscpy_s(notify_data.szTip, L"Greenflame");
+    {
+        static constexpr std::wstring_view kTip(L"Greenflame");
+        std::copy_n(kTip.data(), kTip.size(), notify_data.szTip);
+        notify_data.szTip[kTip.size()] = L'\0';
+    }
     if (!Shell_NotifyIconW(NIM_ADD, &notify_data)) {
         DestroyWindow(hwnd);
         return false;

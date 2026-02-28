@@ -16,6 +16,7 @@ bool Within_radius_sq(PointPx a, PointPx b, int radius_px) noexcept {
 
 #pragma warning(push)
 #pragma warning(disable : 4061)
+CLANG_WARN_IGNORE_PUSH("-Wswitch-enum")
 PointPx Corner_position(RectPx const &r, SelectionHandle h) noexcept {
     switch (h) {
     case SelectionHandle::TopLeft:
@@ -47,6 +48,7 @@ PointPx Edge_midpoint_position(RectPx const &r, SelectionHandle h) noexcept {
         return {0, 0};
     }
 }
+CLANG_WARN_IGNORE_POP()
 #pragma warning(pop)
 } // namespace
 

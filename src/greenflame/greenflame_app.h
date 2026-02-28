@@ -19,9 +19,9 @@ class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
     GreenflameApp &operator=(GreenflameApp const &) = delete;
     GreenflameApp(GreenflameApp &&) = delete;
     GreenflameApp &operator=(GreenflameApp &&) = delete;
-    ~GreenflameApp() = default;
+    ~GreenflameApp() override = default;
 
-    [[nodiscard]] int Run();
+    [[nodiscard]] uint8_t Run();
 
   private:
     [[nodiscard]] ProcessExitCode Run_cli_capture_mode();

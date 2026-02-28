@@ -129,3 +129,23 @@ Breaking these rules is considered a correctness bug.
 - When unsure, preserve correctness over convenience
 - Keep process/CLI exit codes in a single enum with globally unique numeric values (no reuse). When codes change, update the README exit-code table in the command-line section.
 - Your main instinct should be to debug issues and find problems' root causes rather than introduce new abstractions or code paths, or changing the architecture or existing code.
+
+### Avoiding Clang `-Wunsafe-buffer-usage-in-libc-call` warnings
+
+When building with Clang (clang-cl), prefer C++ standard library APIs over raw libc calls to avoid `-Wunsafe-buffer-usage-in-libc-call`:
+
+- **`swprintf_s`** → Use `std::to_wstring` and string concatenation. For zero-padded integers (e.g. `%04u`, `%02u`), use a small helper that pads with `std::wstring(width - s.size(), L'0') + s`.
+- **`memcpy`** → Use `std::copy_n` or `std::copy` from `<algorithm>`. For struct-to-buffer copies, use `std::copy_n(reinterpret_cast<uint8_t const *>(&obj), sizeof(obj), dest)`.
+- **`wcschr`** → Use `std::wstring_view(str).find(ch) != std::wstring_view::npos` to test if a character is in a string.
+- **`wcslen`** → Use `std::wstring_view(str).size()` or, when the source is `std::wstring`, `.size()`.
+- **`wcsrchr`** → Use `std::wstring_view(str).rfind(ch)`; returns `std::wstring_view::npos` if not found, otherwise the position.
+- **`wcscmp`** → Use `std::wstring_view(a) == std::wstring_view(b)` for equality; `std::wstring_view` compares correctly with string literals.
+- **`wcscpy_s`** / **`wcsncpy_s`** → Use `std::wstring::copy(dest, count)` (returns chars copied), then `dest[n] = L'\0'`. For fixed literals, use `std::copy_n(std::wstring_view(literal).data(), literal.size(), dest)` then null-terminate.
+
+### Avoiding Clang `-Wunsafe-buffer-usage` (pointer arithmetic and buffer access)
+
+- **`pixels.data() + offset`** / **raw pointer arithmetic** → Use `std::span` indexing instead. Replace `uint8_t *row = pixels.data() + y * row_bytes` and `row[off]` with `size_t row_offset = y * row_bytes` and `pixels[row_offset + off]`. The span carries bounds information.
+- **`argv[i]`** → Wrap in `std::span<LPWSTR>(argv, argc)` so the compiler knows the bounds, then use `argv_span[i]`.
+- **`container.data() + n`** for iterators → Use `container.begin() + n` (e.g. for `std::copy_n` destination or `insert` range).
+- **C-style array with dynamic index** → Use `std::array<T, N>` instead of `T arr[N]` for better bounds awareness.
+

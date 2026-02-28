@@ -7,9 +7,16 @@ namespace greenflame::core {
 namespace {
 constexpr size_t kMaxWindowTitleChars = 50;
 
+[[nodiscard]] std::wstring Pad_unsigned(unsigned value, size_t width) {
+    auto s = std::to_wstring(value);
+    if (s.size() >= width) return s;
+    return std::wstring(width - s.size(), L'0') + s;
+}
+
 [[nodiscard]] bool Is_invalid_filename_char(wchar_t ch) noexcept {
-    static wchar_t const *const kInvalid = L"\\/:*?\"<>|";
-    return static_cast<unsigned>(ch) < 0x20u || std::wcschr(kInvalid, ch) != nullptr;
+    static constexpr std::wstring_view kInvalid = L"\\/:*?\"<>|";
+    return static_cast<unsigned>(ch) < 0x20u ||
+           kInvalid.find(ch) != std::wstring_view::npos;
 }
 
 [[nodiscard]] bool Equals_no_case(std::wstring_view a, std::wstring_view b) noexcept {
@@ -40,35 +47,27 @@ constexpr size_t kMaxWindowTitleChars = 50;
 
 [[nodiscard]] std::wstring Resolve_variable(std::wstring_view name,
                                             FilenamePatternContext const &ctx) {
-    wchar_t buf[16] = {};
     auto const &ts = ctx.timestamp;
     if (name == L"YYYY") {
-        swprintf_s(buf, L"%04u", ts.year);
-        return buf;
+        return Pad_unsigned(ts.year, 4);
     }
     if (name == L"YY") {
-        swprintf_s(buf, L"%02u", ts.year % 100);
-        return buf;
+        return Pad_unsigned(ts.year % 100, 2);
     }
     if (name == L"MM") {
-        swprintf_s(buf, L"%02u", ts.month);
-        return buf;
+        return Pad_unsigned(ts.month, 2);
     }
     if (name == L"DD") {
-        swprintf_s(buf, L"%02u", ts.day);
-        return buf;
+        return Pad_unsigned(ts.day, 2);
     }
     if (name == L"hh") {
-        swprintf_s(buf, L"%02u", ts.hour);
-        return buf;
+        return Pad_unsigned(ts.hour, 2);
     }
     if (name == L"mm") {
-        swprintf_s(buf, L"%02u", ts.minute);
-        return buf;
+        return Pad_unsigned(ts.minute, 2);
     }
     if (name == L"ss") {
-        swprintf_s(buf, L"%02u", ts.second);
-        return buf;
+        return Pad_unsigned(ts.second, 2);
     }
     if (name == L"title") {
         if (ctx.window_title.empty()) return L"window";
@@ -78,12 +77,10 @@ constexpr size_t kMaxWindowTitleChars = 50;
     }
     if (name == L"monitor") {
         if (!ctx.monitor_index_zero_based.has_value()) return {};
-        swprintf_s(buf, L"%zu", *ctx.monitor_index_zero_based + 1);
-        return buf;
+        return std::to_wstring(*ctx.monitor_index_zero_based + 1);
     }
     if (name == L"num") {
-        swprintf_s(buf, L"%06u", ctx.incrementing_number);
-        return buf;
+        return Pad_unsigned(ctx.incrementing_number, 6);
     }
     return {};
 }

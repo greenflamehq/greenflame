@@ -21,17 +21,17 @@ constexpr int kThumbnailMaxHeight = 120;
         CloseClipboard();
         return nullptr;
     }
-#pragma warning(push)
-#pragma warning(disable : 5219)
-    float const scale_w = static_cast<float>(kThumbnailMaxWidth) / bm.bmWidth;
-    float const scale_h = static_cast<float>(kThumbnailMaxHeight) / bm.bmHeight;
+
+    float const scale_w =
+        static_cast<float>(kThumbnailMaxWidth) / static_cast<float>(bm.bmWidth);
+    float const scale_h =
+        static_cast<float>(kThumbnailMaxHeight) / static_cast<float>(bm.bmHeight);
     float scale = (std::min)(scale_w, scale_h);
     if (scale > 1.0f) {
         scale = 1.0f;
     }
-    int thumb_w = static_cast<int>(bm.bmWidth * scale);
-    int thumb_h = static_cast<int>(bm.bmHeight * scale);
-#pragma warning(pop)
+    int thumb_w = static_cast<int>(static_cast<float>(bm.bmWidth) * scale);
+    int thumb_h = static_cast<int>(static_cast<float>(bm.bmHeight) * scale);
     if (thumb_w <= 0) {
         thumb_w = 1;
     }
@@ -202,7 +202,7 @@ GreenflameApp::GreenflameApp(HINSTANCE hinstance, core::CliOptions const &cli_op
                       file_system_service_),
       cli_options_(cli_options) {}
 
-int GreenflameApp::Run() {
+uint8_t GreenflameApp::Run() {
     Enable_per_monitor_dpi_awareness_v2();
     config_ = Load_app_config();
     if (core::Is_capture_mode(cli_options_.capture_mode)) {
@@ -272,7 +272,7 @@ int GreenflameApp::Run() {
     }
 
     (void)Save_app_config(config_);
-    return static_cast<int>(message.wParam);
+    return static_cast<uint8_t>(message.wParam);
 }
 
 ProcessExitCode GreenflameApp::Run_cli_capture_mode() {

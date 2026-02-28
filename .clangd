@@ -1,4 +1,9 @@
 # Tell clangd where the compilation database lives (CMake puts it in the build dir).
-# Run "cmake --preset x64-debug" so build/x64-debug/compile_commands.json exists.
 CompileFlags:
-    CompilationDatabase: build/x64-debug
+    CompilationDatabase: build/x64-debug-clang
+    Add:
+        - -Wno-c++98-compat
+        - -Wno-c++98-compat-pedantic
+        - -Wno-pre-c++14-compat
+        - -Wno-pre-c++17-compat
+        - -Wno-pre-c++20-compat

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame_core/compiler_diagnostic.h"
 #include <windows.h>
 
 #include <ShellScalingApi.h>
@@ -11,6 +12,7 @@
 #include <wincodec.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

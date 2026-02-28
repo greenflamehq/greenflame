@@ -1,6 +1,8 @@
 #pragma once
 
+#include "greenflame_core/compiler_diagnostic.h"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>

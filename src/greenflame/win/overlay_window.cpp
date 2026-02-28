@@ -32,17 +32,16 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
         return nullptr;
     }
 
-#pragma warning(push)
-#pragma warning(disable : 5219)
-    float const scale_w = static_cast<float>(kThumbnailMaxWidth) / capture.width;
-    float const scale_h = static_cast<float>(kThumbnailMaxHeight) / capture.height;
+    float const scale_w =
+        static_cast<float>(kThumbnailMaxWidth) / static_cast<float>(capture.width);
+    float const scale_h =
+        static_cast<float>(kThumbnailMaxHeight) / static_cast<float>(capture.height);
     float scale = (std::min)(scale_w, scale_h);
     if (scale > 1.0f) {
         scale = 1.0f;
     }
-    int tw = static_cast<int>(capture.width * scale);
-    int th = static_cast<int>(capture.height * scale);
-#pragma warning(pop)
+    int tw = static_cast<int>(static_cast<float>(capture.width) * scale);
+    int th = static_cast<int>(static_cast<float>(capture.height) * scale);
     if (tw <= 0) {
         tw = 1;
     }
@@ -127,11 +126,16 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     dropfiles->pFiles = sizeof(DROPFILES);
     dropfiles->fWide = TRUE;
 
-    wchar_t *files =
-        reinterpret_cast<wchar_t *>(static_cast<uint8_t *>(raw) + sizeof(DROPFILES));
-    memcpy(files, absolute_path.c_str(), path_chars * sizeof(wchar_t));
+    std::vector<wchar_t> file_buf(path_chars + 2);
+    std::span<wchar_t> files(file_buf);
+    std::copy_n(absolute_path.c_str(), path_chars, files.data());
     files[path_chars] = L'\0';
     files[path_chars + 1] = L'\0';
+    CLANG_WARN_IGNORE_PUSH("-Wunsafe-buffer-usage")
+    wchar_t *const dest =
+        reinterpret_cast<wchar_t *>(static_cast<uint8_t *>(raw) + dropfiles->pFiles);
+    CLANG_WARN_IGNORE_POP()
+    std::copy(file_buf.begin(), file_buf.end(), dest);
     GlobalUnlock(file_list_memory);
 
     bool copied = false;
@@ -364,7 +368,6 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
         Copy_to_clipboard_and_close();
         break;
     case core::OverlayAction::None:
-    default:
         break;
     }
 }
@@ -597,8 +600,8 @@ std::wstring OverlayWindow::Resolve_save_as_initial_directory() const {
 }
 
 void OverlayWindow::Build_default_save_name(std::wstring_view save_dir_for_num_scan,
-                                            wchar_t *out, size_t out_chars) const {
-    if (!out || out_chars == 0) {
+                                            std::span<wchar_t> out) const {
+    if (out.empty()) {
         return;
     }
     out[0] = L'\0';
@@ -651,7 +654,8 @@ void OverlayWindow::Build_default_save_name(std::wstring_view save_dir_for_num_s
 
     std::wstring const name =
         core::Build_default_save_name(s.selection_source, ctx, pattern);
-    wcsncpy_s(out, out_chars, name.c_str(), _TRUNCATE);
+    size_t const n = name.copy(out.data(), out.size() - 1);
+    out[n] = L'\0';
 }
 
 core::RectPx OverlayWindow::Selection_screen_rect() const {
@@ -683,7 +687,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
     std::wstring const save_dir = Resolve_default_save_directory();
 
     wchar_t default_name[256] = {};
-    Build_default_save_name(save_dir, default_name, 256);
+    Build_default_save_name(save_dir, default_name);
 
     // Determine extension from config.
     std::wstring_view ext = L".png";
@@ -767,16 +771,22 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
     std::wstring const initial_dir = Resolve_save_as_initial_directory();
 
     wchar_t default_name[256] = {};
-    Build_default_save_name(initial_dir, default_name, 256);
+    Build_default_save_name(initial_dir, default_name);
 
     OPENFILENAMEW ofn = {};
-    wchar_t path_buffer[MAX_PATH] = {};
-    wcscpy_s(path_buffer, default_name);
+    std::array<wchar_t, MAX_PATH> path_buffer{};
+    std::span<wchar_t> path_span(path_buffer);
+    {
+        std::wstring_view const sv(default_name);
+        size_t const n = std::min(sv.size(), path_span.size() - 1);
+        std::copy_n(sv.data(), n, path_span.begin());
+        path_span[n] = L'\0';
+    }
     ofn.lStructSize = sizeof(ofn);
     ofn.hwndOwner = hwnd_;
     ofn.lpstrFilter = L"PNG (*.png)\0*.png\0JPEG "
                       L"(*.jpg;*.jpeg)\0*.jpg;*.jpeg\0BMP (*.bmp)\0*.bmp\0\0";
-    ofn.lpstrFile = path_buffer;
+    ofn.lpstrFile = path_buffer.data();
     ofn.nMaxFile = MAX_PATH;
     ofn.lpstrDefExt = L"png";
     ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
@@ -790,19 +800,20 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         return;
     }
 
-    std::wstring const resolved_path =
-        core::Ensure_image_save_extension(path_buffer, ofn.nFilterIndex);
-    wcsncpy_s(path_buffer, MAX_PATH, resolved_path.c_str(), _TRUNCATE);
+    std::wstring const resolved_path = core::Ensure_image_save_extension(
+        std::wstring_view(path_buffer.data()), ofn.nFilterIndex);
+    size_t const n = resolved_path.copy(path_buffer.data(), path_span.size() - 1);
+    path_span[n] = L'\0';
 
     bool saved = false;
     core::ImageSaveFormat const format =
-        core::Detect_image_save_format_from_path(path_buffer);
+        core::Detect_image_save_format_from_path(std::wstring_view(path_buffer.data()));
     if (format == core::ImageSaveFormat::Jpeg) {
-        saved = Save_capture_to_jpeg(cropped, path_buffer);
+        saved = Save_capture_to_jpeg(cropped, path_buffer.data());
     } else if (format == core::ImageSaveFormat::Bmp) {
-        saved = Save_capture_to_bmp(cropped, path_buffer);
+        saved = Save_capture_to_bmp(cropped, path_buffer.data());
     } else {
-        saved = Save_capture_to_png(cropped, path_buffer);
+        saved = Save_capture_to_png(cropped, path_buffer.data());
     }
 
     HBITMAP thumb = saved ? Create_thumbnail_from_capture(cropped) : nullptr;
@@ -810,20 +821,22 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
     if (saved) {
         bool file_copied_to_clipboard = false;
         if (copy_saved_file_to_clipboard) {
-            file_copied_to_clipboard = Copy_file_path_to_clipboard(path_buffer, hwnd_);
+            file_copied_to_clipboard = Copy_file_path_to_clipboard(
+                std::wstring_view(path_buffer.data()), hwnd_);
         }
-        wchar_t *last_slash = wcsrchr(path_buffer, L'\\');
-        if (last_slash && config_) {
-            size_t const dir_len = static_cast<size_t>(last_slash - path_buffer);
-            if (dir_len < MAX_PATH) {
-                config_->last_save_as_dir.assign(path_buffer, dir_len);
+        std::wstring_view const path_view(path_buffer.data());
+        size_t const last_slash_pos = path_view.rfind(L'\\');
+        if (last_slash_pos != std::wstring_view::npos && config_) {
+            size_t const dir_len = last_slash_pos;
+            if (dir_len < path_span.size()) {
+                config_->last_save_as_dir.assign(path_buffer.data(), dir_len);
                 config_->Normalize();
             }
         }
         if (events_) {
             events_->On_selection_saved_to_file(
                 Selection_screen_rect(), controller_.State().selection_window, thumb,
-                path_buffer, file_copied_to_clipboard);
+                path_view, file_copied_to_clipboard);
             thumb = nullptr;
         }
         if (thumb != nullptr) {

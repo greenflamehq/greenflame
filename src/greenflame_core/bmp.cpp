@@ -8,6 +8,7 @@ constexpr size_t kFileHeaderSize = 14;
 constexpr size_t kInfoHeaderSize = 40;
 constexpr uint16_t kBmpMagic = 0x4D42; // 'BM'
 
+#pragma pack(push, 1)
 struct BmpFileHeader {
     uint16_t bfType = kBmpMagic;
     uint32_t bfSize = 0;
@@ -29,6 +30,7 @@ struct BmpInfoHeader {
     uint32_t biClrUsed = 0;
     uint32_t biClrImportant = 0;
 };
+#pragma pack(pop)
 
 } // namespace
 
@@ -51,9 +53,12 @@ std::vector<uint8_t> Build_bmp_bytes(std::span<const uint8_t> pixels, int width,
     std::vector<uint8_t> out;
     out.reserve(kFileHeaderSize + kInfoHeaderSize + image_size);
     out.resize(kFileHeaderSize + kInfoHeaderSize);
-    std::memcpy(out.data(), &file_header, kFileHeaderSize);
-    std::memcpy(out.data() + kFileHeaderSize, &info_header, kInfoHeaderSize);
-    out.insert(out.end(), pixels.data(), pixels.data() + image_size);
+    std::copy_n(reinterpret_cast<uint8_t const *>(&file_header), kFileHeaderSize,
+                out.begin());
+    std::copy_n(reinterpret_cast<uint8_t const *>(&info_header), kInfoHeaderSize,
+                out.begin() + static_cast<std::ptrdiff_t>(kFileHeaderSize));
+    out.insert(out.end(), pixels.begin(),
+               pixels.begin() + static_cast<std::ptrdiff_t>(image_size));
     return out;
 }
 

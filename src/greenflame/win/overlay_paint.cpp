@@ -63,7 +63,8 @@ void Blend_magnifier_crosshair_onto_pixels(std::span<uint8_t> pixels, int width,
     for (int y = sy0; y < sy1; ++y) {
         int const iy = y - mag_top;
         int const dy_sq = (iy - center) * (iy - center);
-        uint8_t *row = pixels.data() + static_cast<size_t>(y) * row_bytes;
+        size_t const row_offset =
+            static_cast<size_t>(y) * static_cast<size_t>(row_bytes);
         for (int x = sx0; x < sx1; ++x) {
             int const ix = x - mag_left;
             if ((ix - center) * (ix - center) + dy_sq > radius_sq) continue;
@@ -84,17 +85,18 @@ void Blend_magnifier_crosshair_onto_pixels(std::span<uint8_t> pixels, int width,
             if (on_arm) on_contour = false;
             if (!on_arm && !on_contour) continue;
 
-            size_t off = static_cast<size_t>(x) * 4;
+            size_t const off = static_cast<size_t>(x) * 4;
             if (off + 2 >= static_cast<size_t>(row_bytes)) continue;
+            size_t const base = row_offset + off;
             float const target = on_contour ? kColorChannelMaxF : 0.f;
-            int const blend_b = static_cast<int>(ia * row[off] + a * target);
-            int const blend_g = static_cast<int>(ia * row[off + 1] + a * target);
-            int const blend_r = static_cast<int>(ia * row[off + 2] + a * target);
-            row[off] = static_cast<uint8_t>(
+            int const blend_b = static_cast<int>(ia * pixels[base] + a * target);
+            int const blend_g = static_cast<int>(ia * pixels[base + 1] + a * target);
+            int const blend_r = static_cast<int>(ia * pixels[base + 2] + a * target);
+            pixels[base] = static_cast<uint8_t>(
                 blend_b > kColorChannelMax ? kColorChannelMax : blend_b);
-            row[off + 1] = static_cast<uint8_t>(
+            pixels[base + 1] = static_cast<uint8_t>(
                 blend_g > kColorChannelMax ? kColorChannelMax : blend_g);
-            row[off + 2] = static_cast<uint8_t>(
+            pixels[base + 2] = static_cast<uint8_t>(
                 blend_r > kColorChannelMax ? kColorChannelMax : blend_r);
         }
     }
@@ -211,20 +213,20 @@ void Draw_dimension_labels(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
         if (font_dim) {
             HGDIOBJ old_font_dim = SelectObject(buf_dc, font_dim);
 
-            wchar_t width_buf[32], height_buf[32], center_buf[32];
-            swprintf_s(width_buf, L"%d", sel.Width());
-            swprintf_s(height_buf, L"%d", sel.Height());
-            swprintf_s(center_buf, L"%d x %d", sel.Width(), sel.Height());
+            std::wstring width_str = std::to_wstring(sel.Width());
+            std::wstring height_str = std::to_wstring(sel.Height());
+            std::wstring center_str =
+                std::to_wstring(sel.Width()) + L" x " + std::to_wstring(sel.Height());
 
             SIZE width_size = {}, height_size = {}, center_size = {};
-            GetTextExtentPoint32W(buf_dc, width_buf,
-                                  static_cast<int>(wcslen(width_buf)), &width_size);
-            GetTextExtentPoint32W(buf_dc, height_buf,
-                                  static_cast<int>(wcslen(height_buf)), &height_size);
+            GetTextExtentPoint32W(buf_dc, width_str.c_str(),
+                                  static_cast<int>(width_str.size()), &width_size);
+            GetTextExtentPoint32W(buf_dc, height_str.c_str(),
+                                  static_cast<int>(height_str.size()), &height_size);
             if (font_center) {
                 SelectObject(buf_dc, font_center);
-                GetTextExtentPoint32W(buf_dc, center_buf,
-                                      static_cast<int>(wcslen(center_buf)),
+                GetTextExtentPoint32W(buf_dc, center_str.c_str(),
+                                      static_cast<int>(center_str.size()),
                                       &center_size);
                 SelectObject(buf_dc, font_dim);
             }
@@ -342,13 +344,13 @@ void Draw_dimension_labels(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
                                    center_box_top + k_center_margin_v,
                                    center_box_left + center_box_w - k_dim_margin,
                                    center_box_top + center_box_h - k_center_margin_v};
-            DrawTextW(buf_dc, width_buf, -1, &width_text_rc,
+            DrawTextW(buf_dc, width_str.c_str(), -1, &width_text_rc,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-            DrawTextW(buf_dc, height_buf, -1, &height_text_rc,
+            DrawTextW(buf_dc, height_str.c_str(), -1, &height_text_rc,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             if (center_fits && font_center) {
                 SelectObject(buf_dc, font_center);
-                DrawTextW(buf_dc, center_buf, -1, &center_text_rc,
+                DrawTextW(buf_dc, center_str.c_str(), -1, &center_text_rc,
                           DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             }
             SelectObject(buf_dc, old_font_dim);
@@ -482,8 +484,7 @@ void Draw_crosshair_and_coord_tooltip(HDC buf_dc, HBITMAP buf_bmp, HWND hwnd, in
         // Compute coord tooltip position (no pixel buffer needed).
         constexpr int k_coord_padding = 4;
         constexpr int k_coord_margin = 4;
-        wchar_t coord_buf[32];
-        swprintf_s(coord_buf, L"%d x %d", cx, cy);
+        std::wstring coord_str = std::to_wstring(cx) + L" x " + std::to_wstring(cy);
         HFONT font = res ? res->font_dim : nullptr;
         bool tooltip_ready = false;
         int box_w = 0, box_h = 0, tt_left = 0, tt_top = 0;
@@ -492,9 +493,8 @@ void Draw_crosshair_and_coord_tooltip(HDC buf_dc, HBITMAP buf_bmp, HWND hwnd, in
         if (font) {
             old_font = SelectObject(buf_dc, font);
             SIZE text_size = {};
-            if (GetTextExtentPoint32W(buf_dc, coord_buf,
-                                      static_cast<int>(wcslen(coord_buf)),
-                                      &text_size)) {
+            if (GetTextExtentPoint32W(buf_dc, coord_str.c_str(),
+                                      static_cast<int>(coord_str.size()), &text_size)) {
                 box_w = text_size.cx + 2 * k_coord_margin;
                 box_h = text_size.cy + 2 * k_coord_margin;
                 tt_left = cx + k_coord_padding;
@@ -543,7 +543,7 @@ void Draw_crosshair_and_coord_tooltip(HDC buf_dc, HBITMAP buf_bmp, HWND hwnd, in
             RECT text_rc = {tt_left + k_coord_margin, tt_top + k_coord_margin,
                             tt_left + box_w - k_coord_margin,
                             tt_top + box_h - k_coord_margin};
-            DrawTextW(buf_dc, coord_buf, -1, &text_rc,
+            DrawTextW(buf_dc, coord_str.c_str(), -1, &text_rc,
                       DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         }
         if (old_font) SelectObject(buf_dc, old_font);

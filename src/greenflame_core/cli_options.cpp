@@ -195,7 +195,7 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
 }
 
 [[nodiscard]] bool Try_parse_region(std::wstring_view value, RectPx &region) noexcept {
-    std::wstring_view parts[4] = {};
+    std::array<std::wstring_view, 4> parts = {};
     size_t part_count = 0;
     size_t segment_start = 0;
 

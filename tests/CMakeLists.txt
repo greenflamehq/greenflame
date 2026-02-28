@@ -54,17 +54,21 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-pre-c++14-compat
         -Wno-pre-c++17-compat
         -Wno-pre-c++20-compat
+        -Wno-global-constructors
+        -Wno-implicit-int-float-conversion
+        -Wno-switch-default
+        -Wno-language-extension-token
         -ftime-trace
     )
 elseif(MSVC)
     target_compile_options(greenflame_tests PRIVATE
         /Wall
-        /wd4514 # 'function' : unreferenced inline function has been removed
-        /wd5045 # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
-        /wd4820 # 'bytes' bytes padding added after construct 'member_name'
         /wd4355 # 'this': used in base member initializer list
+        /wd4514 # 'function' : unreferenced inline function has been removed
         /wd4710 # 'function' : function not inlined
         /wd4711 # 'function' : function selected for automatic inline expansion
+        /wd4820 # 'bytes' bytes padding added after construct 'member_name'
+        /wd5045 # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
         /external:W0
         /external:anglebrackets
         /permissive-
