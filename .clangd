@@ -1,4 +1,6 @@
 # Tell clangd where the compilation database lives (CMake puts it in the build dir).
+InlayHints:
+  ParameterNames: No
 CompileFlags:
     CompilationDatabase: build/x64-debug-clang
     Add:
