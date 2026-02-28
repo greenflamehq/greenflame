@@ -17,12 +17,14 @@ enum class SelectionHandle : uint8_t {
     Left = 7,
 };
 
-// Hit-test: which handle (if any) is under the cursor?
-// Tests corners first so a corner wins when cursor is within radius of both.
-// Returns nullopt if selection is empty or cursor is not near any handle.
+// Corner zone size used by both hit-testing and border highlight rendering.
+inline constexpr int kMaxCornerSizePx = 16;
+
+// Hit-test against the border band. Returns the zone under the cursor,
+// or nullopt if not within kBorderHitBandPx px of any border edge.
+// Corner size = min(kMaxCornerSizePx, side/2) per axis.
 [[nodiscard]] std::optional<SelectionHandle>
-Hit_test_selection_handle(RectPx selection, PointPx cursor_client_px,
-                          int grab_radius_px) noexcept;
+Hit_test_border_zone(RectPx selection, PointPx cursor_client_px) noexcept;
 
 // Resize rect: anchor rect with the given handle moved to cursor position.
 // Opposite corner/edge stays fixed. Result is normalized and has minimum size 1x1.

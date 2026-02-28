@@ -72,6 +72,7 @@ class OverlayWindow final {
     HINSTANCE hinstance_ = nullptr;
     core::OverlayController controller_;
     std::unique_ptr<OverlayResources> resources_;
+    std::optional<core::SelectionHandle> last_hover_handle_;
 };
 
 } // namespace greenflame

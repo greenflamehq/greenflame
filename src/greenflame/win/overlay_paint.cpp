@@ -7,6 +7,7 @@
 #include "gdi_capture.h"
 #include "greenflame_core/pixel_ops.h"
 #include "greenflame_core/rect_px.h"
+#include "greenflame_core/selection_handles.h"
 
 namespace {
 
@@ -15,7 +16,6 @@ constexpr unsigned char kCoordTooltipBgR = 217, kCoordTooltipBgG = 240,
                         kCoordTooltipBgB = 227;
 constexpr COLORREF kCoordTooltipBorderText = RGB(15, 60, 35); // dark SeaGreen
 
-constexpr int kHandleHalfSize = 4; // 8x8 handle centered on contour
 constexpr int kMagnifierSize = 256;
 constexpr int kMagnifierZoom = 8; // source size = kMagnifierSize / kMagnifierZoom
 constexpr int kMagnifierSource = kMagnifierSize / kMagnifierZoom; // 32
@@ -177,30 +177,75 @@ void Draw_capture_to_buffer(HDC buf_dc, HDC hdc, int w, int h,
     }
 }
 
-void Draw_contour_handles(HDC buf_dc, greenflame::core::RectPx const &sel,
-                          greenflame::PaintResources const *res) {
+void Draw_border_highlight(HDC dc, HPEN pen, greenflame::core::RectPx const &sel,
+                           greenflame::core::SelectionHandle highlight,
+                           int max_corner_size_px) {
     if (sel.Is_empty()) return;
     greenflame::core::RectPx const r = sel.Normalized();
-    int const cx = (r.left + r.right) / 2;
-    int const cy = (r.top + r.bottom) / 2;
-    if (!res || !res->handle_brush || !res->handle_pen) return;
-    HGDIOBJ old_brush = SelectObject(buf_dc, res->handle_brush);
-    HGDIOBJ old_pen = SelectObject(buf_dc, res->handle_pen);
-    auto draw_handle = [buf_dc](int hx, int hy) {
-        RECT hr = {hx - kHandleHalfSize, hy - kHandleHalfSize, hx + kHandleHalfSize,
-                   hy + kHandleHalfSize};
-        Rectangle(buf_dc, hr.left, hr.top, hr.right, hr.bottom);
-    };
-    draw_handle(r.left, r.top);
-    draw_handle(r.right, r.top);
-    draw_handle(r.right, r.bottom);
-    draw_handle(r.left, r.bottom);
-    draw_handle(cx, r.top);
-    draw_handle(r.right, cy);
-    draw_handle(cx, r.bottom);
-    draw_handle(r.left, cy);
-    SelectObject(buf_dc, old_pen);
-    SelectObject(buf_dc, old_brush);
+    int const corner_w = std::min(max_corner_size_px, r.Width() / 2);
+    int const corner_h = std::min(max_corner_size_px, r.Height() / 2);
+    HGDIOBJ old_pen = SelectObject(dc, pen);
+
+    switch (highlight) {
+    case greenflame::core::SelectionHandle::Top:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.left + corner_w, r.top + off, nullptr);
+            LineTo(dc, r.right - corner_w, r.top + off);
+        }
+        break;
+    case greenflame::core::SelectionHandle::Bottom:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.left + corner_w, r.bottom - 1 + off, nullptr);
+            LineTo(dc, r.right - corner_w, r.bottom - 1 + off);
+        }
+        break;
+    case greenflame::core::SelectionHandle::Left:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.left + off, r.top + corner_h, nullptr);
+            LineTo(dc, r.left + off, r.bottom - corner_h);
+        }
+        break;
+    case greenflame::core::SelectionHandle::Right:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.right - 1 + off, r.top + corner_h, nullptr);
+            LineTo(dc, r.right - 1 + off, r.bottom - corner_h);
+        }
+        break;
+    case greenflame::core::SelectionHandle::TopLeft:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.left, r.top + off, nullptr);
+            LineTo(dc, r.left + corner_w, r.top + off);
+            MoveToEx(dc, r.left + off, r.top, nullptr);
+            LineTo(dc, r.left + off, r.top + corner_h);
+        }
+        break;
+    case greenflame::core::SelectionHandle::TopRight:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.right - corner_w, r.top + off, nullptr);
+            LineTo(dc, r.right, r.top + off);
+            MoveToEx(dc, r.right - 1 + off, r.top, nullptr);
+            LineTo(dc, r.right - 1 + off, r.top + corner_h);
+        }
+        break;
+    case greenflame::core::SelectionHandle::BottomLeft:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.left, r.bottom - 1 + off, nullptr);
+            LineTo(dc, r.left + corner_w, r.bottom - 1 + off);
+            MoveToEx(dc, r.left + off, r.bottom - corner_h, nullptr);
+            LineTo(dc, r.left + off, r.bottom);
+        }
+        break;
+    case greenflame::core::SelectionHandle::BottomRight:
+        for (int off = -1; off <= 1; ++off) {
+            MoveToEx(dc, r.right - corner_w, r.bottom - 1 + off, nullptr);
+            LineTo(dc, r.right, r.bottom - 1 + off);
+            MoveToEx(dc, r.right - 1 + off, r.bottom - corner_h, nullptr);
+            LineTo(dc, r.right - 1 + off, r.bottom);
+        }
+        break;
+    }
+
+    SelectObject(dc, old_pen);
 }
 
 void Draw_selection_dim_and_border(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
@@ -641,12 +686,16 @@ void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &
     if (show_crosshair) {
         Draw_crosshair_and_coord_tooltip(buf_dc, buf_bmp, hwnd, w, h, cx, cy, false,
                                          in.paint_buffer, in.resources, in.capture);
-        // Resize handles only when committed or resizing; never in Object_selection
-        // (modifier_preview).
-    } else if ((in.handle_dragging || in.move_dragging) && !in.live_rect.Is_empty()) {
-        Draw_contour_handles(buf_dc, in.live_rect, in.resources);
-    } else if (!in.final_selection.Is_empty() && !in.modifier_preview) {
-        Draw_contour_handles(buf_dc, in.final_selection, in.resources);
+    }
+
+    if (in.highlight_handle.has_value() && in.resources && in.resources->handle_pen) {
+        core::RectPx const &hl_sel =
+            (in.handle_dragging || in.move_dragging) ? in.live_rect : in.final_selection;
+        if (!hl_sel.Is_empty()) {
+            Draw_border_highlight(buf_dc, in.resources->handle_pen,
+                                  hl_sel, *in.highlight_handle,
+                                  core::kMaxCornerSizePx);
+        }
     }
 
     BitBlt(hdc, 0, 0, w, h, buf_dc, 0, 0, SRCCOPY);

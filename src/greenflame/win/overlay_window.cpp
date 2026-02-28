@@ -18,7 +18,6 @@
 namespace {
 
 constexpr wchar_t kOverlayWindowClass[] = L"GreenflameOverlay";
-constexpr int kHandleGrabRadiusPx = 6;
 constexpr int32_t kSnapThresholdPx = 10;
 constexpr int kDimensionFontHeight = 14;
 constexpr int kCenterFontHeight = 36;
@@ -220,7 +219,6 @@ struct OverlayWindow::OverlayResources {
                         DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
         paint.crosshair_pen = CreatePen(PS_SOLID, 1, winui::kOverlayCrosshair);
         paint.border_pen = CreatePen(PS_SOLID, 1, winui::kOverlayBorder);
-        paint.handle_brush = CreateSolidBrush(winui::kOverlayHandle);
         paint.handle_pen = CreatePen(PS_SOLID, 1, winui::kOverlayHandle);
         return true;
     }
@@ -243,10 +241,6 @@ struct OverlayWindow::OverlayResources {
         if (paint.border_pen) {
             DeleteObject(paint.border_pen);
             paint.border_pen = nullptr;
-        }
-        if (paint.handle_brush) {
-            DeleteObject(paint.handle_brush);
-            paint.handle_brush = nullptr;
         }
         if (paint.handle_pen) {
             DeleteObject(paint.handle_pen);
@@ -525,6 +519,25 @@ LRESULT OverlayWindow::On_mouse_move() {
     Apply_action(controller_.On_pointer_move(mods, cursor_client, cursor_screen,
                                              win_rect, vdesk, monitor_idx, ox, oy,
                                              static_cast<uint64_t>(GetTickCount64())));
+
+    auto const &s2 = controller_.State();
+    if (!s2.final_selection.Is_empty() && !s2.dragging &&
+        !s2.handle_dragging && !s2.move_dragging) {
+        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        bool const tab_held = (GetKeyState(VK_TAB) & 0x8000) != 0;
+        std::optional<core::SelectionHandle> hover =
+            (tab_held && s2.final_selection.Contains(cur))
+                ? std::nullopt
+                : core::Hit_test_border_zone(s2.final_selection, cur);
+        if (hover != last_hover_handle_) {
+            last_hover_handle_ = hover;
+            InvalidateRect(hwnd_, nullptr, TRUE);
+        }
+    } else if (last_hover_handle_.has_value()) {
+        last_hover_handle_ = std::nullopt;
+        // no extra repaint needed — drags already repaint
+    }
+
     return 0;
 }
 
@@ -897,6 +910,11 @@ LRESULT OverlayWindow::On_paint() {
         input.cursor_client_px = cursor;
         input.paint_buffer = std::span<uint8_t>(resources_->paint_buffer);
         input.resources = &resources_->paint;
+        if (s.handle_dragging && s.resize_handle.has_value()) {
+            input.highlight_handle = s.resize_handle;
+        } else if (!s.move_dragging && !s.dragging && !s.modifier_preview) {
+            input.highlight_handle = last_hover_handle_;
+        }
         Paint_overlay(hdc, hwnd_, rect, input);
         EndPaint(hwnd_, &paint);
     }
@@ -941,8 +959,8 @@ LRESULT OverlayWindow::On_set_cursor(WPARAM wparam, LPARAM lparam) {
             SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
             return TRUE;
         }
-        std::optional<core::SelectionHandle> hit = core::Hit_test_selection_handle(
-            s.final_selection, cursor, kHandleGrabRadiusPx);
+        std::optional<core::SelectionHandle> hit =
+            core::Hit_test_border_zone(s.final_selection, cursor);
         if (hit.has_value()) {
             SetCursor(Cursor_for_handle(*hit));
             return TRUE;

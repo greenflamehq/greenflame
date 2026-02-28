@@ -17,9 +17,12 @@ struct PaintResources {
     HFONT font_center = nullptr;       // 36pt "Segoe UI" black weight
     HPEN crosshair_pen = nullptr;      // LightSeaGreen dashed crosshair
     HPEN border_pen = nullptr;         // SeaGreen for label/tooltip borders
-    HBRUSH handle_brush = nullptr;     // Teal for contour handles
-    HPEN handle_pen = nullptr;         // Teal for contour handles
+    HPEN handle_pen = nullptr;         // Teal for border highlight
 };
+
+namespace core {
+enum class SelectionHandle : uint8_t;
+} // namespace core
 
 struct PaintOverlayInput {
     GdiCaptureResult const *capture = nullptr;
@@ -32,6 +35,7 @@ struct PaintOverlayInput {
     bool handle_dragging = false;
     bool move_dragging = false;
     bool modifier_preview = false; // Shift/Ctrl: live_rect = window or monitor
+    std::optional<core::SelectionHandle> highlight_handle = std::nullopt;
 };
 
 void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &in);

@@ -6,7 +6,6 @@
 namespace greenflame::core {
 
 namespace {
-constexpr int kHandleGrabRadiusPx = 6;
 constexpr int32_t kSnapThresholdPx = 10;
 } // namespace
 
@@ -201,8 +200,8 @@ OverlayAction OverlayController::On_primary_press(
             Rebuild_snap_edges(std::move(visible_window_rects), origin_x, origin_y);
             return OverlayAction::Repaint;
         }
-        std::optional<SelectionHandle> hit = Hit_test_selection_handle(
-            state_.final_selection, cursor_client, kHandleGrabRadiusPx);
+        std::optional<SelectionHandle> hit =
+            Hit_test_border_zone(state_.final_selection, cursor_client);
         if (hit.has_value()) {
             state_.handle_dragging = true;
             state_.resize_handle = hit;

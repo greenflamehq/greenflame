@@ -5,79 +5,53 @@ namespace greenflame::core {
 namespace {
 
 constexpr int32_t kMinSize = 1;
+constexpr int kBorderHitBandPx = 5;
 
-bool Within_radius_sq(PointPx a, PointPx b, int radius_px) noexcept {
-    if (radius_px <= 0) return false;
-    const int64_t dx = static_cast<int64_t>(a.x) - static_cast<int64_t>(b.x);
-    const int64_t dy = static_cast<int64_t>(a.y) - static_cast<int64_t>(b.y);
-    const int64_t r = static_cast<int64_t>(radius_px);
-    return dx * dx + dy * dy <= r * r;
-}
-
-#pragma warning(push)
-#pragma warning(disable : 4061)
-CLANG_WARN_IGNORE_PUSH("-Wswitch-enum")
-PointPx Corner_position(RectPx const &r, SelectionHandle h) noexcept {
-    switch (h) {
-    case SelectionHandle::TopLeft:
-        return r.Top_left();
-    case SelectionHandle::TopRight:
-        return {r.right, r.top};
-    case SelectionHandle::BottomRight:
-        return r.Bottom_right();
-    case SelectionHandle::BottomLeft:
-        return {r.left, r.bottom};
-    default:
-        return {0, 0};
-    }
-}
-
-PointPx Edge_midpoint_position(RectPx const &r, SelectionHandle h) noexcept {
-    int const cx = (r.left + r.right) / 2;
-    int const cy = (r.top + r.bottom) / 2;
-    switch (h) {
-    case SelectionHandle::Top:
-        return {cx, r.top};
-    case SelectionHandle::Right:
-        return {r.right, cy};
-    case SelectionHandle::Bottom:
-        return {cx, r.bottom};
-    case SelectionHandle::Left:
-        return {r.left, cy};
-    default:
-        return {0, 0};
-    }
-}
-CLANG_WARN_IGNORE_POP()
-#pragma warning(pop)
 } // namespace
 
-std::optional<SelectionHandle> Hit_test_selection_handle(RectPx selection,
-                                                         PointPx cursor_client_px,
-                                                         int grab_radius_px) noexcept {
+std::optional<SelectionHandle> Hit_test_border_zone(RectPx selection,
+                                                    PointPx cursor_client_px) noexcept {
     RectPx const r = selection.Normalized();
     if (r.Is_empty()) return std::nullopt;
 
-    // Corners first (priority over edges).
-    static constexpr SelectionHandle kCorners[] = {
-        SelectionHandle::TopLeft, SelectionHandle::TopRight,
-        SelectionHandle::BottomRight, SelectionHandle::BottomLeft};
-    for (SelectionHandle h : kCorners) {
-        if (Within_radius_sq(Corner_position(r, h), cursor_client_px, grab_radius_px)) {
-            return h;
-        }
-    }
+    int const band = kBorderHitBandPx;
+    int const w = r.Width();
+    int const h = r.Height();
+    int const corner_w = std::min(kMaxCornerSizePx, w / 2);
+    int const corner_h = std::min(kMaxCornerSizePx, h / 2);
 
-    // Then edges.
-    static constexpr SelectionHandle kEdges[] = {
-        SelectionHandle::Top, SelectionHandle::Right, SelectionHandle::Bottom,
-        SelectionHandle::Left};
-    for (SelectionHandle h : kEdges) {
-        if (Within_radius_sq(Edge_midpoint_position(r, h), cursor_client_px,
-                             grab_radius_px)) {
-            return h;
-        }
-    }
+    int const cx = cursor_client_px.x;
+    int const cy = cursor_client_px.y;
+
+    // Is cursor within band of each edge (AND within that edge's lateral extent)?
+    bool const on_top    = (cy >= r.top - band && cy <= r.top + band) &&
+                           cx >= r.left - band && cx <= r.right - 1 + band;
+    bool const on_bottom = (cy >= r.bottom - 1 - band && cy <= r.bottom - 1 + band) &&
+                           cx >= r.left - band && cx <= r.right - 1 + band;
+    bool const on_left   = (cx >= r.left - band && cx <= r.left + band) &&
+                           cy >= r.top - band && cy <= r.bottom - 1 + band;
+    bool const on_right  = (cx >= r.right - 1 - band && cx <= r.right - 1 + band) &&
+                           cy >= r.top - band && cy <= r.bottom - 1 + band;
+
+    if (!on_top && !on_bottom && !on_left && !on_right) return std::nullopt;
+
+    // Corner zone membership per axis.
+    bool const in_lc = cx <  r.left  + corner_w;
+    bool const in_rc = cx >= r.right - corner_w;
+    bool const in_tc = cy <  r.top   + corner_h;
+    bool const in_bc = cy >= r.bottom - corner_h;
+
+    // Corners first (priority over edges).
+    if ((on_top && in_lc) || (on_left && in_tc))    return SelectionHandle::TopLeft;
+    if ((on_top && in_rc) || (on_right && in_tc))   return SelectionHandle::TopRight;
+    if ((on_bottom && in_rc) || (on_right && in_bc)) return SelectionHandle::BottomRight;
+    if ((on_bottom && in_lc) || (on_left && in_bc)) return SelectionHandle::BottomLeft;
+
+    // Edges (on band but not in any corner zone).
+    if (on_top    && !in_lc && !in_rc) return SelectionHandle::Top;
+    if (on_right  && !in_tc && !in_bc) return SelectionHandle::Right;
+    if (on_bottom && !in_lc && !in_rc) return SelectionHandle::Bottom;
+    if (on_left   && !in_tc && !in_bc) return SelectionHandle::Left;
 
     return std::nullopt;
 }
