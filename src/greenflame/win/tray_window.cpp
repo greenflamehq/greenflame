@@ -295,8 +295,6 @@ class TrayWindow::ToastPopup final {
         int const icon_size = Scale_for_dpi(kIconDip, dpi);
         int const icon_gap = Scale_for_dpi(kIconGapDip, dpi);
         int const title_app_icon_size = Scale_for_dpi(kTitleAppIconDip, dpi);
-        int const title_app_icon_gap = Scale_for_dpi(kTitleAppIconGapDip, dpi);
-        int const title_icon_reserved = title_app_icon_size + title_app_icon_gap;
         int const min_height = Scale_for_dpi(kMinHeightDip, dpi);
         int const max_height = Scale_for_dpi(kMaxHeightDip, dpi);
         int const thumbnail_max_height = Scale_for_dpi(kThumbnailMaxHeightDip, dpi);
@@ -306,9 +304,10 @@ class TrayWindow::ToastPopup final {
         int const content_right = width - padding;
         int const content_width = content_right - content_left;
         int const title_left = content_left;
-        int title_right = content_right - title_icon_reserved;
-        if (title_right <= title_left) {
-            title_right = title_left + 1;
+        int const title_text_left = title_left + title_app_icon_size + title_app_icon_size;
+        int title_right = content_right;
+        if (title_right <= title_text_left) {
+            title_right = title_text_left + 1;
         }
         int const text_left = content_left + icon_size + icon_gap;
         int const text_width = std::max(1, content_right - text_left);
@@ -322,7 +321,7 @@ class TrayWindow::ToastPopup final {
                 hdc, title_font_ ? title_font_ : GetStockObject(DEFAULT_GUI_FONT));
 
             RECT title_measure{};
-            title_measure.right = title_right - title_left;
+            title_measure.right = title_right - title_text_left;
             DrawTextW(hdc, kTitleText, -1, &title_measure,
                       DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS |
                           DT_CALCRECT);
@@ -407,7 +406,6 @@ class TrayWindow::ToastPopup final {
     static constexpr int kIconDip = 20;
     static constexpr int kIconGapDip = 10;
     static constexpr int kTitleAppIconDip = 14;
-    static constexpr int kTitleAppIconGapDip = 6;
     static constexpr int kTitleFontDip = 12;
     static constexpr int kBodyFontDip = 13;
     static constexpr int kMinHeightDip = 56;
@@ -535,9 +533,6 @@ class TrayWindow::ToastPopup final {
                 int const icon_size = Scale_for_dpi(kIconDip, dpi);
                 int const icon_gap = Scale_for_dpi(kIconGapDip, dpi);
                 int const title_app_icon_size = Scale_for_dpi(kTitleAppIconDip, dpi);
-                int const title_app_icon_gap = Scale_for_dpi(kTitleAppIconGapDip, dpi);
-                int const title_icon_reserved =
-                    title_app_icon_size + title_app_icon_gap;
                 int const thumbnail_max_height =
                     Scale_for_dpi(kThumbnailMaxHeightDip, dpi);
                 int const thumbnail_gap = Scale_for_dpi(kThumbnailGapDip, dpi);
@@ -573,30 +568,24 @@ class TrayWindow::ToastPopup final {
                 }
 
                 int const title_left = content_left;
-                int title_right = content_right - title_icon_reserved;
-                if (title_right <= title_left) {
-                    title_right = title_left + 1;
+                int const title_text_left =
+                    title_left + title_app_icon_size + title_app_icon_size;
+                int title_right = content_right;
+                if (title_right <= title_text_left) {
+                    title_right = title_text_left + 1;
                 }
 
                 RECT title_rect{};
-                title_rect.left = title_left;
+                title_rect.left = title_text_left;
                 title_rect.top = padding;
                 title_rect.right = title_right;
                 title_rect.bottom = title_rect.top + title_app_icon_size;
-
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, title_color);
-                HGDIOBJ const old_font = SelectObject(
-                    hdc, title_font_ ? title_font_ : GetStockObject(DEFAULT_GUI_FONT));
-                DrawTextW(hdc, kTitleText, -1, &title_rect,
-                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX |
-                              DT_END_ELLIPSIS);
 
                 HICON loaded_app_icon = static_cast<HICON>(LoadImageW(
                     hinstance_, MAKEINTRESOURCEW(kAppIconResourceId), IMAGE_ICON,
                     title_app_icon_size, title_app_icon_size, LR_DEFAULTCOLOR));
                 if (loaded_app_icon != nullptr) {
-                    int const app_icon_x = content_right - title_app_icon_size;
+                    int const app_icon_x = title_left;
                     int const app_icon_y =
                         title_rect.top +
                         ((title_rect.bottom - title_rect.top - title_app_icon_size) /
@@ -606,6 +595,14 @@ class TrayWindow::ToastPopup final {
                                DI_NORMAL);
                     DestroyIcon(loaded_app_icon);
                 }
+
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, title_color);
+                HGDIOBJ const old_font = SelectObject(
+                    hdc, title_font_ ? title_font_ : GetStockObject(DEFAULT_GUI_FONT));
+                DrawTextW(hdc, kTitleText, -1, &title_rect,
+                          DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX |
+                              DT_END_ELLIPSIS);
 
                 int const body_top = title_rect.bottom + header_gap;
 
