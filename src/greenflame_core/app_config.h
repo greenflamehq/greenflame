@@ -11,6 +11,8 @@ struct AppConfig final {
     std::wstring filename_pattern_window = {};
     std::wstring default_save_format = {}; // "png" (default), "jpg"/"jpeg", or "bmp".
     bool show_balloons = true;
+    bool show_selection_size_side_labels = true;
+    bool show_selection_size_center_label = true;
 
     void Normalize();
 };

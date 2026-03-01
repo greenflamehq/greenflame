@@ -134,6 +134,8 @@ Greenflame reads `~/.config/greenflame/greenflame.ini` (i.e. `%USERPROFILE%\.con
 | Section | Key | Default | Meaning |
 |---|---|---|---|
 | `[ui]` | `show_balloons` | `true` | Show tray toast notifications after copy/save actions. |
+| `[ui]` | `show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
+| `[ui]` | `show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
 | `[save]` | `default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
 | `[save]` | `last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
 | `[save]` | `default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
@@ -147,6 +149,8 @@ Example:
 ```ini
 [ui]
 show_balloons=true
+show_selection_size_side_labels=true
+show_selection_size_center_label=true
 
 [save]
 default_save_dir=C:\Users\you\Pictures\greenflame

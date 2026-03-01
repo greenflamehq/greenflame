@@ -892,6 +892,12 @@ LRESULT OverlayWindow::On_paint() {
         input.handle_dragging = s.handle_dragging;
         input.move_dragging = s.move_dragging;
         input.modifier_preview = s.modifier_preview;
+        if (config_ != nullptr) {
+            input.show_selection_size_side_labels =
+                config_->show_selection_size_side_labels;
+            input.show_selection_size_center_label =
+                config_->show_selection_size_center_label;
+        }
         input.live_rect = s.live_rect;
         input.final_selection = s.final_selection;
         core::PointPx cursor = Get_client_cursor_pos_px(hwnd_);

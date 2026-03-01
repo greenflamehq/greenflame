@@ -105,6 +105,12 @@ core::AppConfig Load_app_config() {
             if (section == "ui") {
                 if (key == "show_balloons") {
                     config.show_balloons = (value == "true" || value == "1");
+                } else if (key == "show_selection_size_side_labels") {
+                    config.show_selection_size_side_labels =
+                        (value == "true" || value == "1");
+                } else if (key == "show_selection_size_center_label") {
+                    config.show_selection_size_center_label =
+                        (value == "true" || value == "1");
                 }
             } else if (section == "save") {
                 auto read = [&](char const *name, std::wstring &target) {
@@ -141,10 +147,22 @@ bool Save_app_config(core::AppConfig const &config) {
         }
 
         // UI section: only write non-default values.
-        if (!config.show_balloons) { // default: true
-            file << "[ui]\n";
-            file << "show_balloons=false\n";
-        }
+        bool wrote_ui_header = false;
+        auto write_ui_bool = [&](char const *key, bool value) {
+            if (value) {
+                return;
+            }
+            if (!wrote_ui_header) {
+                file << "[ui]\n";
+                wrote_ui_header = true;
+            }
+            file << key << "=false\n";
+        };
+        write_ui_bool("show_balloons", config.show_balloons);
+        write_ui_bool("show_selection_size_side_labels",
+                      config.show_selection_size_side_labels);
+        write_ui_bool("show_selection_size_center_label",
+                      config.show_selection_size_center_label);
 
         // Save section: only write non-default values.
         bool wrote_save_header = false;
