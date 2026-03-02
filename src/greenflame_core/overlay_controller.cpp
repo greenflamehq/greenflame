@@ -41,11 +41,22 @@ void OverlaySessionData::Reset_for_session() {
 
 void OverlayController::Reset_for_session(std::vector<MonitorWithBounds> monitors) {
     state_.Reset_for_session();
+    undo_stack_.Clear();
     state_.cached_monitors = std::move(monitors);
     state_.window_rects.reserve(64);
     state_.vertical_edges.reserve(128);
     state_.horizontal_edges.reserve(128);
 }
+
+void OverlayController::Set_final_selection(RectPx r) { state_.final_selection = r; }
+
+void OverlayController::Push_command(std::unique_ptr<ICommand> cmd) {
+    undo_stack_.Push(std::move(cmd));
+}
+
+void OverlayController::Undo() { undo_stack_.Undo(); }
+
+void OverlayController::Redo() { undo_stack_.Redo(); }
 
 void OverlayController::Rebuild_snap_edges(std::vector<RectPx> window_rects,
                                            int32_t origin_x, int32_t origin_y) {

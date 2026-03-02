@@ -84,6 +84,10 @@ add_library(greenflame_core STATIC
     src/greenflame_core/output_path.h
     src/greenflame_core/overlay_controller.cpp
     src/greenflame_core/overlay_controller.h
+    src/greenflame_core/command.h
+    src/greenflame_core/undo_stack.cpp
+    src/greenflame_core/undo_stack.h
+    src/greenflame_core/modification_command.h
 )
 
 # Allow includes like: #include "greenflame_core/rect_px.h"

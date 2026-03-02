@@ -30,6 +30,7 @@ add_executable(greenflame_tests
     cli_options_tests.cpp
     overlay_controller_tests.cpp
     app_controller_tests.cpp
+    undo_stack_tests.cpp
 )
 target_compile_definitions(greenflame_tests PRIVATE
     NOMINMAX

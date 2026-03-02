@@ -3,6 +3,7 @@
 #include "win/overlay_window.h"
 
 #include "greenflame_core/app_config.h"
+#include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/save_image_policy.h"
@@ -373,6 +374,15 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         Apply_action(controller_.On_cancel());
         return 0;
     }
+    if (eff_ctrl && wparam == L'Z') {
+        if (eff_shift) {
+            controller_.Redo();
+        } else {
+            controller_.Undo();
+        }
+        InvalidateRect(hwnd_, nullptr, TRUE);
+        return 0;
+    }
     if (eff_ctrl && wparam == L'S') {
         Apply_action(controller_.On_save_requested(eff_shift, eff_alt));
         return 0;
@@ -537,9 +547,31 @@ LRESULT OverlayWindow::On_mouse_move() {
 }
 
 LRESULT OverlayWindow::On_l_button_up() {
+    auto const &s = controller_.State();
+    bool const was_move = s.move_dragging;
+    bool const was_resize = s.handle_dragging;
+    core::RectPx const before =
+        was_move ? s.move_anchor_rect
+                 : (was_resize ? s.resize_anchor_rect : core::RectPx{});
+
     core::OverlayModifierState mods{};
     mods.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     Apply_action(controller_.On_primary_release(mods, Get_client_cursor_pos_px(hwnd_)));
+
+    if ((was_move || was_resize)) {
+        core::RectPx const after = controller_.State().final_selection;
+        if (before != after) {
+            controller_.Push_command(
+                std::make_unique<core::ModificationCommand<core::RectPx>>(
+                    was_move ? "Move selection" : "Resize selection",
+                    [this](core::RectPx const &r) {
+                        controller_.Set_final_selection(r);
+                        InvalidateRect(hwnd_, nullptr, TRUE);
+                    },
+                    before, after));
+        }
+    }
+
     return 0;
 }
 

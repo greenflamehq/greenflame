@@ -1,9 +1,11 @@
 #pragma once
 
+#include "greenflame_core/command.h"
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/save_image_policy.h"
 #include "greenflame_core/selection_handles.h"
+#include "greenflame_core/undo_stack.h"
 
 namespace greenflame::core {
 
@@ -94,6 +96,12 @@ class OverlayController final {
 
     [[nodiscard]] OverlaySessionData const &State() const noexcept { return state_; }
 
+    void Set_final_selection(RectPx r);
+
+    void Push_command(std::unique_ptr<ICommand> cmd);
+    void Undo();
+    void Redo();
+
   private:
     void Rebuild_snap_edges(std::vector<RectPx> window_rects, int32_t origin_x,
                             int32_t origin_y);
@@ -104,6 +112,7 @@ class OverlayController final {
                                 int32_t origin_y);
 
     OverlaySessionData state_;
+    UndoStack undo_stack_;
 };
 
 } // namespace greenflame::core
