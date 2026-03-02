@@ -1,7 +1,7 @@
 #pragma once
 
-#include "greenflame_core/overlay_help_content.h"
 #include "greenflame_core/overlay_controller.h"
+#include "greenflame_core/overlay_help_content.h"
 #include "greenflame_core/rect_px.h"
 #include "win/overlay_help_overlay.h"
 

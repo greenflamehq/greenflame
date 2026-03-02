@@ -11,11 +11,11 @@ constexpr int kHelpBodyFontHeight = 18;
 constexpr int kHelpKeyFontHeight = 18;
 constexpr int kHelpSectionFontHeight = 20;
 
-void Draw_help_overlay_to_buffer(
-    HDC buf_dc, HBITMAP buf_bmp, int w, int h, std::span<uint8_t> pixels,
-    HFONT title_font, HFONT body_font, HFONT key_font, HFONT section_font,
-    greenflame::core::OverlayHelpContent const *content,
-    std::optional<greenflame::core::RectPx> monitor_rect) {
+void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
+                                 std::span<uint8_t> pixels, HFONT title_font,
+                                 HFONT body_font, HFONT key_font, HFONT section_font,
+                                 greenflame::core::OverlayHelpContent const *content,
+                                 std::optional<greenflame::core::RectPx> monitor_rect) {
     if (w <= 0 || h <= 0 || content == nullptr || content->sections.empty()) {
         return;
     }
@@ -39,8 +39,8 @@ void Draw_help_overlay_to_buffer(
     greenflame::core::RectPx overlay_rect =
         monitor_rect.value_or(greenflame::core::RectPx::From_ltrb(0, 0, w, h));
     std::optional<greenflame::core::RectPx> const clipped_overlay =
-        greenflame::core::RectPx::Clip(
-            overlay_rect, greenflame::core::RectPx::From_ltrb(0, 0, w, h));
+        greenflame::core::RectPx::Clip(overlay_rect,
+                                       greenflame::core::RectPx::From_ltrb(0, 0, w, h));
     if (!clipped_overlay.has_value()) {
         return;
     }
@@ -182,9 +182,8 @@ void Draw_help_overlay_to_buffer(
             RECT desc_rect = {desc_left, row_y, content_right, row_y + row_h};
             SelectObject(buf_dc, body_font);
             std::wstring_view const description(entry.description);
-            DrawTextW(buf_dc, description.data(),
-                      static_cast<int>(description.size()), &desc_rect,
-                      DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+            DrawTextW(buf_dc, description.data(), static_cast<int>(description.size()),
+                      &desc_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
             row_y += row_h;
         }
@@ -225,7 +224,9 @@ bool OverlayHelpOverlay::Has_content() const noexcept {
     return false;
 }
 
-bool OverlayHelpOverlay::Is_visible() const noexcept { return visible_ && Has_content(); }
+bool OverlayHelpOverlay::Is_visible() const noexcept {
+    return visible_ && Has_content();
+}
 
 void OverlayHelpOverlay::Hide() noexcept {
     visible_ = false;
@@ -255,11 +256,11 @@ void OverlayHelpOverlay::Toggle_at_cursor(
         core::Index_of_monitor_containing(cursor_screen, monitors);
     if (monitor_index.has_value() && *monitor_index < monitors.size()) {
         core::RectPx const &monitor_bounds = monitors[*monitor_index].bounds;
-        monitor_rect_client_ = core::RectPx::From_ltrb(
-            monitor_bounds.left - overlay_rect_screen.left,
-            monitor_bounds.top - overlay_rect_screen.top,
-            monitor_bounds.right - overlay_rect_screen.left,
-            monitor_bounds.bottom - overlay_rect_screen.top);
+        monitor_rect_client_ =
+            core::RectPx::From_ltrb(monitor_bounds.left - overlay_rect_screen.left,
+                                    monitor_bounds.top - overlay_rect_screen.top,
+                                    monitor_bounds.right - overlay_rect_screen.left,
+                                    monitor_bounds.bottom - overlay_rect_screen.top);
     }
     visible_ = true;
 }
@@ -292,8 +293,8 @@ bool OverlayHelpOverlay::Paint(HDC hdc, RECT const &client_rect,
 
     HGDIOBJ old_buf = SelectObject(buf_dc, buf_bmp);
     BitBlt(buf_dc, 0, 0, w, h, hdc, 0, 0, SRCCOPY);
-    Draw_help_overlay_to_buffer(buf_dc, buf_bmp, w, h, pixels, font_title_,
-                                font_body_, font_key_, font_section_, content_,
+    Draw_help_overlay_to_buffer(buf_dc, buf_bmp, w, h, pixels, font_title_, font_body_,
+                                font_key_, font_section_, content_,
                                 monitor_rect_client_);
     BitBlt(hdc, 0, 0, w, h, buf_dc, 0, 0, SRCCOPY);
     SelectObject(buf_dc, old_buf);
@@ -321,16 +322,16 @@ bool OverlayHelpOverlay::Ensure_fonts() noexcept {
                         DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
     }
     if (font_key_ == nullptr) {
-        font_key_ = CreateFontW(kHelpKeyFontHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE,
-                                FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                                CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY,
-                                FIXED_PITCH | FF_MODERN, L"Courier New");
+        font_key_ =
+            CreateFontW(kHelpKeyFontHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                        DEFAULT_QUALITY, FIXED_PITCH | FF_MODERN, L"Courier New");
     }
     if (font_section_ == nullptr) {
-        font_section_ = CreateFontW(kHelpSectionFontHeight, 0, 0, 0, FW_BOLD, FALSE,
-                                    FALSE, FALSE, DEFAULT_CHARSET,
-                                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                                    DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
+        font_section_ =
+            CreateFontW(kHelpSectionFontHeight, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
+                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                        DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
     }
 
     if (font_title_ == nullptr || font_body_ == nullptr || font_key_ == nullptr ||

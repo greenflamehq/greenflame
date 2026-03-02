@@ -404,14 +404,14 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         if (!is_repeat && Is_selection_stable_for_help()) {
             RECT overlay_rect{};
             if (GetWindowRect(hwnd_, &overlay_rect) != 0) {
-                core::RectPx const overlay_screen_rect = core::RectPx::From_ltrb(
-                    static_cast<int32_t>(overlay_rect.left),
-                    static_cast<int32_t>(overlay_rect.top),
-                    static_cast<int32_t>(overlay_rect.right),
-                    static_cast<int32_t>(overlay_rect.bottom));
-                hotkey_help_overlay_.Toggle_at_cursor(Get_cursor_pos_px(),
-                                                      controller_.State().cached_monitors,
-                                                      overlay_screen_rect);
+                core::RectPx const overlay_screen_rect =
+                    core::RectPx::From_ltrb(static_cast<int32_t>(overlay_rect.left),
+                                            static_cast<int32_t>(overlay_rect.top),
+                                            static_cast<int32_t>(overlay_rect.right),
+                                            static_cast<int32_t>(overlay_rect.bottom));
+                hotkey_help_overlay_.Toggle_at_cursor(
+                    Get_cursor_pos_px(), controller_.State().cached_monitors,
+                    overlay_screen_rect);
             }
             InvalidateRect(hwnd_, nullptr, TRUE);
         }
@@ -1005,7 +1005,8 @@ LRESULT OverlayWindow::On_paint() {
                     monitor.bounds.bottom - static_cast<int32_t>(overlay_rect.top)));
             }
         }
-        input.monitor_rects_client = std::span<const core::RectPx>(monitor_client_rects);
+        input.monitor_rects_client =
+            std::span<const core::RectPx>(monitor_client_rects);
         core::PointPx cursor = Get_client_cursor_pos_px(hwnd_);
         bool const snap_enabled = (GetKeyState(VK_MENU) & 0x8000) == 0;
         bool const crosshair_mode = s.final_selection.Is_empty() && !s.dragging &&

@@ -205,8 +205,7 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
         {L"Ctrl + S", L"Save selection to default location"},
         {L"Ctrl + Alt + S", L"Save selection and copy saved file path"},
         {L"Ctrl + Shift + S", L"Save selection as..."},
-        {L"Ctrl + Shift + Alt + S",
-         L"Save selection as... and copy saved file path"},
+        {L"Ctrl + Shift + Alt + S", L"Save selection as... and copy saved file path"},
     };
     content.sections.push_back(std::move(copy_and_save));
 
