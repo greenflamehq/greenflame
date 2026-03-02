@@ -1,0 +1,70 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 02:00 UTC every day
+  workflow_dispatch:       # allow manual trigger
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Guard: skip the rest if master had no commits in the last 24 hours.
+  # Uses a lightweight Ubuntu runner to avoid spinning up a Windows VM
+  # unnecessarily.
+  # ---------------------------------------------------------------------------
+  check-commits:
+    name: Check for recent commits
+    runs-on: ubuntu-latest
+    outputs:
+      has-commits: ${{ steps.check.outputs.has-commits }}
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Count commits in the last 24 hours
+        id: check
+        run: |
+          count=$(git log --oneline --since="24 hours ago" | wc -l)
+          if [ "$count" -gt 0 ]; then
+            echo "has-commits=true"  >> "$GITHUB_OUTPUT"
+            echo "Found $count commit(s) since yesterday — will run clang-tidy."
+          else
+            echo "has-commits=false" >> "$GITHUB_OUTPUT"
+            echo "No new commits since yesterday — skipping clang-tidy."
+          fi
+
+  # ---------------------------------------------------------------------------
+  # clang-tidy: static analysis against the Clang-debug compilation database.
+  # A full build is required so that PCH binaries and generated files exist.
+  # MSVC dev env is required so clang-tidy can resolve Windows SDK and
+  # MSVC-runtime headers referenced in the compile commands.
+  # ---------------------------------------------------------------------------
+  clang-tidy:
+    name: clang-tidy
+    runs-on: windows-latest
+    needs: check-commits
+    if: needs.check-commits.outputs.has-commits == 'true'
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v4
+        with:
+          ref: master
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake --preset x64-debug-clang
+
+      - name: Build
+        run: cmake --build --preset x64-debug-clang
+
+      - name: Run clang-tidy
+        shell: bash
+        run: |
+          find src tests -name "*.cpp" -print0 \
+            | xargs -0 clang-tidy -p build/x64-debug-clang

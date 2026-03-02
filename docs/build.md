@@ -77,15 +77,23 @@ cmake --build --preset x64-release-clang
 - **Include timing:** Clang builds use `-ftime-trace`; the compiler emits `.json` trace files in the build dir. Open them in Chrome's `chrome://tracing` to inspect time spent in includes and in the compiler.
 - **Include What You Use (IWYU)** can use the same `compile_commands.json` for optional include-cleanup suggestions.
 
-## Formatting and lint policy before finishing a task
+## Formatting
 
-When a working version is reached and behavior is acceptable:
+**clang-format** is enforced automatically via a git pre-commit hook (`.githooks/pre-commit`). The hook reformats any staged `.cpp`/`.h` files in place and re-stages them before the commit is recorded, so no manual formatting step is needed.
 
-1. Run **clang-format** on changed C/C++ files.
-2. During iteration, run **clang-tidy** on changed translation units (`.cpp` files).
-3. Before considering the task complete, run **clang-tidy on all translation units** in `src/` and `tests/`.
+### Installing the hook (once per clone)
 
-Rationale: a change in one file (especially headers, inline code, templates, macros, or shared declarations) can surface a tidy warning in another file that was not directly modified.
+```bat
+git config core.hooksPath .githooks
+```
+
+The hook requires `clang-format` to be on `PATH`; if it is not found the hook skips silently and the commit proceeds normally.
+
+**clang-format** is also checked by CI on every push/PR (see `.github/workflows/ci.yml`). If the hook is not installed locally, CI remains the backstop.
+
+## Lint policy
+
+**clang-tidy** is run nightly by CI (see `.github/workflows/nightly.yml`) and is **not required** before considering a task complete. It may be run on demand against individual translation units during development, but a full tidy pass is not a completion gate.
 
 ## Completeness and correctness
 

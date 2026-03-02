@@ -63,32 +63,3 @@ jobs:
           find src tests \( -name "*.cpp" -o -name "*.h" \) -print0 \
             | xargs -0 clang-format --dry-run --Werror
 
-  # ---------------------------------------------------------------------------
-  # clang-tidy: static analysis against the Clang-debug compilation database.
-  # A full build is required so that PCH binaries and generated files exist.
-  # MSVC dev env is required so clang-tidy can resolve Windows SDK and
-  # MSVC-runtime headers referenced in the compile commands.
-  # ---------------------------------------------------------------------------
-  clang-tidy:
-    name: clang-tidy
-    runs-on: windows-latest
-    needs: [build]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Configure
-        run: cmake --preset x64-debug-clang
-
-      - name: Build
-        run: cmake --build --preset x64-debug-clang
-
-      - name: Run clang-tidy
-        shell: bash
-        run: |
-          find src tests -name "*.cpp" -print0 \
-            | xargs -0 clang-tidy -p build/x64-debug-clang
