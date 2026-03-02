@@ -12,8 +12,8 @@ class UndoStack {
   public:
     void Push(std::unique_ptr<ICommand> cmd);
 
-    bool CanUndo() const;
-    bool CanRedo() const;
+    bool Can_undo() const;
+    bool Can_redo() const;
 
     void Undo();
     void Redo();
@@ -23,8 +23,8 @@ class UndoStack {
     std::size_t Count() const;
     int Index() const;
 
-    void SetUndoLimit(int limit);
-    int UndoLimit() const;
+    void Set_undo_limit(int limit);
+    int Undo_limit() const;
 
   private:
     std::vector<std::unique_ptr<ICommand>> commands_;

@@ -22,18 +22,18 @@ void UndoStack::Push(std::unique_ptr<ICommand> cmd) {
     }
 }
 
-bool UndoStack::CanUndo() const { return index_ > 0; }
+bool UndoStack::Can_undo() const { return index_ > 0; }
 
-bool UndoStack::CanRedo() const { return index_ < static_cast<int>(commands_.size()); }
+bool UndoStack::Can_redo() const { return index_ < static_cast<int>(commands_.size()); }
 
 void UndoStack::Undo() {
-    if (!CanUndo()) return;
+    if (!Can_undo()) return;
     --index_;
     commands_[static_cast<std::size_t>(index_)]->Undo();
 }
 
 void UndoStack::Redo() {
-    if (!CanRedo()) return;
+    if (!Can_redo()) return;
     commands_[static_cast<std::size_t>(index_)]->Redo();
     ++index_;
 }
@@ -47,8 +47,8 @@ std::size_t UndoStack::Count() const { return commands_.size(); }
 
 int UndoStack::Index() const { return index_; }
 
-void UndoStack::SetUndoLimit(int limit) { undoLimit_ = limit; }
+void UndoStack::Set_undo_limit(int limit) { undoLimit_ = limit; }
 
-int UndoStack::UndoLimit() const { return undoLimit_; }
+int UndoStack::Undo_limit() const { return undoLimit_; }
 
 } // namespace greenflame::core
