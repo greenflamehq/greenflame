@@ -423,6 +423,11 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
                                                      vdesk, monitor_idx, ox, oy));
         return 0;
     }
+    if (wparam == VK_TAB) {
+        // Tab pressed: refresh cursor (IDC_SIZEALL when inside selection) since
+        // WM_SETCURSOR may not be sent on key press.
+        Refresh_cursor();
+    }
     UINT const message_id =
         (lparam & (static_cast<LPARAM>(1) << 29)) != 0 ? WM_SYSKEYDOWN : WM_KEYDOWN;
     return DefWindowProcW(hwnd_, message_id, wparam, lparam);
@@ -440,6 +445,11 @@ LRESULT OverlayWindow::On_key_up(WPARAM wparam, LPARAM lparam) {
         // On key-up, no preview hints: preview is being cleared, not set.
         Apply_action(controller_.On_modifier_changed(new_mods, {}, {}, {}, {}, 0, 0));
         return 0;
+    }
+    if (wparam == VK_TAB) {
+        // Tab released: cursor was IDC_SIZEALL when inside selection; refresh it
+        // since WM_SETCURSOR is not sent on key release.
+        Refresh_cursor();
     }
     UINT const message_id =
         (lparam & (static_cast<LPARAM>(1) << 29)) != 0 ? WM_SYSKEYUP : WM_KEYUP;
@@ -964,40 +974,44 @@ LRESULT OverlayWindow::On_close() {
     return 0;
 }
 
-LRESULT OverlayWindow::On_set_cursor(WPARAM wparam, LPARAM lparam) {
-    if (LOWORD(lparam) != HTCLIENT) {
-        return DefWindowProcW(hwnd_, WM_SETCURSOR, wparam, lparam);
-    }
+void OverlayWindow::Refresh_cursor() {
     auto const &s = controller_.State();
     if (s.move_dragging) {
         SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
-        return TRUE;
+        return;
     }
     if (s.handle_dragging && s.resize_handle.has_value()) {
         SetCursor(Cursor_for_handle(*s.resize_handle));
-        return TRUE;
+        return;
     }
     if (s.modifier_preview) {
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
-        return TRUE;
+        return;
     }
     if (!s.final_selection.Is_empty() && !s.dragging) {
         core::PointPx const cursor = Get_client_cursor_pos_px(hwnd_);
         bool const tab_held = (GetKeyState(VK_TAB) & 0x8000) != 0;
         if (tab_held && s.final_selection.Contains(cursor)) {
             SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
-            return TRUE;
+            return;
         }
         std::optional<core::SelectionHandle> hit =
             core::Hit_test_border_zone(s.final_selection, cursor);
         if (hit.has_value()) {
             SetCursor(Cursor_for_handle(*hit));
-            return TRUE;
+            return;
         }
         SetCursor(LoadCursorW(nullptr, IDC_ARROW));
-        return TRUE;
+        return;
     }
     SetCursor(LoadCursorW(nullptr, IDC_CROSS));
+}
+
+LRESULT OverlayWindow::On_set_cursor(WPARAM wparam, LPARAM lparam) {
+    if (LOWORD(lparam) != HTCLIENT) {
+        return DefWindowProcW(hwnd_, WM_SETCURSOR, wparam, lparam);
+    }
+    Refresh_cursor();
     return TRUE;
 }
 

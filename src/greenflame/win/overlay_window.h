@@ -67,6 +67,7 @@ class OverlayWindow final {
     LRESULT On_destroy();
     LRESULT On_close();
     LRESULT On_set_cursor(WPARAM wparam, LPARAM lparam);
+    void Refresh_cursor();
 
     IOverlayEvents *events_ = nullptr;
     core::AppConfig *config_ = nullptr;
