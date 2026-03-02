@@ -16,12 +16,17 @@ constexpr int kMagnifierSize = 256;
 constexpr int kMagnifierZoom = 8; // source size = kMagnifierSize / kMagnifierZoom
 constexpr int kMagnifierSource = kMagnifierSize / kMagnifierZoom; // 32
 constexpr int kMagnifierPadding = 8;
+static_assert((kMagnifierZoom % 2) == 0,
+              "Magnifier zoom must be even for centered pixel alignment.");
 // Magnifier crosshair and contour: 66% opaque.
 constexpr unsigned char kMagnifierCrosshairAlpha = 168; // 255 * 66 / 100
 // Greenshot-style: thick cross with white contour, center gap, margin from edge.
 constexpr int kMagnifierCrosshairThickness = 8;
 constexpr int kMagnifierCrosshairGap = 20;   // center to inner arm end
 constexpr int kMagnifierCrosshairMargin = 8; // circle edge to outer arm end
+static_assert(kMagnifierCrosshairThickness == kMagnifierZoom,
+              "Magnifier crosshair thickness must match one magnified pixel.");
+constexpr Gdiplus::REAL kMagnifierBorderWidth = 1.5f;
 constexpr int kMagnifierCheckerTile = 16;
 constexpr COLORREF kMagnifierCheckerLight = RGB(224, 224, 224);
 constexpr COLORREF kMagnifierCheckerDark = RGB(168, 168, 168);
@@ -61,13 +66,20 @@ void Draw_dashed_rect_border(HDC dc, HPEN pen, int left, int top, int right,
 
 void Blend_magnifier_crosshair_onto_pixels(std::span<uint8_t> pixels, int width,
                                            int height, int row_bytes, int mag_left,
-                                           int mag_top) noexcept {
+                                           int mag_top, int crosshair_left,
+                                           int crosshair_top) noexcept {
     int const size = kMagnifierSize;
-    int const center = size / 2;
-    int const radius_sq = center * center;
+    int const circle_center = size / 2;
+    int const radius_sq = circle_center * circle_center;
     int const half = kMagnifierCrosshairThickness / 2;
     int const gap = kMagnifierCrosshairGap;
     int const margin = kMagnifierCrosshairMargin;
+    int const arm_left =
+        std::clamp(crosshair_left, 0, size - kMagnifierCrosshairThickness);
+    int const arm_top =
+        std::clamp(crosshair_top, 0, size - kMagnifierCrosshairThickness);
+    int const center_x = arm_left + half;
+    int const center_y = arm_top + half;
     float const a = static_cast<float>(kMagnifierCrosshairAlpha) / 255.f;
     float const ia = 1.f - a;
 
@@ -76,10 +88,14 @@ void Blend_magnifier_crosshair_onto_pixels(std::span<uint8_t> pixels, int width,
         int x0, y0, x1, y1;
     };
     Arm const arms[4] = {
-        {center - half, margin, center + half, center - gap},        // top
-        {center - half, center + gap, center + half, size - margin}, // bottom
-        {margin, center - half, center - gap, center + half},        // left
-        {center + gap, center - half, size - margin, center + half}, // right
+        {arm_left, margin, arm_left + kMagnifierCrosshairThickness,
+         center_y - gap}, // top
+        {arm_left, center_y + gap, arm_left + kMagnifierCrosshairThickness,
+         size - margin}, // bottom
+        {margin, arm_top, center_x - gap,
+         arm_top + kMagnifierCrosshairThickness}, // left
+        {center_x + gap, arm_top, size - margin,
+         arm_top + kMagnifierCrosshairThickness}, // right
     };
 
     int const sy0 = std::max(0, mag_top);
@@ -89,12 +105,14 @@ void Blend_magnifier_crosshair_onto_pixels(std::span<uint8_t> pixels, int width,
 
     for (int y = sy0; y < sy1; ++y) {
         int const iy = y - mag_top;
-        int const dy_sq = (iy - center) * (iy - center);
+        int const dy_sq = (iy - circle_center) * (iy - circle_center);
         size_t const row_offset =
             static_cast<size_t>(y) * static_cast<size_t>(row_bytes);
         for (int x = sx0; x < sx1; ++x) {
             int const ix = x - mag_left;
-            if ((ix - center) * (ix - center) + dy_sq > radius_sq) continue;
+            if ((ix - circle_center) * (ix - circle_center) + dy_sq > radius_sq) {
+                continue;
+            }
 
             // Classify: inside an arm (black) or on its 1px contour (white)?
             bool on_arm = false;
@@ -129,8 +147,8 @@ void Blend_magnifier_crosshair_onto_pixels(std::span<uint8_t> pixels, int width,
     }
 }
 
-void Fill_magnifier_checkerboard(HDC dc, int left, int top, int src_x,
-                                 int src_y) noexcept {
+void Fill_magnifier_checkerboard(HDC dc, int left, int top, int src_x, int src_y,
+                                 int dst_offset_x, int dst_offset_y) noexcept {
     HBRUSH const dc_brush = static_cast<HBRUSH>(GetStockObject(DC_BRUSH));
     if (!dc_brush) {
         RECT fallback = {left, top, left + kMagnifierSize, top + kMagnifierSize};
@@ -148,8 +166,9 @@ void Fill_magnifier_checkerboard(HDC dc, int left, int top, int src_x,
     // src, so the first partial tile is half-width).
     int const tile_sx0 = src_x & ~1; // even source pixel at or before src_x
     int const tile_sy0 = src_y & ~1;
-    int const mx0 = (tile_sx0 - src_x) * kMagnifierZoom; // 0 or -kMagnifierZoom
-    int const my0 = (tile_sy0 - src_y) * kMagnifierZoom;
+    int const mx0 =
+        (tile_sx0 - src_x) * kMagnifierZoom + dst_offset_x; // shifted sample origin
+    int const my0 = (tile_sy0 - src_y) * kMagnifierZoom + dst_offset_y;
     int const base_tx = tile_sx0 / 2; // tile index of the first tile
     int const base_ty = tile_sy0 / 2;
 
@@ -173,6 +192,47 @@ void Fill_magnifier_checkerboard(HDC dc, int left, int top, int src_x,
             FillRect(dc, &cell, dc_brush);
         }
     }
+}
+
+[[nodiscard]] COLORREF Get_pen_color_or_fallback(HPEN pen, COLORREF fallback) noexcept {
+    if (!pen) {
+        return fallback;
+    }
+    LOGPEN log_pen = {};
+    if (GetObjectW(pen, static_cast<int>(sizeof(log_pen)), &log_pen) ==
+        static_cast<int>(sizeof(log_pen))) {
+        return log_pen.lopnColor;
+    }
+    return fallback;
+}
+
+[[nodiscard]] bool Ensure_gdiplus() noexcept {
+    static ULONG_PTR token = 0;
+    static bool ok = false;
+    if (!ok) {
+        Gdiplus::GdiplusStartupInput input;
+        ok = Gdiplus::GdiplusStartup(&token, &input, nullptr) == Gdiplus::Ok;
+    }
+    return ok;
+}
+
+void Draw_antialiased_magnifier_border(HDC dc, int left, int top,
+                                       COLORREF color) noexcept {
+    if (!Ensure_gdiplus()) {
+        return;
+    }
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    Gdiplus::Color const gdip_color(255, GetRValue(color), GetGValue(color),
+                                    GetBValue(color));
+    Gdiplus::Pen pen(gdip_color, kMagnifierBorderWidth);
+    Gdiplus::REAL const inset = kMagnifierBorderWidth / 2.0f;
+    Gdiplus::REAL const x = static_cast<Gdiplus::REAL>(left) + inset;
+    Gdiplus::REAL const y = static_cast<Gdiplus::REAL>(top) + inset;
+    Gdiplus::REAL const d =
+        static_cast<Gdiplus::REAL>(kMagnifierSize) - kMagnifierBorderWidth;
+    (void)graphics.DrawEllipse(&pen, x, y, d, d);
 }
 
 void Draw_capture_to_buffer(HDC buf_dc, HDC hdc, int w, int h,
@@ -296,7 +356,8 @@ void Draw_selection_dim_and_border(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
         return false;
     }
 
-    HRGN target_region = CreateRectRgn(target.left, target.top, target.right, target.bottom);
+    HRGN target_region =
+        CreateRectRgn(target.left, target.top, target.right, target.bottom);
     if (!target_region) {
         return false;
     }
@@ -357,8 +418,7 @@ constexpr int kDimMargin = 4;
 constexpr int kDimGap = 4;
 constexpr int kCenterMinPadding = 24;
 
-void Measure_text_size(HDC dc, HFONT font, std::wstring const &text,
-                       SIZE &text_size) {
+void Measure_text_size(HDC dc, HFONT font, std::wstring const &text, SIZE &text_size) {
     text_size = {};
     if (font == nullptr) {
         return;
@@ -434,8 +494,7 @@ void Compute_side_label_positions(DimLabelPositions &p, HDC dc,
 
 void Compute_center_label_position(DimLabelPositions &p, HDC dc,
                                    greenflame::core::RectPx const &sel, int center_x,
-                                   int center_y,
-                                   std::wstring const &center_str,
+                                   int center_y, std::wstring const &center_str,
                                    HFONT font_center) {
     if (font_center == nullptr) {
         p.draw_center_box = false;
@@ -472,20 +531,22 @@ void Compute_help_label_position(
     p.help_box_h = help_size.cy + 2 * kDimMargin;
     bool const selection_wide_enough = (sel.Width() >= p.help_box_w);
     p.help_box_left = sel.right - p.help_box_w;
-    greenflame::core::RectPx const below_candidate = greenflame::core::RectPx::From_ltrb(
-        p.help_box_left, sel.bottom + kDimGap, p.help_box_left + p.help_box_w,
-        sel.bottom + kDimGap + p.help_box_h);
-    greenflame::core::RectPx const above_candidate = greenflame::core::RectPx::From_ltrb(
-        p.help_box_left, sel.top - kDimGap - p.help_box_h, p.help_box_left + p.help_box_w,
-        sel.top - kDimGap);
+    greenflame::core::RectPx const below_candidate =
+        greenflame::core::RectPx::From_ltrb(p.help_box_left, sel.bottom + kDimGap,
+                                            p.help_box_left + p.help_box_w,
+                                            sel.bottom + kDimGap + p.help_box_h);
+    greenflame::core::RectPx const above_candidate =
+        greenflame::core::RectPx::From_ltrb(
+            p.help_box_left, sel.top - kDimGap - p.help_box_h,
+            p.help_box_left + p.help_box_w, sel.top - kDimGap);
 
     auto const box_fits = [&](greenflame::core::RectPx const &candidate) {
         if (!monitor_rects_client.empty()) {
             return Rect_fully_covered_by_monitors(candidate, monitor_rects_client);
         }
         greenflame::core::RectPx const normalized = candidate.Normalized();
-        return normalized.left >= 0 && normalized.top >= 0 &&
-               normalized.right <= w && normalized.bottom <= h;
+        return normalized.left >= 0 && normalized.top >= 0 && normalized.right <= w &&
+               normalized.bottom <= h;
     };
 
     bool const fits_below = box_fits(below_candidate);
@@ -521,14 +582,12 @@ static DimLabelPositions Compute_dim_label_positions(
     return p;
 }
 
-void Draw_dimension_labels(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
-                           greenflame::core::RectPx const &sel,
-                           std::span<const greenflame::core::RectPx> monitor_rects_client,
-                           std::span<uint8_t> pixels,
-                           greenflame::PaintResources const *res,
-                           bool show_selection_size_side_labels,
-                           bool show_selection_size_center_label,
-                           bool show_help_hint_requested) {
+void Draw_dimension_labels(
+    HDC buf_dc, HBITMAP buf_bmp, int w, int h, greenflame::core::RectPx const &sel,
+    std::span<const greenflame::core::RectPx> monitor_rects_client,
+    std::span<uint8_t> pixels, greenflame::PaintResources const *res,
+    bool show_selection_size_side_labels, bool show_selection_size_center_label,
+    bool show_help_hint_requested) {
     constexpr int k_dim_margin = 4;
     constexpr wchar_t k_help_hint_text[] = L"Ctrl-H for Help";
     bool const show_help_hint =
@@ -563,10 +622,9 @@ void Draw_dimension_labels(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
         std::wstring const center_str = width_str + L" x " + height_str;
         std::wstring const help_str = k_help_hint_text;
 
-        DimLabelPositions const p =
-            Compute_dim_label_positions(buf_dc, sel, w, h, width_str, height_str,
-                                        center_str, help_str, font_dim, font_center,
-                                        font_help_hint, monitor_rects_client);
+        DimLabelPositions const p = Compute_dim_label_positions(
+            buf_dc, sel, w, h, width_str, height_str, center_str, help_str, font_dim,
+            font_center, font_help_hint, monitor_rects_client);
         SelectObject(buf_dc, base_font);
 
         // Pixel blending for box backgrounds.
@@ -668,10 +726,13 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
                            std::span<uint8_t> pixels,
                            greenflame::PaintResources const *res,
                            greenflame::GdiCaptureResult const *capture) {
+    constexpr int kMagnifierHalfZoom = kMagnifierZoom / 2;
     int const src_x = cx - kMagnifierSource / 2;
     int const src_y = cy - kMagnifierSource / 2;
-    int const src_right = src_x + kMagnifierSource;
-    int const src_bottom = src_y + kMagnifierSource;
+    int const src_right = src_x + kMagnifierSource + 1;
+    int const src_bottom = src_y + kMagnifierSource + 1;
+    int const crosshair_left = (cx - src_x) * kMagnifierZoom - kMagnifierHalfZoom;
+    int const crosshair_top = (cy - src_y) * kMagnifierZoom - kMagnifierHalfZoom;
     // Clamp sample to the full capture (virtual desktop) extent so that pixels
     // from adjacent monitors are shown rather than producing a checkered gap.
     // Monitor bounds are only used for magnifier *placement* below.
@@ -717,10 +778,13 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
                                  mag_top + kMagnifierSize);
     if (rgn) {
         SelectClipRgn(buf_dc, rgn);
-        Fill_magnifier_checkerboard(buf_dc, mag_left, mag_top, src_x, src_y);
+        Fill_magnifier_checkerboard(buf_dc, mag_left, mag_top, src_x, src_y,
+                                    -kMagnifierHalfZoom, -kMagnifierHalfZoom);
         if (source_has_coverage) {
-            int const dst_left = mag_left + (sample_left - src_x) * kMagnifierZoom;
-            int const dst_top = mag_top + (sample_top - src_y) * kMagnifierZoom;
+            int const dst_left =
+                mag_left + (sample_left - src_x) * kMagnifierZoom - kMagnifierHalfZoom;
+            int const dst_top =
+                mag_top + (sample_top - src_y) * kMagnifierZoom - kMagnifierHalfZoom;
             int const dst_w = (sample_right - sample_left) * kMagnifierZoom;
             int const dst_h = (sample_bottom - sample_top) * kMagnifierZoom;
             SetStretchBltMode(buf_dc, COLORONCOLOR);
@@ -741,15 +805,10 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
             }
         }
         SelectClipRgn(buf_dc, nullptr);
+        COLORREF const border_color = Get_pen_color_or_fallback(
+            res ? res->border_pen : nullptr, greenflame::kBorderColor);
+        Draw_antialiased_magnifier_border(buf_dc, mag_left, mag_top, border_color);
         DeleteObject(rgn);
-    }
-    HPEN mag_border_pen = res ? res->border_pen : nullptr;
-    if (mag_border_pen) {
-        HGDIOBJ old_pen = SelectObject(buf_dc, mag_border_pen);
-        SelectObject(buf_dc, GetStockObject(NULL_BRUSH));
-        Ellipse(buf_dc, mag_left, mag_top, mag_left + kMagnifierSize,
-                mag_top + kMagnifierSize);
-        SelectObject(buf_dc, old_pen);
     }
 
     // DIB round-trip to blend crosshair pixels inside the magnifier circle.
@@ -761,7 +820,8 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
         if (GetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
                       reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS) != 0) {
             Blend_magnifier_crosshair_onto_pixels(pixels, w, h, row_bytes, mag_left,
-                                                  mag_top);
+                                                  mag_top, crosshair_left,
+                                                  crosshair_top);
             SetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
                       reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
         }
