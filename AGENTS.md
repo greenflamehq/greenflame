@@ -1,8 +1,8 @@
-# AGENTS — Project Greenflame
+# AGENTS - Project Greenflame
 
-This repository builds **greenflame.exe**, a Windows-only screenshot and annotation tool.
+This repository builds `greenflame.exe`, a Windows-only screenshot and annotation tool.
 
-Agents interacting with this repo MUST follow the build, test, and architectural rules below.
+Agents MUST follow this file and the authoritative docs linked below.
 
 ---
 
@@ -11,141 +11,104 @@ Agents interacting with this repo MUST follow the build, test, and architectural
 Greenflame is a high-correctness screenshot tool designed for:
 
 - mixed-DPI, multi-monitor Windows setups
-- capture-first region selection (GDI capture, then overlay to select and crop)
+- capture-first region selection (capture, then overlay selection)
 - optional in-place annotation
 - optional CLI mode
 
-Correctness (especially DPI and coordinates) takes priority over convenience.
+Correctness, especially DPI and coordinate behavior, takes priority over convenience.
 
-Inspired by:
+---
 
-- Greenshot (capture and multi-monitor support)
-- Flameshot (in-place annotation and CLI)
-- Microsoft Snipping Tool (multi-monitor selection rules)
+## Authoritative Docs
+
+- [docs/build.md](docs/build.md): configure/build/lint/static-analysis expectations
+- [docs/testing.md](docs/testing.md): test philosophy, build/run commands, and policy
+- [README.md](README.md): user-facing behavior, CLI semantics, and exit code table
+
+Before considering any task complete:
+
+- all required builds in `docs/build.md` must pass
+- all required test runs in `docs/testing.md` must pass
 
 ---
 
 ## Platform & Toolchain (authoritative)
 
 - OS: **Windows 11**
-- Compiler: **MSVC (Visual Studio 2026 (18.2.1 or later))**; **Clang (clang-cl)** is supported as an alternative when the Visual Studio "C++ Clang compiler for Windows" component is installed. MSVC remains the primary compiler.
+- Compiler: **MSVC (Visual Studio 2026 (18.2.1 or later))** (primary), **Clang (clang-cl)** supported
 - Build system: **CMake**
 - Generator: **Ninja** (preferred) or **Visual Studio**
 - Language standard: **C++20**
-- IDE/editor: Cursor, Visual Studio, or CLI
 
 ---
 
 ## Repository Structure (authoritative)
 
 - `src/greenflame/`
-    Win32 GUI application (overlay, rendering, capture glue)
+  Win32 application shell and OS integration
+  - `main.cpp`: process entry, CLI parse handoff, single-instance tray guard
+  - `greenflame_app.*`: app lifecycle, message loop, wiring between UI events and controllers
+  - `win/`: Win32 adapter layer (window classes, tray/overlay UI, GDI capture/paint, file dialogs/startup, concrete service implementations)
 
 - `src/greenflame_core/`
-    **Pure, testable core logic** (NO Win32 UI, NO rendering)
-  - geometry types (`*Px`, `*Dip`)
-  - coordinate conversions
-  - selection rules
-  - annotation and undo/redo models
+  Testable core logic and controller policies
+  - geometry/rect and monitor rules
+  - selection and overlay interaction state machine
+  - output path and save policy logic
+  - CLI/application orchestration via injected service interfaces
 
 - `tests/`
-    Unit tests for `greenflame_core` only
+  GoogleTest unit coverage for `greenflame_core` behavior using mocks/fakes for service interfaces
+
+- `docs/`
+  Authoritative build and testing instructions, plus focused design notes
 
 ---
 
-## Build & Test Execution (MANDATORY)
+## Architecture Notes
 
-Build and test commands have been moved to docs:
+Greenflame is controller-centric rather than strict MVC.
 
-- [docs/build.md](docs/build.md) for configure/build/analysis/lint expectations
-- [docs/testing.md](docs/testing.md) for test build/run commands, framework, and test policy
-
-These docs are authoritative for execution steps and command lines.
-
-Before considering a task complete:
-
-- all required builds in [docs/build.md](docs/build.md) must pass
-- all required test runs in [docs/testing.md](docs/testing.md) must pass
-
-### Build runner reliability rule (Ninja + Codex runner)
-
-When builds are launched through the Codex command runner, `pwsh.exe` may intermittently hang at 0% CPU while `cmake`/`ninja` appear idle.
-
-- In **sandboxed** Codex runs, run build/test commands **sequentially**.
-- In **non-sandboxed** runs, parallel builds are allowed.
-- Use a **20-second timeout** for each sandboxed build/test command.
-- Prefer running build/test commands **outside sandbox restrictions** when possible.
-- If a run hangs, terminate the stuck **`pwsh.exe`** process and rerun.
+- `greenflame_core::AppController` owns capture/save/CLI orchestration and policy decisions.
+- `greenflame_core::OverlayController` owns overlay interaction state and action decisions.
+- `src/greenflame/win/` owns Win32-specific adapters and concrete service implementations.
+- `OverlayWindow` and `TrayWindow` translate Win32 events into controller calls and apply returned actions.
+- Keep as much behavior as possible in core; keep OS/UI code in `greenflame`.
+- Prefer OOP and encapsulation with clear ownership/lifecycle boundaries over global/procedural state.
 
 ---
 
-## Unit Test Policy (MANDATORY)
-
-See **[docs/testing.md](docs/testing.md)** — authoritative for philosophy, framework, what
-requires tests, and how to write them.
-
-Non-negotiables (repeated here for visibility):
-
-- Tests MUST pass before any task is considered complete
-- Do not move testable orchestration logic into the `greenflame` GUI executable
-- Tests must never link against `greenflame` directly
-- Tests should link against `greenflame_core` and `greenflame_logic` for unit coverage
-
----
-
-## Rendering & Capture Stack (authoritative)
-
-- **Capture:** GDI (desktop DC, CreateDIBSection, BitBlt with CAPTUREBLT) for full virtual-desktop capture. Capture happens once before the overlay is shown (capture-first pattern).
-- **Overlay:** Fullscreen borderless topmost window; drawing via GDI (e.g. BitBlt of captured bitmap, then dim and selection rect). No Direct3D, DirectComposition, or Direct2D in the current path.
-- **Future:** Windows Graphics Capture (WGC) may be added later for capture; overlay may remain GDI-based.
-
----
-
-## DPI & Coordinate Rules (critical)
+## Rendering, DPI, and Coordinate Rules (critical)
 
 - Process is **Per-Monitor DPI Aware v2**
 - Internal coordinate truth is **physical pixels**
 - Explicit types MUST be used:
   - `*Px` for physical pixels
   - `*Dip` for device-independent pixels
-- No implicit conversions
-- DPI conversion happens exactly once, explicitly
+- No implicit coordinate conversions
+- DPI conversion must happen explicitly and in one place per boundary crossing
 
-Breaking these rules is considered a correctness bug.
+Capture/overlay stack (current):
+
+- Capture: GDI virtual-desktop capture before overlay display (capture-first)
+- Overlay rendering: GDI in a fullscreen borderless topmost window
+- No Direct3D/Direct2D/DirectComposition in the current path
+
+Breaking these rules is a correctness bug.
 
 ---
 
-## Notes for Agents
+## Coding Rules for Agents
 
-- **Do not use `goto`.** Use structured control flow instead (flags, loops with `break`, helper functions, RAII).
-- **Indent with 4 spaces (no tabs).**
-- **Prefer forward declarations over `#include` in header files.** Avoid including headers in other headers whenever possible; use forward declarations for types that are only used as pointers or references. Include the full header only in the `.cpp` that needs the definition.
-- **Do not include standard library headers or Windows headers directly in non-PCH files.** If a new standard/Win32 header is needed, add it to the appropriate precompiled header (`src/greenflame/pch.h`, `src/greenflame_core/pch.h`, or `tests/pch.h`) and consume it through PCH.
-- **Prefer OOP for Win32/UI-side code when ownership or lifecycle boundaries are non-trivial.** Keep API surfaces small and cohesive; separate responsibilities into focused objects instead of accumulating procedural/global state.
-- Do not introduce third-party libraries without explicit justification
-- Do not bypass or “simplify” DPI logic
-- Do not move testable logic into the GUI executable
-- Prefer failing loudly over silently doing the wrong thing
-- When unsure, preserve correctness over convenience
-- Keep process/CLI exit codes in a single enum with globally unique numeric values (no reuse). When codes change, update the README exit-code table in the command-line section.
-- Your main instinct should be to debug issues and find problems' root causes rather than introduce new abstractions or code paths, or changing the architecture or existing code.
-
-### Avoiding Clang `-Wunsafe-buffer-usage-in-libc-call` warnings
-
-When building with Clang (clang-cl), prefer C++ standard library APIs over raw libc calls to avoid `-Wunsafe-buffer-usage-in-libc-call`:
-
-- **`swprintf_s`** → Use `std::to_wstring` and string concatenation. For zero-padded integers (e.g. `%04u`, `%02u`), use a small helper that pads with `std::wstring(width - s.size(), L'0') + s`.
-- **`memcpy`** → Use `std::copy_n` or `std::copy` from `<algorithm>`. For struct-to-buffer copies, use `std::copy_n(reinterpret_cast<uint8_t const *>(&obj), sizeof(obj), dest)`.
-- **`wcschr`** → Use `std::wstring_view(str).find(ch) != std::wstring_view::npos` to test if a character is in a string.
-- **`wcslen`** → Use `std::wstring_view(str).size()` or, when the source is `std::wstring`, `.size()`.
-- **`wcsrchr`** → Use `std::wstring_view(str).rfind(ch)`; returns `std::wstring_view::npos` if not found, otherwise the position.
-- **`wcscmp`** → Use `std::wstring_view(a) == std::wstring_view(b)` for equality; `std::wstring_view` compares correctly with string literals.
-- **`wcscpy_s`** / **`wcsncpy_s`** → Use `std::wstring::copy(dest, count)` (returns chars copied), then `dest[n] = L'\0'`. For fixed literals, use `std::copy_n(std::wstring_view(literal).data(), literal.size(), dest)` then null-terminate.
-
-### Avoiding Clang `-Wunsafe-buffer-usage` (pointer arithmetic and buffer access)
-
-- **`pixels.data() + offset`** / **raw pointer arithmetic** → Use `std::span` indexing instead. Replace `uint8_t *row = pixels.data() + y * row_bytes` and `row[off]` with `size_t row_offset = y * row_bytes` and `pixels[row_offset + off]`. The span carries bounds information.
-- **`argv[i]`** → Wrap in `std::span<LPWSTR>(argv, argc)` so the compiler knows the bounds, then use `argv_span[i]`.
-- **`container.data() + n`** for iterators → Use `container.begin() + n` (e.g. for `std::copy_n` destination or `insert` range).
-- **C-style array with dynamic index** → Use `std::array<T, N>` instead of `T arr[N]` for better bounds awareness.
-
+- Do not use `goto`.
+- Indent with 4 spaces (no tabs).
+- Prefer forward declarations in headers when possible; include full definitions in `.cpp`.
+- Do not include standard library or Windows headers directly in non-PCH files. Add needed headers to the relevant PCH (`src/greenflame/pch.h`, `src/greenflame_core/pch.h`, or `tests/pch.h`).
+- Do not introduce third-party libraries without explicit justification.
+- Do not bypass or simplify DPI logic.
+- Do not move testable orchestration/policy logic into the GUI executable.
+- Prefer failing loudly over silently doing the wrong thing.
+- When unsure, preserve correctness over convenience.
+- Keep process/CLI exit codes in a single enum with globally unique numeric values. If codes change, update the README exit-code table.
+- Debug root causes first; avoid adding new abstractions or code paths without clear need.
+- Clang warning hygiene guidance lives in `docs/build.md`.

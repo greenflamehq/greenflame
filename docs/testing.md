@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-02-24
+last_updated: 2026-03-03
 tags:
   - tests
   - ctest
@@ -59,6 +59,8 @@ For Clang debug builds:
 ```bat
 ctest --test-dir build\x64-debug-clang
 ```
+
+For Codex sandboxed command-runner sessions, follow the Build Runner Reliability policy in [docs/build.md](build.md).
 
 Test must be run and must pass before any task is considered complete. This is a hard requirement.
 

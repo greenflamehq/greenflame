@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-02-21
+last_updated: 2026-03-03
 tags:
   - build
   - cmake
@@ -71,11 +71,42 @@ cmake --preset x64-release-clang
 cmake --build --preset x64-release-clang
 ```
 
+## Build Runner Reliability (Ninja + Codex runner)
+
+When builds are launched through the Codex command runner, `pwsh.exe` can intermittently hang at 0% CPU while `cmake`/`ninja` appear idle.
+
+- In sandboxed Codex runs, execute build and test commands sequentially
+- In non-sandboxed runs, parallel builds are allowed
+- Use a 20-second timeout for each sandboxed build/test command
+- Prefer running build/test commands outside sandbox restrictions when possible
+- If a run hangs, terminate the stuck `pwsh.exe` process and rerun
+
 ## Static analysis and include analysis (non-mandatory)
 
 - **clang-tidy:** `compile_commands.json` is generated in the build dir (from `CMAKE_EXPORT_COMPILE_COMMANDS ON`). Use the Clang preset build dir so include paths and defines match. Example: `clang-tidy -p build\x64-debug-clang src\greenflame\win\gdi_capture.cpp` (and similarly for other sources under `src\greenflame\` and `src\greenflame_core\`).
 - **Include timing:** Clang builds use `-ftime-trace`; the compiler emits `.json` trace files in the build dir. Open them in Chrome's `chrome://tracing` to inspect time spent in includes and in the compiler.
 - **Include What You Use (IWYU)** can use the same `compile_commands.json` for optional include-cleanup suggestions.
+
+## Clang Unsafe-Buffer Warning Guidance
+
+When building with Clang (`clang-cl`), prefer C++ standard library APIs over raw libc and pointer arithmetic patterns that trigger buffer-safety warnings.
+
+### Avoiding `-Wunsafe-buffer-usage-in-libc-call`
+
+- `swprintf_s`: use `std::to_wstring` and string concatenation. For zero-padded integers (for example `%04u`, `%02u`), pad explicitly with `std::wstring(width - s.size(), L'0') + s`.
+- `memcpy`: use `std::copy_n` or `std::copy`. For struct-to-buffer copies, use `std::copy_n(reinterpret_cast<uint8_t const *>(&obj), sizeof(obj), dest)`.
+- `wcschr`: use `std::wstring_view(str).find(ch) != std::wstring_view::npos`.
+- `wcslen`: use `std::wstring_view(str).size()` or `.size()` for `std::wstring`.
+- `wcsrchr`: use `std::wstring_view(str).rfind(ch)` and compare to `std::wstring_view::npos`.
+- `wcscmp`: use `std::wstring_view(a) == std::wstring_view(b)` for equality checks.
+- `wcscpy_s` / `wcsncpy_s`: use `std::wstring::copy(dest, count)` then null-terminate (`dest[n] = L'\0'`). For fixed literals, use `std::copy_n(std::wstring_view(literal).data(), literal.size(), dest)` then null-terminate.
+
+### Avoiding `-Wunsafe-buffer-usage` (pointer arithmetic and buffer access)
+
+- `pixels.data() + offset` and similar pointer arithmetic: prefer `std::span` indexing (`pixels[row_offset + off]`) over raw pointer math.
+- `argv[i]`: wrap as `std::span<LPWSTR>(argv, argc)` and index the span.
+- `container.data() + n` for iterators: use `container.begin() + n`.
+- C-style arrays with dynamic indices: prefer `std::array<T, N>` over `T arr[N]`.
 
 ## Formatting
 
