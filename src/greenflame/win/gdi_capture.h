@@ -40,4 +40,10 @@ bool Copy_capture_to_clipboard(GdiCaptureResult const &capture, HWND owner_windo
 void Fill_bmi32_top_down(BITMAPINFOHEADER &bmi, int width, int height);
 int Row_bytes32(int width);
 
+// Scales src_bitmap to fit within max_width x max_height (preserving aspect
+// ratio). Returns an HBITMAP the caller must DeleteObject, or nullptr on failure.
+[[nodiscard]] HBITMAP Scale_bitmap_to_thumbnail(HBITMAP src_bitmap, int src_width,
+                                                int src_height, int max_width,
+                                                int max_height);
+
 } // namespace greenflame

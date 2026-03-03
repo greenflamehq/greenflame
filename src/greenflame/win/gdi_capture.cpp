@@ -227,4 +227,46 @@ bool Copy_capture_to_clipboard(GdiCaptureResult const &capture, HWND owner_windo
     return copied_to_clipboard;
 }
 
+HBITMAP Scale_bitmap_to_thumbnail(HBITMAP src_bitmap, int src_width, int src_height,
+                                  int max_width, int max_height) {
+    float const scale_w = static_cast<float>(max_width) / static_cast<float>(src_width);
+    float const scale_h =
+        static_cast<float>(max_height) / static_cast<float>(src_height);
+    float scale = (std::min)(scale_w, scale_h);
+    if (scale > 1.0f) {
+        scale = 1.0f;
+    }
+    int const tw = std::max(1, static_cast<int>(static_cast<float>(src_width) * scale));
+    int const th =
+        std::max(1, static_cast<int>(static_cast<float>(src_height) * scale));
+    HBITMAP result = nullptr;
+    HDC const screen_dc = GetDC(nullptr);
+    if (screen_dc != nullptr) {
+        HDC const src_dc = CreateCompatibleDC(screen_dc);
+        HDC const dst_dc = CreateCompatibleDC(screen_dc);
+        result = CreateCompatibleBitmap(screen_dc, tw, th);
+        if (src_dc != nullptr && dst_dc != nullptr && result != nullptr) {
+            HGDIOBJ const old_src = SelectObject(src_dc, src_bitmap);
+            HGDIOBJ const old_dst = SelectObject(dst_dc, result);
+            SetStretchBltMode(dst_dc, HALFTONE);
+            SetBrushOrgEx(dst_dc, 0, 0, nullptr);
+            StretchBlt(dst_dc, 0, 0, tw, th, src_dc, 0, 0, src_width, src_height,
+                       SRCCOPY);
+            SelectObject(dst_dc, old_dst);
+            SelectObject(src_dc, old_src);
+        } else if (result != nullptr) {
+            DeleteObject(result);
+            result = nullptr;
+        }
+        if (dst_dc != nullptr) {
+            DeleteDC(dst_dc);
+        }
+        if (src_dc != nullptr) {
+            DeleteDC(src_dc);
+        }
+        ReleaseDC(nullptr, screen_dc);
+    }
+    return result;
+}
+
 } // namespace greenflame

@@ -2,6 +2,8 @@
 
 #include "win/save_image.h"
 
+#include "greenflame_core/save_image_policy.h"
+
 #pragma comment(lib, "Windowscodecs.lib")
 
 namespace greenflame {
@@ -142,6 +144,17 @@ bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
 
 bool Save_capture_to_png(GdiCaptureResult const &capture, wchar_t const *path) {
     return Save_capture_via_wic(capture, path, GUID_ContainerFormatPng);
+}
+
+bool Save_capture_to_file(GdiCaptureResult const &capture, wchar_t const *path,
+                          core::ImageSaveFormat format) {
+    if (format == core::ImageSaveFormat::Jpeg) {
+        return Save_capture_to_jpeg(capture, path);
+    }
+    if (format == core::ImageSaveFormat::Bmp) {
+        return Save_capture_to_bmp(capture, path);
+    }
+    return Save_capture_to_png(capture, path);
 }
 
 bool Save_capture_to_jpeg(GdiCaptureResult const &capture, wchar_t const *path) {

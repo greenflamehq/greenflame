@@ -336,16 +336,6 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
 }
 
 [[nodiscard]] CliOptionSpec const *
-Find_option_by_long_name_any(std::wstring_view name) noexcept {
-    for (CliOptionSpec const &spec : kCliOptionSpecs) {
-        if (spec.long_name != nullptr && name == spec.long_name) {
-            return &spec;
-        }
-    }
-    return nullptr;
-}
-
-[[nodiscard]] CliOptionSpec const *
 Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
     for (CliOptionSpec const &spec : kCliOptionSpecs) {
         if (spec.short_name == L'\0') {
@@ -531,7 +521,7 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
 
     CliOptionSpec const *spec = Find_option_by_long_name(name_view, debug_build);
     if (spec == nullptr) {
-        CliOptionSpec const *all_build_spec = Find_option_by_long_name_any(name_view);
+        CliOptionSpec const *all_build_spec = Find_option_by_long_name(name_view, true);
         if (all_build_spec != nullptr && all_build_spec->debug_only && !debug_build) {
             std::wstring message = L"Option is only available in debug builds: --";
             message += std::wstring(name_view);

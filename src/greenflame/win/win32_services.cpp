@@ -201,14 +201,8 @@ bool Win32CaptureService::Save_rect_to_file(core::RectPx screen_rect,
     }
 
     std::wstring const output_path(path);
-    bool saved = false;
-    if (format == core::ImageSaveFormat::Jpeg) {
-        saved = greenflame::Save_capture_to_jpeg(cropped, output_path.c_str());
-    } else if (format == core::ImageSaveFormat::Bmp) {
-        saved = greenflame::Save_capture_to_bmp(cropped, output_path.c_str());
-    } else {
-        saved = greenflame::Save_capture_to_png(cropped, output_path.c_str());
-    }
+    bool const saved =
+        greenflame::Save_capture_to_file(cropped, output_path.c_str(), format);
     cropped.Free();
     return saved;
 }

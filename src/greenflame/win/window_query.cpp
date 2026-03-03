@@ -19,6 +19,10 @@ namespace {
     return !Is_empty_rect(out_rect);
 }
 
+[[nodiscard]] bool Is_visible_top_level_window(HWND hwnd) noexcept {
+    return IsWindowVisible(hwnd) && GetParent(hwnd) == nullptr;
+}
+
 [[nodiscard]] bool Is_fully_occluded(RECT const &target,
                                      std::vector<RECT> const &occluders) noexcept {
     if (occluders.empty()) {
@@ -73,16 +77,9 @@ std::optional<HWND> Win32WindowQuery::Get_window_under_cursor(POINT screen_pt,
         hwnd = GetTopWindow(nullptr);
     }
     while (hwnd != nullptr) {
-        if (!IsWindowVisible(hwnd)) {
-            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-            continue;
-        }
-        if (GetParent(hwnd) != nullptr) {
-            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-            continue;
-        }
         RECT rect{};
-        if (Try_get_window_bounds(hwnd, rect) && PtInRect(&rect, screen_pt)) {
+        if (Is_visible_top_level_window(hwnd) && Try_get_window_bounds(hwnd, rect) &&
+            PtInRect(&rect, screen_pt)) {
             return hwnd;
         }
         hwnd = GetWindow(hwnd, GW_HWNDNEXT);
@@ -147,26 +144,16 @@ void Win32WindowQuery::Get_visible_top_level_window_rects(
     HWND hwnd = GetWindow(exclude_hwnd, GW_HWNDNEXT);
     std::vector<RECT> occluders;
     while (hwnd != nullptr) {
-        if (!IsWindowVisible(hwnd)) {
-            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-            continue;
-        }
-        if (GetParent(hwnd) != nullptr) {
-            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-            continue;
-        }
         RECT rect{};
-        if (!Try_get_window_bounds(hwnd, rect)) {
-            hwnd = GetWindow(hwnd, GW_HWNDNEXT);
-            continue;
+        if (Is_visible_top_level_window(hwnd) && Try_get_window_bounds(hwnd, rect)) {
+            if (!Is_fully_occluded(rect, occluders)) {
+                out.push_back(greenflame::core::RectPx::From_ltrb(
+                    static_cast<int32_t>(rect.left), static_cast<int32_t>(rect.top),
+                    static_cast<int32_t>(rect.right),
+                    static_cast<int32_t>(rect.bottom)));
+            }
+            occluders.push_back(rect);
         }
-
-        if (!Is_fully_occluded(rect, occluders)) {
-            out.push_back(greenflame::core::RectPx::From_ltrb(
-                static_cast<int32_t>(rect.left), static_cast<int32_t>(rect.top),
-                static_cast<int32_t>(rect.right), static_cast<int32_t>(rect.bottom)));
-        }
-        occluders.push_back(rect);
         hwnd = GetWindow(hwnd, GW_HWNDNEXT);
     }
 }
@@ -212,13 +199,13 @@ WindowObscuration Win32WindowQuery::Get_window_obscuration(HWND hwnd) const {
         }
     }
 
+    if (!has_overlap) {
+        return WindowObscuration::None;
+    }
     if (Is_fully_occluded(target_rect, occluders)) {
         return WindowObscuration::Full;
     }
-    if (has_overlap) {
-        return WindowObscuration::Partial;
-    }
-    return WindowObscuration::None;
+    return WindowObscuration::Partial;
 }
 
 } // namespace greenflame

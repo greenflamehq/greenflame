@@ -1,6 +1,7 @@
 #include "greenflame_app.h"
 #include "app_config_store.h"
 #include "console_output.h"
+#include "win/gdi_capture.h"
 #include "win/startup_launch.h"
 
 namespace {
@@ -14,60 +15,16 @@ constexpr wchar_t kStartupToggleFailedMessage[] =
     if (OpenClipboard(nullptr) == 0) {
         return nullptr;
     }
-    HBITMAP clip_bmp = static_cast<HBITMAP>(GetClipboardData(CF_BITMAP));
-    if (clip_bmp == nullptr) {
-        CloseClipboard();
-        return nullptr;
-    }
-    BITMAP bm{};
-    if (GetObject(clip_bmp, sizeof(bm), &bm) == 0 || bm.bmWidth <= 0 ||
-        bm.bmHeight <= 0) {
-        CloseClipboard();
-        return nullptr;
-    }
-
-    float const scale_w =
-        static_cast<float>(kThumbnailMaxWidth) / static_cast<float>(bm.bmWidth);
-    float const scale_h =
-        static_cast<float>(kThumbnailMaxHeight) / static_cast<float>(bm.bmHeight);
-    float scale = (std::min)(scale_w, scale_h);
-    if (scale > 1.0f) {
-        scale = 1.0f;
-    }
-    int thumb_w = static_cast<int>(static_cast<float>(bm.bmWidth) * scale);
-    int thumb_h = static_cast<int>(static_cast<float>(bm.bmHeight) * scale);
-    if (thumb_w <= 0) {
-        thumb_w = 1;
-    }
-    if (thumb_h <= 0) {
-        thumb_h = 1;
-    }
+    HBITMAP const clip_bmp = static_cast<HBITMAP>(GetClipboardData(CF_BITMAP));
     HBITMAP result = nullptr;
-    HDC const screen_dc = GetDC(nullptr);
-    if (screen_dc != nullptr) {
-        HDC const src_dc = CreateCompatibleDC(screen_dc);
-        HDC const dst_dc = CreateCompatibleDC(screen_dc);
-        result = CreateCompatibleBitmap(screen_dc, thumb_w, thumb_h);
-        if (src_dc != nullptr && dst_dc != nullptr && result != nullptr) {
-            HGDIOBJ const old_src = SelectObject(src_dc, clip_bmp);
-            HGDIOBJ const old_dst = SelectObject(dst_dc, result);
-            SetStretchBltMode(dst_dc, HALFTONE);
-            SetBrushOrgEx(dst_dc, 0, 0, nullptr);
-            StretchBlt(dst_dc, 0, 0, thumb_w, thumb_h, src_dc, 0, 0, bm.bmWidth,
-                       bm.bmHeight, SRCCOPY);
-            SelectObject(dst_dc, old_dst);
-            SelectObject(src_dc, old_src);
-        } else if (result != nullptr) {
-            DeleteObject(result);
-            result = nullptr;
+    if (clip_bmp != nullptr) {
+        BITMAP bm{};
+        if (GetObject(clip_bmp, sizeof(bm), &bm) != 0 && bm.bmWidth > 0 &&
+            bm.bmHeight > 0) {
+            result = greenflame::Scale_bitmap_to_thumbnail(
+                clip_bmp, bm.bmWidth, bm.bmHeight, kThumbnailMaxWidth,
+                kThumbnailMaxHeight);
         }
-        if (dst_dc != nullptr) {
-            DeleteDC(dst_dc);
-        }
-        if (src_dc != nullptr) {
-            DeleteDC(src_dc);
-        }
-        ReleaseDC(nullptr, screen_dc);
     }
     CloseClipboard();
     return result;

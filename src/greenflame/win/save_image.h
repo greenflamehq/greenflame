@@ -4,11 +4,19 @@
 
 #include "win/gdi_capture.h"
 
+namespace greenflame::core {
+enum class ImageSaveFormat : uint8_t;
+} // namespace greenflame::core
+
 namespace greenflame {
 
 // Writes the capture to PNG or JPEG. Path is UTF-16 (wchar_t).
 bool Save_capture_to_png(GdiCaptureResult const &capture, wchar_t const *path);
 bool Save_capture_to_jpeg(GdiCaptureResult const &capture, wchar_t const *path);
+
+// Dispatches to the appropriate encoder based on format.
+bool Save_capture_to_file(GdiCaptureResult const &capture, wchar_t const *path,
+                          core::ImageSaveFormat format);
 
 // Atomically reserves a writable file path. The returned file path exists
 // (created as an empty placeholder) and is unique at reservation time.

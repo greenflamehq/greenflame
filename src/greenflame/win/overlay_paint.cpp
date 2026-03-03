@@ -781,8 +781,8 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
         Fill_magnifier_checkerboard(buf_dc, mag_left, mag_top, src_x, src_y,
                                     -k_magnifier_half_zoom, -k_magnifier_half_zoom);
         if (source_has_coverage) {
-            int const dst_left =
-                mag_left + (sample_left - src_x) * kMagnifierZoom - k_magnifier_half_zoom;
+            int const dst_left = mag_left + (sample_left - src_x) * kMagnifierZoom -
+                                 k_magnifier_half_zoom;
             int const dst_top =
                 mag_top + (sample_top - src_y) * kMagnifierZoom - k_magnifier_half_zoom;
             int const dst_w = (sample_right - sample_left) * kMagnifierZoom;

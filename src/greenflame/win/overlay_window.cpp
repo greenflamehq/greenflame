@@ -32,51 +32,9 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     if (!capture.Is_valid()) {
         return nullptr;
     }
-
-    float const scale_w =
-        static_cast<float>(kThumbnailMaxWidth) / static_cast<float>(capture.width);
-    float const scale_h =
-        static_cast<float>(kThumbnailMaxHeight) / static_cast<float>(capture.height);
-    float scale = (std::min)(scale_w, scale_h);
-    if (scale > 1.0f) {
-        scale = 1.0f;
-    }
-    int tw = static_cast<int>(static_cast<float>(capture.width) * scale);
-    int th = static_cast<int>(static_cast<float>(capture.height) * scale);
-    if (tw <= 0) {
-        tw = 1;
-    }
-    if (th <= 0) {
-        th = 1;
-    }
-    HBITMAP result = nullptr;
-    HDC const screen_dc = GetDC(nullptr);
-    if (screen_dc != nullptr) {
-        HDC const src_dc = CreateCompatibleDC(screen_dc);
-        HDC const dst_dc = CreateCompatibleDC(screen_dc);
-        result = CreateCompatibleBitmap(screen_dc, tw, th);
-        if (src_dc != nullptr && dst_dc != nullptr && result != nullptr) {
-            HGDIOBJ const old_src = SelectObject(src_dc, capture.bitmap);
-            HGDIOBJ const old_dst = SelectObject(dst_dc, result);
-            SetStretchBltMode(dst_dc, HALFTONE);
-            SetBrushOrgEx(dst_dc, 0, 0, nullptr);
-            StretchBlt(dst_dc, 0, 0, tw, th, src_dc, 0, 0, capture.width,
-                       capture.height, SRCCOPY);
-            SelectObject(dst_dc, old_dst);
-            SelectObject(src_dc, old_src);
-        } else if (result != nullptr) {
-            DeleteObject(result);
-            result = nullptr;
-        }
-        if (dst_dc != nullptr) {
-            DeleteDC(dst_dc);
-        }
-        if (src_dc != nullptr) {
-            DeleteDC(src_dc);
-        }
-        ReleaseDC(nullptr, screen_dc);
-    }
-    return result;
+    return greenflame::Scale_bitmap_to_thumbnail(capture.bitmap, capture.width,
+                                                 capture.height, kThumbnailMaxWidth,
+                                                 kThumbnailMaxHeight);
 }
 
 [[nodiscard]] std::wstring Resolve_absolute_path(std::wstring_view path) {
@@ -793,15 +751,12 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
     wchar_t default_name[256] = {};
     Build_default_save_name(save_dir, default_name);
 
-    // Determine extension from config.
-    std::wstring_view ext = L".png";
+    // Determine format from config.
     core::ImageSaveFormat format = core::ImageSaveFormat::Png;
     if (config_) {
         if (config_->default_save_format == L"jpg") {
-            ext = L".jpg";
             format = core::ImageSaveFormat::Jpeg;
         } else if (config_->default_save_format == L"bmp") {
-            ext = L".bmp";
             format = core::ImageSaveFormat::Bmp;
         }
     }
@@ -811,7 +766,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
         full_path += L'\\';
     }
     full_path += default_name;
-    full_path += ext;
+    full_path += core::Extension_for_image_save_format(format);
     std::wstring const reserved_path = Reserve_unique_file_path(full_path);
     if (reserved_path.empty()) {
         cropped.Free();
@@ -819,14 +774,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
         return;
     }
 
-    bool saved = false;
-    if (format == core::ImageSaveFormat::Jpeg) {
-        saved = Save_capture_to_jpeg(cropped, reserved_path.c_str());
-    } else if (format == core::ImageSaveFormat::Bmp) {
-        saved = Save_capture_to_bmp(cropped, reserved_path.c_str());
-    } else {
-        saved = Save_capture_to_png(cropped, reserved_path.c_str());
-    }
+    bool const saved = Save_capture_to_file(cropped, reserved_path.c_str(), format);
     if (!saved) {
         (void)DeleteFileW(reserved_path.c_str());
         cropped.Free();
@@ -897,16 +845,9 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
     size_t const n = resolved_path.copy(path_buffer.data(), path_span.size() - 1);
     path_span[n] = L'\0';
 
-    bool saved = false;
     core::ImageSaveFormat const format =
         core::Detect_image_save_format_from_path(std::wstring_view(path_buffer.data()));
-    if (format == core::ImageSaveFormat::Jpeg) {
-        saved = Save_capture_to_jpeg(cropped, path_buffer.data());
-    } else if (format == core::ImageSaveFormat::Bmp) {
-        saved = Save_capture_to_bmp(cropped, path_buffer.data());
-    } else {
-        saved = Save_capture_to_png(cropped, path_buffer.data());
-    }
+    bool const saved = Save_capture_to_file(cropped, path_buffer.data(), format);
 
     if (!saved) {
         cropped.Free();

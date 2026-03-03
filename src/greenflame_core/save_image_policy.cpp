@@ -1,6 +1,7 @@
 #include "greenflame_core/save_image_policy.h"
 
 #include "greenflame_core/cli_options.h"
+#include "greenflame_core/string_utils.h"
 
 namespace greenflame::core {
 
@@ -17,14 +18,6 @@ constexpr size_t kMaxWindowTitleChars = 50;
     static constexpr std::wstring_view kInvalid = L"\\/:*?\"<>|";
     return static_cast<unsigned>(ch) < 0x20u ||
            kInvalid.find(ch) != std::wstring_view::npos;
-}
-
-[[nodiscard]] bool Equals_no_case(std::wstring_view a, std::wstring_view b) noexcept {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (std::towlower(a[i]) != std::towlower(b[i])) return false;
-    }
-    return true;
 }
 
 [[nodiscard]] bool Ends_with_no_case(std::wstring_view s,
