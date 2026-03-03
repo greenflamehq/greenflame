@@ -36,8 +36,7 @@ struct RegistryKeyGuard {
         if (capacity >= kMaxExecutablePathChars) {
             return {};
         }
-        DWORD const next_capacity =
-            (std::min)(capacity * 2, kMaxExecutablePathChars);
+        DWORD const next_capacity = (std::min)(capacity * 2, kMaxExecutablePathChars);
         executable_path.resize(next_capacity);
     }
 }
@@ -53,10 +52,9 @@ struct RegistryKeyGuard {
 [[nodiscard]] bool Read_startup_value(std::wstring &value) {
     value.clear();
     DWORD value_bytes = 0;
-    LSTATUS status =
-        RegGetValueW(HKEY_CURRENT_USER, kStartupRunKeyPath, kStartupValueName,
-                     RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, nullptr, nullptr,
-                     &value_bytes);
+    LSTATUS status = RegGetValueW(
+        HKEY_CURRENT_USER, kStartupRunKeyPath, kStartupValueName,
+        RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, nullptr, nullptr, &value_bytes);
     if (status != ERROR_SUCCESS || value_bytes < sizeof(wchar_t)) {
         return false;
     }
@@ -64,8 +62,8 @@ struct RegistryKeyGuard {
     size_t const character_count = value_bytes / sizeof(wchar_t);
     value.resize(character_count);
     status = RegGetValueW(HKEY_CURRENT_USER, kStartupRunKeyPath, kStartupValueName,
-                          RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, nullptr,
-                          value.data(), &value_bytes);
+                          RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, nullptr, value.data(),
+                          &value_bytes);
     if (status != ERROR_SUCCESS || value_bytes < sizeof(wchar_t)) {
         value.clear();
         return false;
@@ -83,8 +81,8 @@ struct RegistryKeyGuard {
     return !value.empty();
 }
 
-[[nodiscard]] std::wstring Parse_startup_command_executable(
-    std::wstring_view command_line) {
+[[nodiscard]] std::wstring
+Parse_startup_command_executable(std::wstring_view command_line) {
     if (command_line.empty()) {
         return {};
     }
@@ -120,8 +118,7 @@ bool Is_startup_launch_enabled() {
     if (!Read_startup_value(command_line)) {
         return false;
     }
-    std::wstring const configured_path =
-        Parse_startup_command_executable(command_line);
+    std::wstring const configured_path = Parse_startup_command_executable(command_line);
     if (configured_path.empty()) {
         return false;
     }

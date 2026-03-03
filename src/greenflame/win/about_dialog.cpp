@@ -27,8 +27,10 @@ void Center_dialog_on_cursor_monitor(HWND hwnd) {
     RECT const monitor_rect = monitor_info.rcMonitor;
     int const dialog_width = dialog_rect.right - dialog_rect.left;
     int const dialog_height = dialog_rect.bottom - dialog_rect.top;
-    int const x = monitor_rect.left + ((monitor_rect.right - monitor_rect.left) - dialog_width) / 2;
-    int const y = monitor_rect.top + ((monitor_rect.bottom - monitor_rect.top) - dialog_height) / 2;
+    int const x = monitor_rect.left +
+                  ((monitor_rect.right - monitor_rect.left) - dialog_width) / 2;
+    int const y = monitor_rect.top +
+                  ((monitor_rect.bottom - monitor_rect.top) - dialog_height) / 2;
     SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
@@ -39,10 +41,9 @@ namespace greenflame {
 AboutDialog::AboutDialog(HINSTANCE hinstance) : hinstance_(hinstance) {}
 
 void AboutDialog::Show(HWND owner) const {
-    INT_PTR const dialog_result =
-        DialogBoxParamW(hinstance_, MAKEINTRESOURCEW(kAboutDialogResourceId), owner,
-                        &AboutDialog::Dialog_proc,
-                        reinterpret_cast<LPARAM>(hinstance_));
+    INT_PTR const dialog_result = DialogBoxParamW(
+        hinstance_, MAKEINTRESOURCEW(kAboutDialogResourceId), owner,
+        &AboutDialog::Dialog_proc, reinterpret_cast<LPARAM>(hinstance_));
     if (dialog_result == -1) {
         MessageBoxW(owner, L"Failed to open About Greenflame dialog.", L"Greenflame",
                     MB_OK | MB_ICONWARNING);
@@ -60,7 +61,8 @@ INT_PTR CALLBACK AboutDialog::Dialog_proc(HWND hwnd, UINT msg, WPARAM wparam,
         if (app_icon != nullptr) {
             SendDlgItemMessageW(hwnd, kAboutDialogIconControlId, STM_SETICON,
                                 reinterpret_cast<WPARAM>(app_icon), 0);
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app_icon));
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                              reinterpret_cast<LONG_PTR>(app_icon));
         }
         Center_dialog_on_cursor_monitor(hwnd);
         return TRUE;
@@ -72,7 +74,8 @@ INT_PTR CALLBACK AboutDialog::Dialog_proc(HWND hwnd, UINT msg, WPARAM wparam,
         }
         return FALSE;
     case WM_DESTROY: {
-        HICON const app_icon = reinterpret_cast<HICON>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        HICON const app_icon =
+            reinterpret_cast<HICON>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
         if (app_icon != nullptr) {
             DestroyIcon(app_icon);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
