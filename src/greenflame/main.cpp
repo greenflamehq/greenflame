@@ -11,6 +11,16 @@ constexpr bool kDebugBuild = false;
 #endif
 constexpr wchar_t kTrayInstanceMutexName[] = L"Local\\greenflame.tray.single_instance";
 
+[[nodiscard]] std::wstring Build_semantic_version_text() {
+    std::wstring text = L"Greenflame v";
+    text += std::to_wstring(GREENFLAME_VERSION_MAJOR);
+    text += L".";
+    text += std::to_wstring(GREENFLAME_VERSION_MINOR);
+    text += L".";
+    text += std::to_wstring(GREENFLAME_VERSION_PATCH);
+    return text;
+}
+
 [[nodiscard]] std::vector<std::wstring> Command_line_args_without_program() {
     std::vector<std::wstring> args;
     int argc = 0;
@@ -155,8 +165,12 @@ int WINAPI wWinMain(HINSTANCE h_instance, HINSTANCE, PWSTR, int) {
             greenflame::ProcessExitCode::CliArgumentParseFailed);
     }
 
-    if (parse_result.options.capture_mode == greenflame::core::CliCaptureMode::Help) {
+    if (parse_result.options.action == greenflame::core::CliAction::Help) {
         Write_console_text(greenflame::core::Build_cli_help_text(kDebugBuild), false);
+        return greenflame::To_exit_code(greenflame::ProcessExitCode::Success);
+    }
+    if (parse_result.options.action == greenflame::core::CliAction::Version) {
+        Write_console_line(Build_semantic_version_text(), false);
         return greenflame::To_exit_code(greenflame::ProcessExitCode::Success);
     }
 

@@ -10,11 +10,12 @@ enum class CliOptionId : uint8_t {
     Monitor = 2,
     Desktop = 3,
     Help = 4,
-    Output = 5,
-    Format = 6,
-    Overwrite = 7,
+    Version = 5,
+    Output = 6,
+    Format = 7,
+    Overwrite = 8,
 #ifdef DEBUG
-    Testing12 = 8,
+    Testing12 = 9,
 #endif
 };
 
@@ -90,6 +91,16 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
         L"Display help and exit.",
         L'h',
         CliOptionId::Help,
+        CliOptionValueKind::None,
+        CliOptionGroup::Exclusive,
+        false,
+    },
+    {
+        L"version",
+        nullptr,
+        L"Display version and exit.",
+        L'v',
+        CliOptionId::Version,
         CliOptionValueKind::None,
         CliOptionGroup::Exclusive,
         false,
@@ -292,7 +303,7 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
 [[nodiscard]] std::wstring Group_header(CliOptionGroup group) {
     switch (group) {
     case CliOptionGroup::Exclusive:
-        return L"Capture Mode (Mutually Exclusive):";
+        return L"Mode (Mutually Exclusive):";
     case CliOptionGroup::Optional:
         return L"Options:";
     case CliOptionGroup::Debug:
@@ -350,13 +361,27 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
     return nullptr;
 }
 
+[[nodiscard]] bool Has_exclusive_mode(CliOptions const &options) {
+    return Is_capture_mode(options.capture_mode) || options.action != CliAction::None;
+}
+
 [[nodiscard]] bool Try_set_capture_mode(CliOptions &options, CliCaptureMode mode,
                                         std::wstring &error_message) {
-    if (options.capture_mode != CliCaptureMode::None) {
-        error_message = L"Only one capture mode can be specified per invocation.";
+    if (Has_exclusive_mode(options)) {
+        error_message = L"Only one mode can be specified per invocation.";
         return false;
     }
     options.capture_mode = mode;
+    return true;
+}
+
+[[nodiscard]] bool Try_set_action(CliOptions &options, CliAction action,
+                                  std::wstring &error_message) {
+    if (Has_exclusive_mode(options)) {
+        error_message = L"Only one mode can be specified per invocation.";
+        return false;
+    }
+    options.action = action;
     return true;
 }
 
@@ -403,7 +428,12 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         }
         return CliParseResult{{}, options, true};
     case CliOptionId::Help:
-        if (!Try_set_capture_mode(options, CliCaptureMode::Help, error_message)) {
+        if (!Try_set_action(options, CliAction::Help, error_message)) {
+            return Make_error(error_message);
+        }
+        return CliParseResult{{}, options, true};
+    case CliOptionId::Version:
+        if (!Try_set_action(options, CliAction::Version, error_message)) {
             return Make_error(error_message);
         }
         return CliParseResult{{}, options, true};
@@ -644,8 +674,9 @@ std::wstring Build_cli_help_text(bool debug_build) {
     help_text += L"Yet another Windows screenshot tool.\n";
     help_text += L"\n";
     help_text += L"Usage:\n";
-    help_text += L"  greenflame [capture-mode] [options]\n";
+    help_text += L"  greenflame [mode] [options]\n";
     help_text += L"  greenflame --help\n";
+    help_text += L"  greenflame --version\n";
     help_text += L"\n";
 
     Append_help_group(help_text, CliOptionGroup::Exclusive, debug_build);

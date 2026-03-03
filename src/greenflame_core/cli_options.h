@@ -10,13 +10,18 @@ enum class CliCaptureMode : uint8_t {
     Window = 2,
     Monitor = 3,
     Desktop = 4,
-    Help = 5,
 };
 
 enum class CliOutputFormat : uint8_t {
     Png = 0,
     Jpeg = 1,
     Bmp = 2,
+};
+
+enum class CliAction : uint8_t {
+    None = 0,
+    Help = 1,
+    Version = 2,
 };
 
 [[nodiscard]] constexpr bool Is_capture_mode(CliCaptureMode mode) noexcept {
@@ -30,6 +35,7 @@ struct CliOptions final {
     std::optional<RectPx> region_px = std::nullopt;
     int32_t monitor_id = 0; // 1-based.
     std::optional<CliOutputFormat> output_format = std::nullopt;
+    CliAction action = CliAction::None;
     CliCaptureMode capture_mode = CliCaptureMode::None;
     bool overwrite_output = false;
 #ifdef DEBUG

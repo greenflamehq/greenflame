@@ -192,6 +192,9 @@ target_compile_definitions(greenflame PRIVATE
         WIN32_LEAN_AND_MEAN
         UNICODE
         _UNICODE
+        GREENFLAME_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+        GREENFLAME_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+        GREENFLAME_VERSION_PATCH=${PROJECT_VERSION_PATCH}
 )
 
 target_precompile_headers(greenflame PRIVATE

@@ -316,7 +316,6 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         target_rect = display_queries_.Get_virtual_desktop_bounds_px();
         source = core::SaveSelectionSource::Desktop;
         break;
-    case core::CliCaptureMode::Help:
     case core::CliCaptureMode::None:
         return {};
     }

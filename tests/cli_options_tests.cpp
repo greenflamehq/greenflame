@@ -7,6 +7,7 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_TRUE(result.ok);
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
+    EXPECT_EQ(result.options.action, CliAction::None);
     EXPECT_FALSE(result.options.region_px.has_value());
     EXPECT_TRUE(result.options.output_path.empty());
     EXPECT_FALSE(result.options.output_format.has_value());
@@ -149,14 +150,31 @@ TEST(cli_options, CLI_parser_RejectsMutuallyExclusiveModes) {
     std::vector<std::wstring> args = {L"--desktop", L"--monitor", L"1"};
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"Only one capture mode"), std::wstring::npos);
+    EXPECT_NE(result.error_message.find(L"Only one mode"), std::wstring::npos);
 }
 
 TEST(cli_options, CLI_parser_AcceptsHelp) {
     std::vector<std::wstring> args = {L"--help"};
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_TRUE(result.ok);
-    EXPECT_EQ(result.options.capture_mode, CliCaptureMode::Help);
+    EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
+    EXPECT_EQ(result.options.action, CliAction::Help);
+}
+
+TEST(cli_options, CLI_parser_AcceptsVersionLong) {
+    std::vector<std::wstring> args = {L"--version"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
+    EXPECT_EQ(result.options.action, CliAction::Version);
+}
+
+TEST(cli_options, CLI_parser_AcceptsVersionShort) {
+    std::vector<std::wstring> args = {L"-v"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
+    EXPECT_EQ(result.options.action, CliAction::Version);
 }
 
 #ifdef DEBUG
@@ -181,6 +199,7 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"--monitor"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--desktop"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--help"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--version"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--output"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--format"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--overwrite"), std::wstring::npos);

@@ -62,7 +62,7 @@ The last two hotkeys require a previous capture in the current session. If no pr
 
 With no parameters, Greenflame starts normally in the tray.
 
-You can also run one-shot capture commands (exactly one capture mode per invocation):
+You can also run one-shot command-line modes (at most one mode per invocation):
 
 | Option | Meaning |
 |---|---|
@@ -71,6 +71,7 @@ You can also run one-shot capture commands (exactly one capture mode per invocat
 | `-m, --monitor <id>` | Capture monitor by 1-based id |
 | `-d, --desktop` | Capture the full virtual desktop |
 | `-h, --help` | Show help and exit |
+| `-v, --version` | Show version and exit |
 
 Optional:
 
@@ -110,7 +111,7 @@ codes are unique and not reused.
 
 | Code | Meaning |
 |---|---|
-| `0` | Success (includes `--help` and "already running" tray startup) |
+| `0` | Success (includes `--help`, `--version`, and "already running" tray startup) |
 | `1` | Failed to register application window classes |
 | `2` | CLI argument parse/validation failed |
 | `3` | Failed to create tray window |
