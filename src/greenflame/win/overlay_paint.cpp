@@ -726,13 +726,13 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
                            std::span<uint8_t> pixels,
                            greenflame::PaintResources const *res,
                            greenflame::GdiCaptureResult const *capture) {
-    constexpr int kMagnifierHalfZoom = kMagnifierZoom / 2;
+    constexpr int k_magnifier_half_zoom = kMagnifierZoom / 2;
     int const src_x = cx - kMagnifierSource / 2;
     int const src_y = cy - kMagnifierSource / 2;
     int const src_right = src_x + kMagnifierSource + 1;
     int const src_bottom = src_y + kMagnifierSource + 1;
-    int const crosshair_left = (cx - src_x) * kMagnifierZoom - kMagnifierHalfZoom;
-    int const crosshair_top = (cy - src_y) * kMagnifierZoom - kMagnifierHalfZoom;
+    int const crosshair_left = (cx - src_x) * kMagnifierZoom - k_magnifier_half_zoom;
+    int const crosshair_top = (cy - src_y) * kMagnifierZoom - k_magnifier_half_zoom;
     // Clamp sample to the full capture (virtual desktop) extent so that pixels
     // from adjacent monitors are shown rather than producing a checkered gap.
     // Monitor bounds are only used for magnifier *placement* below.
@@ -779,12 +779,12 @@ static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, in
     if (rgn) {
         SelectClipRgn(buf_dc, rgn);
         Fill_magnifier_checkerboard(buf_dc, mag_left, mag_top, src_x, src_y,
-                                    -kMagnifierHalfZoom, -kMagnifierHalfZoom);
+                                    -k_magnifier_half_zoom, -k_magnifier_half_zoom);
         if (source_has_coverage) {
             int const dst_left =
-                mag_left + (sample_left - src_x) * kMagnifierZoom - kMagnifierHalfZoom;
+                mag_left + (sample_left - src_x) * kMagnifierZoom - k_magnifier_half_zoom;
             int const dst_top =
-                mag_top + (sample_top - src_y) * kMagnifierZoom - kMagnifierHalfZoom;
+                mag_top + (sample_top - src_y) * kMagnifierZoom - k_magnifier_half_zoom;
             int const dst_w = (sample_right - sample_left) * kMagnifierZoom;
             int const dst_h = (sample_bottom - sample_top) * kMagnifierZoom;
             SetStretchBltMode(buf_dc, COLORONCOLOR);

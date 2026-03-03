@@ -10,6 +10,15 @@ constexpr int kHelpTitleFontHeight = 26;
 constexpr int kHelpBodyFontHeight = 18;
 constexpr int kHelpKeyFontHeight = 18;
 constexpr int kHelpSectionFontHeight = 20;
+constexpr unsigned char kOverlayBackdropAlpha = 170;
+constexpr int kPanelTopOffsetPx = 200;
+constexpr int kMinPanelWidthPx = 360;
+constexpr int kMinPanelHeightPx = 220;
+constexpr unsigned char kPanelFillAlpha = 224;
+constexpr int kTitleRowHeightPx = 42;
+constexpr int kCloseHintRowHeightPx = 40;
+constexpr int kRowsTopPaddingPx = 14;
+constexpr int kPanelBottomPaddingPx = 24;
 
 void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
                                  std::span<uint8_t> pixels, HFONT title_font,
@@ -46,14 +55,14 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
     }
     overlay_rect = *clipped_overlay;
     greenflame::core::Blend_rect_onto_pixels(pixels, w, h, row_bytes, overlay_rect,
-                                             RGB(0, 0, 0), 170);
+                                             RGB(0, 0, 0), kOverlayBackdropAlpha);
 
     int const overlay_w = overlay_rect.Width();
     int const overlay_h = overlay_rect.Height();
     int const panel_w = (std::max)(1, overlay_w / 2);
     int const panel_h = (std::max)(1, overlay_h / 2);
     int const panel_left = overlay_rect.left + (overlay_w - panel_w) / 2;
-    int panel_top = overlay_rect.top + 200;
+    int panel_top = overlay_rect.top + kPanelTopOffsetPx;
     int const max_panel_top = overlay_rect.bottom - panel_h;
     if (panel_top > max_panel_top) {
         panel_top = max_panel_top;
@@ -63,13 +72,14 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
     }
     greenflame::core::RectPx const panel_rect = greenflame::core::RectPx::From_ltrb(
         panel_left, panel_top, panel_left + panel_w, panel_top + panel_h);
-    if (panel_rect.Width() < 360 || panel_rect.Height() < 220) {
+    if (panel_rect.Width() < kMinPanelWidthPx ||
+        panel_rect.Height() < kMinPanelHeightPx) {
         SetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
                   reinterpret_cast<BITMAPINFO *>(&bmi_help), DIB_RGB_COLORS);
         return;
     }
     greenflame::core::Blend_rect_onto_pixels(pixels, w, h, row_bytes, panel_rect,
-                                             RGB(52, 52, 52), 224);
+                                             RGB(52, 52, 52), kPanelFillAlpha);
     SetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
               reinterpret_cast<BITMAPINFO *>(&bmi_help), DIB_RGB_COLORS);
 
@@ -95,7 +105,7 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
     SetTextColor(buf_dc, RGB(242, 242, 242));
 
     if (!title_text.empty()) {
-        RECT title_rect = {content_left, top, content_right, top + 42};
+        RECT title_rect = {content_left, top, content_right, top + kTitleRowHeightPx};
         DrawTextW(buf_dc, title_text.data(), static_cast<int>(title_text.size()),
                   &title_rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
@@ -103,7 +113,8 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
     SelectObject(buf_dc, body_font);
     if (!close_hint_text.empty()) {
         SetTextColor(buf_dc, RGB(208, 208, 208));
-        RECT close_hint_rect = {content_left, top, content_right, top + 40};
+        RECT close_hint_rect = {content_left, top, content_right,
+                                top + kCloseHintRowHeightPx};
         DrawTextW(buf_dc, close_hint_text.data(),
                   static_cast<int>(close_hint_text.size()), &close_hint_rect,
                   DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
@@ -145,13 +156,13 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
     }
     int const desc_left = content_left + key_col_w + 10;
     int const row_h = 34;
-    int row_y = sep_y + 14;
+    int row_y = sep_y + kRowsTopPaddingPx;
 
     for (greenflame::core::OverlayHelpSection const &section : content->sections) {
         if (section.entries.empty()) {
             continue;
         }
-        if (row_y + row_h > panel_rect.bottom - 24) {
+        if (row_y + row_h > panel_rect.bottom - kPanelBottomPaddingPx) {
             break;
         }
 
@@ -164,7 +175,7 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
         row_y += row_h + 2;
 
         for (greenflame::core::OverlayHelpEntry const &entry : section.entries) {
-            if (row_y + row_h > panel_rect.bottom - 24) {
+            if (row_y + row_h > panel_rect.bottom - kPanelBottomPaddingPx) {
                 break;
             }
             if (entry.shortcut.empty()) {
@@ -188,7 +199,7 @@ void Draw_help_overlay_to_buffer(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
             row_y += row_h;
         }
         row_y += 8;
-        if (row_y + row_h > panel_rect.bottom - 24) {
+        if (row_y + row_h > panel_rect.bottom - kPanelBottomPaddingPx) {
             break;
         }
     }
