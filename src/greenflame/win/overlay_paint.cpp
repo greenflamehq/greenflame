@@ -256,6 +256,11 @@ void Draw_border_highlight(HDC dc, HPEN pen, greenflame::core::RectPx const &sel
     int const corner_w = std::min(max_corner_size_px, r.Width() / 2);
     int const corner_h = std::min(max_corner_size_px, r.Height() / 2);
     HGDIOBJ old_pen = SelectObject(dc, pen);
+    COLORREF const pen_color = Get_pen_color_or_fallback(pen, greenflame::kOverlayHandle);
+    auto const stamp_corner_tip = [&](int x, int y) noexcept {
+        // LineTo excludes the final endpoint, so stamp the outer corner tip.
+        (void)SetPixelV(dc, x, y, pen_color);
+    };
 
     switch (highlight) {
     case greenflame::core::SelectionHandle::Top:
@@ -289,6 +294,7 @@ void Draw_border_highlight(HDC dc, HPEN pen, greenflame::core::RectPx const &sel
             MoveToEx(dc, r.left + off, r.top, nullptr);
             LineTo(dc, r.left + off, r.top + corner_h);
         }
+        stamp_corner_tip(r.left - 1, r.top - 1);
         break;
     case greenflame::core::SelectionHandle::TopRight:
         for (int off = -1; off <= 1; ++off) {
@@ -297,6 +303,7 @@ void Draw_border_highlight(HDC dc, HPEN pen, greenflame::core::RectPx const &sel
             MoveToEx(dc, r.right - 1 + off, r.top, nullptr);
             LineTo(dc, r.right - 1 + off, r.top + corner_h);
         }
+        stamp_corner_tip(r.right, r.top - 1);
         break;
     case greenflame::core::SelectionHandle::BottomLeft:
         for (int off = -1; off <= 1; ++off) {
@@ -305,6 +312,7 @@ void Draw_border_highlight(HDC dc, HPEN pen, greenflame::core::RectPx const &sel
             MoveToEx(dc, r.left + off, r.bottom - corner_h, nullptr);
             LineTo(dc, r.left + off, r.bottom);
         }
+        stamp_corner_tip(r.left - 1, r.bottom);
         break;
     case greenflame::core::SelectionHandle::BottomRight:
         for (int off = -1; off <= 1; ++off) {
@@ -313,6 +321,7 @@ void Draw_border_highlight(HDC dc, HPEN pen, greenflame::core::RectPx const &sel
             MoveToEx(dc, r.right - 1 + off, r.bottom - corner_h, nullptr);
             LineTo(dc, r.right - 1 + off, r.bottom);
         }
+        stamp_corner_tip(r.right, r.bottom);
         break;
     }
 
