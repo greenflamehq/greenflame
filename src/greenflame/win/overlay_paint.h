@@ -25,6 +25,8 @@ namespace core {
 enum class SelectionHandle : uint8_t;
 } // namespace core
 
+class IOverlayButton;
+
 struct PaintOverlayInput {
     GdiCaptureResult const *capture = nullptr;
     core::RectPx live_rect = {};
@@ -40,6 +42,7 @@ struct PaintOverlayInput {
     bool show_selection_size_side_labels = true;
     bool show_selection_size_center_label = true;
     std::optional<core::SelectionHandle> highlight_handle = std::nullopt;
+    std::span<IOverlayButton *const> toolbar_buttons = {};
 };
 
 void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &in);

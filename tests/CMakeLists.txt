@@ -31,12 +31,14 @@ add_executable(greenflame_tests
     overlay_controller_tests.cpp
     app_controller_tests.cpp
     undo_stack_tests.cpp
+    toolbar_placement_tests.cpp
 )
 target_compile_definitions(greenflame_tests PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
     UNICODE
     _UNICODE
+    $<$<CONFIG:Debug>:DEBUG>
 )
 set_target_properties(greenflame_tests PROPERTIES
     WIN32_EXECUTABLE FALSE  # console app (main), not GUI (WinMain)

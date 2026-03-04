@@ -3,6 +3,7 @@
 #include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/overlay_help_content.h"
 #include "greenflame_core/rect_px.h"
+#include "win/overlay_button.h"
 #include "win/overlay_help_overlay.h"
 
 namespace greenflame {
@@ -39,6 +40,7 @@ class OverlayWindow final {
     [[nodiscard]] bool Create_and_show(HINSTANCE hinstance);
     void Destroy();
     void Set_hotkey_help_content(core::OverlayHelpContent const *content) noexcept;
+    void Set_testing_toolbar(bool enable) noexcept;
 
     [[nodiscard]] bool Is_open() const;
 
@@ -73,6 +75,9 @@ class OverlayWindow final {
     void Refresh_cursor();
     [[nodiscard]] bool Is_selection_stable_for_help() const;
 
+    void Rebuild_toolbar_buttons();
+    [[nodiscard]] std::vector<core::PointPx> Compute_toolbar_positions() const;
+
     IOverlayEvents *events_ = nullptr;
     core::AppConfig *config_ = nullptr;
     IWindowQuery *window_query_ = nullptr;
@@ -82,6 +87,8 @@ class OverlayWindow final {
     std::unique_ptr<OverlayResources> resources_;
     std::optional<core::SelectionHandle> last_hover_handle_;
     OverlayHelpOverlay hotkey_help_overlay_ = {};
+    bool testing_toolbar_ = false;
+    std::vector<std::unique_ptr<IOverlayButton>> toolbar_buttons_;
 };
 
 } // namespace greenflame

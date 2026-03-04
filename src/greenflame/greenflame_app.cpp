@@ -98,6 +98,7 @@ uint8_t GreenflameApp::Run() {
     }
 
     bool const testing_mode_enabled = Is_testing_mode_enabled(cli_options_);
+    overlay_window_.Set_testing_toolbar(testing_mode_enabled);
     bool const start_with_windows_enabled = Is_startup_launch_enabled();
     if (!tray_window_.Create(hinstance_, testing_mode_enabled,
                              start_with_windows_enabled)) {

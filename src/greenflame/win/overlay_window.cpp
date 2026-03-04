@@ -9,6 +9,7 @@
 #include "greenflame_core/save_image_policy.h"
 #include "greenflame_core/selection_handles.h"
 #include "greenflame_core/snap_to_edges.h"
+#include "greenflame_core/toolbar_placement.h"
 #include "greenflame_core/window_query.h"
 #include "win/display_queries.h"
 #include "win/gdi_capture.h"
@@ -23,6 +24,9 @@ constexpr int32_t kSnapThresholdPx = 10;
 constexpr int kDimensionFontHeight = 14;
 constexpr int kCenterFontHeight = 36;
 constexpr int kHelpHintFontHeight = 16;
+constexpr int kToolbarButtonSizePx = 36;
+constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
+constexpr int kTestingButtonCount = 20;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -229,6 +233,73 @@ void OverlayWindow::Set_hotkey_help_content(
     hotkey_help_overlay_.Set_content(content);
 }
 
+void OverlayWindow::Set_testing_toolbar(bool enable) noexcept {
+    testing_toolbar_ = enable;
+}
+
+std::vector<core::PointPx> OverlayWindow::Compute_toolbar_positions() const {
+    auto const &s = controller_.State();
+    if (s.final_selection.Is_empty()) {
+        return {};
+    }
+
+    // Build client-space monitor rects.
+    std::vector<core::RectPx> monitor_client_rects;
+    monitor_client_rects.reserve(s.cached_monitors.size());
+    RECT overlay_rect{};
+    if (GetWindowRect(hwnd_, &overlay_rect) != 0) {
+        for (auto const &monitor : s.cached_monitors) {
+            monitor_client_rects.push_back(core::RectPx::From_ltrb(
+                monitor.bounds.left - static_cast<int32_t>(overlay_rect.left),
+                monitor.bounds.top - static_cast<int32_t>(overlay_rect.top),
+                monitor.bounds.right - static_cast<int32_t>(overlay_rect.left),
+                monitor.bounds.bottom - static_cast<int32_t>(overlay_rect.top)));
+        }
+    }
+
+    core::ToolbarPlacementParams params{};
+    params.selection = s.final_selection;
+    params.available = monitor_client_rects;
+    params.button_size = kToolbarButtonSizePx;
+    params.separator = kToolbarButtonSeparatorPx;
+    params.button_count = kTestingButtonCount;
+    return core::Compute_toolbar_placement(params).positions;
+}
+
+void OverlayWindow::Rebuild_toolbar_buttons() {
+    auto const &s = controller_.State();
+    bool const stable = !s.final_selection.Is_empty() && !s.dragging &&
+                        !s.handle_dragging && !s.move_dragging;
+
+    if (!testing_toolbar_ || !stable) {
+        for (auto const &btn : toolbar_buttons_) {
+            if (btn) {
+                btn->On_mouse_leave();
+            }
+        }
+        toolbar_buttons_.clear();
+        return;
+    }
+
+    std::vector<core::PointPx> const positions = Compute_toolbar_positions();
+    int const count = static_cast<int>(positions.size());
+
+    if (count == static_cast<int>(toolbar_buttons_.size())) {
+        // Reuse existing buttons — just reposition them.
+        for (int i = 0; i < count; ++i) {
+            toolbar_buttons_[static_cast<size_t>(i)]->Set_position(
+                positions[static_cast<size_t>(i)]);
+        }
+    } else {
+        toolbar_buttons_.clear();
+        toolbar_buttons_.reserve(static_cast<size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            toolbar_buttons_.push_back(std::make_unique<DebugNumberButton>(
+                positions[static_cast<size_t>(i)], kToolbarButtonSizePx, i));
+        }
+    }
+}
+
 bool OverlayWindow::Register_window_class(HINSTANCE hinstance) {
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
@@ -313,6 +384,9 @@ LRESULT CALLBACK OverlayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wpar
 }
 
 void OverlayWindow::Apply_action(core::OverlayAction action) {
+    if (action != core::OverlayAction::None) {
+        Rebuild_toolbar_buttons();
+    }
     switch (action) {
     case core::OverlayAction::Repaint:
         InvalidateRect(hwnd_, nullptr, TRUE);
@@ -473,6 +547,16 @@ LRESULT OverlayWindow::On_l_button_down() {
         InvalidateRect(hwnd_, nullptr, TRUE);
         return 0;
     }
+    // Route click to any hovered toolbar button (consume — do not start dragging).
+    if (!toolbar_buttons_.empty()) {
+        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        for (auto const &btn : toolbar_buttons_) {
+            if (btn->Is_hovered()) {
+                btn->On_mouse_down(cur);
+                return 0;
+            }
+        }
+    }
     bool const shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     bool const ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -570,10 +654,40 @@ LRESULT OverlayWindow::On_mouse_move() {
         // no extra repaint needed — drags already repaint
     }
 
+    // Update toolbar button hover state.
+    if (!toolbar_buttons_.empty()) {
+        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        bool any_changed = false;
+        for (auto const &btn : toolbar_buttons_) {
+            bool const was = btn->Is_hovered();
+            bool const now = btn->Hit_test(cur);
+            if (!was && now) {
+                btn->On_mouse_enter();
+                any_changed = true;
+            } else if (was && !now) {
+                btn->On_mouse_leave();
+                any_changed = true;
+            }
+        }
+        if (any_changed) {
+            InvalidateRect(hwnd_, nullptr, FALSE);
+        }
+    }
+
     return 0;
 }
 
 LRESULT OverlayWindow::On_l_button_up() {
+    // Route release to any hovered toolbar button.
+    if (!toolbar_buttons_.empty()) {
+        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        for (auto const &btn : toolbar_buttons_) {
+            if (btn->Is_hovered()) {
+                btn->On_mouse_up(cur);
+                return 0;
+            }
+        }
+    }
     auto const &s = controller_.State();
     bool const was_move = s.move_dragging;
     bool const was_resize = s.handle_dragging;
@@ -969,6 +1083,12 @@ LRESULT OverlayWindow::On_paint() {
         } else if (!s.move_dragging && !s.dragging && !s.modifier_preview) {
             input.highlight_handle = last_hover_handle_;
         }
+        std::vector<IOverlayButton *> btn_ptrs;
+        btn_ptrs.reserve(toolbar_buttons_.size());
+        for (auto const &u : toolbar_buttons_) {
+            btn_ptrs.push_back(u.get());
+        }
+        input.toolbar_buttons = std::span<IOverlayButton *const>(btn_ptrs);
         Paint_overlay(hdc, hwnd_, rect, input);
         (void)hotkey_help_overlay_.Paint(hdc, rect, input.paint_buffer);
         EndPaint(hwnd_, &paint);
@@ -977,6 +1097,7 @@ LRESULT OverlayWindow::On_paint() {
 }
 
 LRESULT OverlayWindow::On_destroy() {
+    toolbar_buttons_.clear();
     resources_->Reset();
     controller_.Reset_for_session({});
     if (events_) {

@@ -8,6 +8,7 @@
 #include "greenflame_core/pixel_ops.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/selection_handles.h"
+#include "overlay_button.h"
 #include "ui_palette.h"
 
 namespace {
@@ -979,14 +980,6 @@ void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &
                               in.show_selection_size_center_label, false);
     }
 
-    bool const show_help_hint_after_selection =
-        !interacting && !in.final_selection.Is_empty();
-    if (show_help_hint_after_selection) {
-        Draw_dimension_labels(buf_dc, buf_bmp, w, h, in.final_selection,
-                              in.monitor_rects_client, in.paint_buffer, in.resources,
-                              false, false, true);
-    }
-
     bool const show_crosshair = in.final_selection.Is_empty() && !in.dragging &&
                                 !in.handle_dragging && !in.move_dragging &&
                                 !in.modifier_preview;
@@ -1004,6 +997,15 @@ void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &
         if (!hl_sel.Is_empty()) {
             Draw_border_highlight(buf_dc, in.resources->handle_pen, hl_sel,
                                   *in.highlight_handle, core::kMaxCornerSizePx);
+        }
+    }
+
+    if (!in.toolbar_buttons.empty()) {
+        ButtonDrawContext const btn_ctx{kCoordTooltipBg, kCoordTooltipText};
+        for (IOverlayButton *const btn : in.toolbar_buttons) {
+            if (btn) {
+                btn->Draw(buf_dc, btn_ctx);
+            }
         }
     }
 

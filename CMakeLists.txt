@@ -89,6 +89,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/undo_stack.cpp
     src/greenflame_core/undo_stack.h
     src/greenflame_core/modification_command.h
+    src/greenflame_core/toolbar_placement.h
+    src/greenflame_core/toolbar_placement.cpp
 )
 
 # Allow includes like: #include "greenflame_core/rect_px.h"
@@ -101,6 +103,7 @@ target_compile_definitions(greenflame_core PRIVATE
     WIN32_LEAN_AND_MEAN
     UNICODE
     _UNICODE
+    $<$<CONFIG:Debug>:DEBUG>
 )
 
 target_precompile_headers(greenflame_core PRIVATE
@@ -180,6 +183,8 @@ add_executable(greenflame WIN32
     src/greenflame/win/window_query.h
     src/greenflame/win/win32_services.cpp
     src/greenflame/win/win32_services.h
+    src/greenflame/win/overlay_button.h
+    src/greenflame/win/overlay_button.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/app.manifest
     ${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc
 )
@@ -197,6 +202,7 @@ target_compile_definitions(greenflame PRIVATE
         GREENFLAME_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
         GREENFLAME_VERSION_MINOR=${PROJECT_VERSION_MINOR}
         GREENFLAME_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+        $<$<CONFIG:Debug>:DEBUG>
 )
 
 target_precompile_headers(greenflame PRIVATE
@@ -250,6 +256,7 @@ target_link_libraries(greenflame PRIVATE
         Windowscodecs
         ole32
         gdiplus
+        msimg32
 )
 
 # -----------------------------
