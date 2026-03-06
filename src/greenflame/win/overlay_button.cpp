@@ -6,6 +6,11 @@ namespace greenflame {
 
 namespace {
 
+constexpr BYTE kOpaqueAlpha = 255;
+constexpr Gdiplus::REAL kPenWidth = 1.5f;
+constexpr Gdiplus::REAL kRingInset = 3.5f;
+constexpr Gdiplus::REAL kDebugFontSize = 12.0f;
+
 // GDI+ startup — idempotent, called at most once per process.
 [[nodiscard]] bool Ensure_gdiplus() noexcept {
     static ULONG_PTR s_token = 0;
@@ -17,7 +22,7 @@ namespace {
     return s_ok;
 }
 
-[[nodiscard]] Gdiplus::Color To_gdip(COLORREF c, BYTE alpha = 255) noexcept {
+[[nodiscard]] Gdiplus::Color To_gdip(COLORREF c, BYTE alpha = kOpaqueAlpha) noexcept {
     return Gdiplus::Color(alpha, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
@@ -61,8 +66,7 @@ void DebugNumberButton::Draw(HDC dc, ButtonDrawContext const &ctx) const {
         g.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
         g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
 
-        constexpr Gdiplus::REAL kPenWidth = 1.5f;
-        constexpr Gdiplus::REAL kHalfPen = kPenWidth / 2.0f;
+        constexpr Gdiplus::REAL k_half_pen = kPenWidth / 2.0f;
 
         // Filled circle.
         {
@@ -73,21 +77,26 @@ void DebugNumberButton::Draw(HDC dc, ButtonDrawContext const &ctx) const {
         // Outline ring.
         {
             Gdiplus::Pen outline(To_gdip(ctx.outline_color), kPenWidth);
-            g.DrawEllipse(&outline, kHalfPen, kHalfPen, df - kPenWidth, df - kPenWidth);
+            g.DrawEllipse(&outline, k_half_pen, k_half_pen, df - kPenWidth,
+                          df - kPenWidth);
         }
 
         // Hover: white inner ring.
         if (hovered_) {
-            constexpr Gdiplus::REAL kRingInset = 3.5f;
-            Gdiplus::Pen ring(Gdiplus::Color(255, 255, 255, 255), kPenWidth);
-            g.DrawEllipse(&ring, kRingInset, kRingInset, df - 2.0f * kRingInset,
-                          df - 2.0f * kRingInset);
+            constexpr Gdiplus::REAL k_ring_double = 2.0f;
+            Gdiplus::Pen ring(
+                Gdiplus::Color(kOpaqueAlpha, kOpaqueAlpha, kOpaqueAlpha,
+                              kOpaqueAlpha),
+                kPenWidth);
+            g.DrawEllipse(&ring, kRingInset, kRingInset,
+                          df - k_ring_double * kRingInset,
+                          df - k_ring_double * kRingInset);
         }
 
         // Label (1-based number) with antialiased GDI+ text (no ClearType fringing).
         {
             g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
-            Gdiplus::Font font(L"Segoe UI", 12.0f, Gdiplus::FontStyleBold,
+            Gdiplus::Font font(L"Segoe UI", kDebugFontSize, Gdiplus::FontStyleBold,
                                Gdiplus::UnitPixel);
             Gdiplus::SolidBrush text_brush(To_gdip(ctx.outline_color));
             Gdiplus::StringFormat fmt;

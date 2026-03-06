@@ -1069,12 +1069,14 @@ LRESULT TrayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
             break;
 #ifdef DEBUG
         case HotkeyTestingError:
-            if (testing_hotkeys_enabled_)
+            if (testing_hotkeys_enabled_) {
                 Show_balloon(TrayBalloonIcon::Error, kTestingErrorBalloonMessage);
+            }
             break;
         case HotkeyTestingWarning:
-            if (testing_hotkeys_enabled_)
+            if (testing_hotkeys_enabled_) {
                 Show_balloon(TrayBalloonIcon::Warning, kTestingWarningBalloonMessage);
+            }
             break;
 #else
         case HotkeyTestingError:
