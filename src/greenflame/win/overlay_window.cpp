@@ -26,6 +26,7 @@ constexpr int kCenterFontHeight = 36;
 constexpr int kHelpHintFontHeight = 16;
 constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
+constexpr int kFreehandCursorResourceId = 102;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -145,6 +146,17 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
 }
 
 [[nodiscard]] HCURSOR Move_mode_cursor() { return LoadCursorW(nullptr, IDC_SIZEALL); }
+
+[[nodiscard]] HCURSOR Load_freehand_annotation_cursor(HINSTANCE hinstance) {
+    if (hinstance != nullptr) {
+        HCURSOR const cursor =
+            LoadCursorW(hinstance, MAKEINTRESOURCEW(kFreehandCursorResourceId));
+        if (cursor != nullptr) {
+            return cursor;
+        }
+    }
+    return LoadCursorW(nullptr, IDC_CROSS);
+}
 
 } // namespace
 
@@ -1272,7 +1284,7 @@ void OverlayWindow::Refresh_cursor() {
             return;
         }
         if (*active_tool == core::AnnotationToolId::Freehand) {
-            SetCursor(LoadCursorW(nullptr, IDC_CROSS));
+            SetCursor(Load_freehand_annotation_cursor(hinstance_));
         } else {
             SetCursor(LoadCursorW(nullptr, IDC_ARROW));
         }
