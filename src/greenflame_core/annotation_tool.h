@@ -11,17 +11,24 @@ enum class AnnotationToolId : uint8_t {
     Freehand,
 };
 
+enum class AnnotationToolbarGlyph : uint8_t {
+    None = 0,
+    Brush,
+};
+
 struct AnnotationToolDescriptor final {
     AnnotationToolId id = AnnotationToolId::Freehand;
     std::wstring name = {};
     wchar_t hotkey = L'\0';
     std::wstring toolbar_label = {};
+    AnnotationToolbarGlyph toolbar_glyph = AnnotationToolbarGlyph::None;
 };
 
 struct AnnotationToolbarButtonView final {
     AnnotationToolId id = AnnotationToolId::Freehand;
     std::wstring label = {};
     std::wstring tooltip = {};
+    AnnotationToolbarGlyph glyph = AnnotationToolbarGlyph::None;
     bool active = false;
 };
 

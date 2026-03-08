@@ -1,4 +1,5 @@
-// Overlay toolbar button: round labelled button with hover, active, and pressed states.
+// Overlay toolbar button: round labelled or glyph-backed button with hover,
+// active, and pressed states.
 
 #include "win/overlay_button.h"
 
@@ -7,9 +8,11 @@ namespace greenflame {
 namespace {
 
 constexpr BYTE kOpaqueAlpha = 255;
+constexpr uint32_t kAlphaShiftBits = 24;
 constexpr Gdiplus::REAL kPenWidth = 1.5f;
 constexpr Gdiplus::REAL kHoverRingWidth = 3.0f;
 constexpr Gdiplus::REAL kFontSize = 12.0f;
+constexpr Gdiplus::REAL kGlyphInset = 8.0f;
 
 // GDI+ startup — idempotent, called at most once per process.
 [[nodiscard]] bool Ensure_gdiplus() noexcept {
@@ -26,12 +29,63 @@ constexpr Gdiplus::REAL kFontSize = 12.0f;
     return Gdiplus::Color(alpha, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
+[[nodiscard]] bool Has_drawable_glyph(OverlayButtonGlyph const *glyph) noexcept {
+    return glyph != nullptr && glyph->Is_valid();
+}
+
+void Draw_glyph(Gdiplus::Graphics &graphics, OverlayButtonGlyph const &glyph,
+                Gdiplus::Color color, Gdiplus::REAL diameter) {
+    if (!glyph.Is_valid()) {
+        return;
+    }
+
+    size_t const pixel_count =
+        static_cast<size_t>(glyph.width) * static_cast<size_t>(glyph.height);
+    std::vector<uint32_t> pixels(pixel_count);
+    uint32_t const rgb = (static_cast<uint32_t>(color.GetR()) << 16) |
+                         (static_cast<uint32_t>(color.GetG()) << 8) |
+                         static_cast<uint32_t>(color.GetB());
+    for (size_t i = 0; i < pixel_count; ++i) {
+        pixels[i] =
+            (static_cast<uint32_t>(glyph.alpha_mask[i]) << kAlphaShiftBits) | rgb;
+    }
+
+    INT const stride_bytes = glyph.width * static_cast<INT>(sizeof(uint32_t));
+    Gdiplus::Bitmap glyph_bitmap(glyph.width, glyph.height, stride_bytes,
+                                 PixelFormat32bppARGB,
+                                 reinterpret_cast<BYTE *>(pixels.data()));
+    if (glyph_bitmap.GetLastStatus() != Gdiplus::Ok) {
+        return;
+    }
+
+    Gdiplus::REAL const max_extent =
+        std::max<Gdiplus::REAL>(1.0f, diameter - (kGlyphInset * 2.0f));
+    Gdiplus::REAL const scale =
+        std::min(max_extent / static_cast<Gdiplus::REAL>(glyph.width),
+                 max_extent / static_cast<Gdiplus::REAL>(glyph.height));
+    Gdiplus::REAL const draw_width = static_cast<Gdiplus::REAL>(glyph.width) * scale;
+    Gdiplus::REAL const draw_height = static_cast<Gdiplus::REAL>(glyph.height) * scale;
+    Gdiplus::RectF const dest((diameter - draw_width) / 2.0f,
+                              (diameter - draw_height) / 2.0f, draw_width, draw_height);
+
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+    graphics.DrawImage(&glyph_bitmap, dest, 0.0f, 0.0f,
+                       static_cast<Gdiplus::REAL>(glyph.width),
+                       static_cast<Gdiplus::REAL>(glyph.height), Gdiplus::UnitPixel);
+}
+
 } // namespace
 
 OverlayButton::OverlayButton(core::PointPx position, int diameter, std::wstring label,
                              bool is_toggle, bool active)
     : position_(position), diameter_(diameter), label_(std::move(label)),
       is_toggle_(is_toggle), active_(active) {}
+
+OverlayButton::OverlayButton(core::PointPx position, int diameter,
+                             OverlayButtonGlyph const *glyph, bool is_toggle,
+                             bool active)
+    : position_(position), diameter_(diameter), glyph_(glyph), is_toggle_(is_toggle),
+      active_(active) {}
 
 core::RectPx OverlayButton::Bounds() const {
     return core::RectPx::From_ltrb(position_.x, position_.y, position_.x + diameter_,
@@ -123,8 +177,9 @@ void OverlayButton::Draw(HDC dc, ButtonDrawContext const &ctx) const {
                           df - k_ring_double * k_hover_inset);
         }
 
-        // Label with antialiased GDI+ text (no ClearType fringing).
-        {
+        if (Has_drawable_glyph(glyph_)) {
+            Draw_glyph(g, *glyph_, To_gdip(text_col), df);
+        } else if (!label_.empty()) {
             g.SetTextRenderingHint(Gdiplus::TextRenderingHintAntiAlias);
             Gdiplus::Font font(L"Segoe UI", kFontSize, Gdiplus::FontStyleBold,
                                Gdiplus::UnitPixel);

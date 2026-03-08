@@ -35,25 +35,26 @@ TEST(annotation_controller, ToolbarViews_ExposeFreehandOnly) {
 
     ASSERT_EQ(views.size(), 1u);
     EXPECT_EQ(views[0].id, AnnotationToolId::Freehand);
-    EXPECT_EQ(views[0].label, L"P");
+    EXPECT_EQ(views[0].label, L"B");
     EXPECT_EQ(views[0].tooltip, L"Brush tool");
+    EXPECT_EQ(views[0].glyph, AnnotationToolbarGlyph::Brush);
     EXPECT_FALSE(views[0].active);
 }
 
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFreehand) {
     AnnotationController controller;
 
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'P'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'B'));
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'P'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'B'));
     EXPECT_EQ(controller.Active_tool(), std::nullopt);
 }
 
 TEST(annotation_controller, ToggleToolByLowercaseHotkey_ActivatesFreehand) {
     AnnotationController controller;
 
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'p'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'b'));
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
 }

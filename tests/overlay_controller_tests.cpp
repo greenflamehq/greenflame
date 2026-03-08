@@ -490,7 +490,7 @@ TEST(overlay_controller,
     Press(c, {100, 100});
     Release(c, {300, 300});
 
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     std::ignore =
         c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0, 0);
@@ -498,7 +498,7 @@ TEST(overlay_controller,
                                     std::nullopt, 0, 0, 100u);
     std::ignore = c.On_primary_release(No_mods(), {140, 140});
     ASSERT_EQ(c.Annotations().size(), 1u);
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
 
     OverlayAction action =
@@ -570,7 +570,7 @@ TEST(overlay_controller, G_Cancel_FinalSelectionAlsoClearsAnnotations) {
     Release(c, {300, 300});
     ASSERT_FALSE(c.State().final_selection.Is_empty());
 
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     std::ignore =
         c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0, 0);
@@ -590,7 +590,7 @@ TEST(overlay_controller, G_Cancel_FinalSelectionResetsActiveToolForNextSelection
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     ASSERT_EQ(c.Active_annotation_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
 
@@ -758,10 +758,10 @@ TEST(overlay_controller, AnnotationToolHotkey_TogglesFreehand) {
     Release(c, {300, 300});
 
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
@@ -778,7 +778,7 @@ TEST(overlay_controller, BrushWidthAdjust_ClampsAndReturnsUpdatedWidth) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
 
     EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
     EXPECT_EQ(c.Adjust_brush_width(1), std::optional<int32_t>{3});
@@ -792,7 +792,7 @@ TEST(overlay_controller,
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
 
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
@@ -841,14 +841,14 @@ TEST(overlay_controller, AnnotationToolbar_AnnotationDragHidesToolbar) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
     ASSERT_EQ(c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
                                  std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
                                  0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_primary_release(No_mods(), {140, 140}), OverlayAction::Repaint);
     ASSERT_EQ(c.Annotations().size(), 1u);
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
 
     ASSERT_TRUE(c.Should_show_annotation_toolbar());
     ASSERT_EQ(c.On_primary_press(No_mods(), {130, 130}, {130, 130}, std::nullopt,

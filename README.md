@@ -31,7 +31,7 @@ Once a region is selected:
 - **Drag the handles** on the selection to resize (hold **Alt** to disable snapping).
 - With **no annotation tool selected** (the default mode), **click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
 - With **no annotation tool selected**, **click and drag an annotation** to **select** and **move** it.
-- Press **P** or use the toolbar to toggle the **Brush tool** on or off.
+- Press **B** or use the toolbar to toggle the **Brush tool** on or off.
 - With an annotation tool active, **right-click** anywhere to open the **color wheel** at the cursor. **Left-click** a segment to select that color, or press **Escape** to dismiss the wheel.
 - With the **Brush tool** active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change brush width from **1** to **50**.
 - With the **Brush tool** active, the overlay shows an anti-aliased circular size preview around the cursor hotspot.

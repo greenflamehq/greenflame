@@ -33,13 +33,18 @@ set(GREENFLAME_COPYRIGHT "Copyright (C) 2026 Jocelyn Legault" CACHE STRING "Copy
 set(GREENFLAME_INTERNAL_NAME "greenflame.exe" CACHE STRING "InternalName in VERSIONINFO")
 set(GREENFLAME_ORIGINAL_FILENAME "greenflame.exe" CACHE STRING "OriginalFilename in VERSIONINFO")
 set(GREENFLAME_MANIFEST_NAME "greenflame" CACHE STRING "Manifest assemblyIdentity name")
-set(GREENFLAME_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/greenflame.ico")
+set(GREENFLAME_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/greenflame.ico")
 file(TO_CMAKE_PATH "${GREENFLAME_ICON_PATH}" GREENFLAME_ICON_PATH)
 set(GREENFLAME_FREEHAND_CURSOR_PATH
-    "${CMAKE_CURRENT_SOURCE_DIR}/small-crosshair.cur"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/small-crosshair.cur"
 )
 file(TO_CMAKE_PATH "${GREENFLAME_FREEHAND_CURSOR_PATH}"
      GREENFLAME_FREEHAND_CURSOR_PATH)
+set(GREENFLAME_BRUSH_TOOL_GLYPH_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/brush-mask.png"
+)
+file(TO_CMAKE_PATH "${GREENFLAME_BRUSH_TOOL_GLYPH_PATH}"
+     GREENFLAME_BRUSH_TOOL_GLYPH_PATH)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/app.manifest.in"
@@ -47,7 +52,7 @@ configure_file(
     @ONLY
 )
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/greenflame.rc.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/greenflame.rc.in"
     "${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc"
     @ONLY
 )

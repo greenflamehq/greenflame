@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-03
+last_updated: 2026-03-08
 tags:
   - build
   - cmake
@@ -70,6 +70,14 @@ For release with Clang:
 cmake --preset x64-release-clang
 cmake --build --preset x64-release-clang
 ```
+
+## Resource assets
+
+Runtime resources embedded into `greenflame.exe` live under `resources/`.
+
+- Keep editable source artwork alongside the derived runtime asset.
+- Check in the derived runtime asset; do not add per-build image conversion steps.
+- For alpha-mask toolbar glyphs and similar assets, follow [docs/resource_processing.md](resource_processing.md).
 
 ## Build Runner Reliability (Ninja + Codex runner)
 

@@ -52,11 +52,11 @@ The annotation system applies only to the interactive overlay flow.
 
 - Default mode: no tool selected
 - Registered tools:
-  - `Brush tool` hotkey `P`
+  - `Brush tool` hotkey `B`
 - The toolbar is anchored to the current selection border.
-- Toolbar buttons currently display the tool hotkey letter.
+- Toolbar buttons display a tool glyph when one is available.
 - Hovering a toolbar button shows a tooltip with the full tool name.
-- Pressing `P` or clicking the `Brush tool` toolbar button toggles that tool on or
+- Pressing `B` or clicking the `Brush tool` toolbar button toggles that tool on or
   off.
 - While an annotation tool is active, right-click opens a color wheel centered on
   the cursor.

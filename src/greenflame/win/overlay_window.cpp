@@ -28,6 +28,7 @@ constexpr int kHelpHintFontHeight = 16;
 constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
 constexpr int kFreehandCursorResourceId = 102;
+constexpr int kBrushToolGlyphResourceId = 103;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 
 constexpr int kThumbnailMaxWidth = 320;
@@ -173,6 +174,146 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     }
 }
 
+template <typename T> struct ComPtr {
+    T *p = nullptr;
+
+    ComPtr() = default;
+    ~ComPtr() {
+        if (p != nullptr) {
+            p->Release();
+        }
+    }
+
+    ComPtr(ComPtr const &) = delete;
+    ComPtr &operator=(ComPtr const &) = delete;
+
+    T **operator&() { return &p; }
+    T *operator->() const { return p; }
+    explicit operator bool() const { return p != nullptr; }
+};
+
+struct CoInitGuard {
+    bool owned = false;
+
+    explicit CoInitGuard(bool owns) : owned(owns) {}
+    ~CoInitGuard() {
+        if (owned) {
+            CoUninitialize();
+        }
+    }
+
+    CoInitGuard(CoInitGuard const &) = delete;
+    CoInitGuard &operator=(CoInitGuard const &) = delete;
+};
+
+[[nodiscard]] std::shared_ptr<greenflame::OverlayButtonGlyph>
+Load_png_resource_alpha_mask(HINSTANCE hinstance, int resource_id) {
+    if (hinstance == nullptr) {
+        return {};
+    }
+
+    HRSRC const resource_info =
+        FindResourceW(hinstance, MAKEINTRESOURCEW(resource_id), RT_RCDATA);
+    if (resource_info == nullptr) {
+        return {};
+    }
+    DWORD const resource_size = SizeofResource(hinstance, resource_info);
+    if (resource_size == 0) {
+        return {};
+    }
+    HGLOBAL const resource_handle = LoadResource(hinstance, resource_info);
+    if (resource_handle == nullptr) {
+        return {};
+    }
+    void const *const resource_data = LockResource(resource_handle);
+    if (resource_data == nullptr) {
+        return {};
+    }
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool coinit = SUCCEEDED(hr);
+    if (hr == RPC_E_CHANGED_MODE) {
+        coinit = false;
+    } else if (FAILED(hr)) {
+        return {};
+    }
+    CoInitGuard const co_guard(coinit);
+
+    ComPtr<IWICImagingFactory> factory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(&factory));
+    if (FAILED(hr) || !factory) {
+        return {};
+    }
+
+    ComPtr<IWICStream> stream;
+    hr = factory->CreateStream(&stream);
+    if (FAILED(hr) || !stream) {
+        return {};
+    }
+
+    BYTE *const stream_bytes =
+        const_cast<BYTE *>(static_cast<BYTE const *>(resource_data));
+    hr = stream->InitializeFromMemory(stream_bytes, resource_size);
+    if (FAILED(hr)) {
+        return {};
+    }
+
+    ComPtr<IWICBitmapDecoder> decoder;
+    hr = factory->CreateDecoderFromStream(stream.p, nullptr,
+                                          WICDecodeMetadataCacheOnLoad, &decoder);
+    if (FAILED(hr) || !decoder) {
+        return {};
+    }
+
+    ComPtr<IWICBitmapFrameDecode> frame;
+    hr = decoder->GetFrame(0, &frame);
+    if (FAILED(hr) || !frame) {
+        return {};
+    }
+
+    UINT width = 0;
+    UINT height = 0;
+    hr = frame->GetSize(&width, &height);
+    if (FAILED(hr) || width == 0 || height == 0) {
+        return {};
+    }
+
+    ComPtr<IWICFormatConverter> converter;
+    hr = factory->CreateFormatConverter(&converter);
+    if (FAILED(hr) || !converter) {
+        return {};
+    }
+    hr = converter->Initialize(frame.p, GUID_WICPixelFormat32bppBGRA,
+                               WICBitmapDitherTypeNone, nullptr, 0.0,
+                               WICBitmapPaletteTypeCustom);
+    if (FAILED(hr)) {
+        return {};
+    }
+
+    UINT const stride = width * 4;
+    size_t const buffer_size =
+        static_cast<size_t>(stride) * static_cast<size_t>(height);
+    std::vector<uint8_t> pixels(buffer_size);
+    hr = converter->CopyPixels(nullptr, stride, static_cast<UINT>(pixels.size()),
+                               pixels.data());
+    if (FAILED(hr)) {
+        return {};
+    }
+
+    auto glyph = std::make_shared<greenflame::OverlayButtonGlyph>();
+    glyph->width = static_cast<int>(width);
+    glyph->height = static_cast<int>(height);
+    glyph->alpha_mask.resize(static_cast<size_t>(width) * static_cast<size_t>(height));
+    for (size_t i = 0; i < glyph->alpha_mask.size(); ++i) {
+        glyph->alpha_mask[i] = pixels[i * 4 + 3];
+    }
+    if (!glyph->Is_valid()) {
+        return {};
+    }
+    return glyph;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -181,6 +322,7 @@ struct OverlayWindow::OverlayResources {
     GdiCaptureResult capture = {};
     std::vector<uint8_t> paint_buffer = {};
     PaintResources paint = {};
+    std::shared_ptr<OverlayButtonGlyph const> brush_tool_glyph = {};
 
     OverlayResources() = default;
     ~OverlayResources() { Reset(); }
@@ -188,7 +330,7 @@ struct OverlayWindow::OverlayResources {
     OverlayResources(OverlayResources const &) = delete;
     OverlayResources &operator=(OverlayResources const &) = delete;
 
-    [[nodiscard]] bool Initialize_for_capture() {
+    [[nodiscard]] bool Initialize_for_capture(HINSTANCE hinstance) {
         if (!capture.Is_valid()) {
             return false;
         }
@@ -216,12 +358,15 @@ struct OverlayWindow::OverlayResources {
         paint.crosshair_pen = CreatePen(PS_SOLID, 1, kOverlayCrosshair);
         paint.border_pen = CreatePen(PS_SOLID, 1, kBorderColor);
         paint.handle_pen = CreatePen(PS_SOLID, 1, kOverlayHandle);
+        brush_tool_glyph =
+            Load_png_resource_alpha_mask(hinstance, kBrushToolGlyphResourceId);
         return true;
     }
 
     void Reset() noexcept {
         capture.Free();
         paint_buffer.clear();
+        brush_tool_glyph.reset();
         if (paint.font_dim) {
             DeleteObject(paint.font_dim);
             paint.font_dim = nullptr;
@@ -295,6 +440,20 @@ OverlayWindow::Compute_toolbar_positions(int button_count) const {
     return core::Compute_toolbar_placement(params).positions;
 }
 
+OverlayButtonGlyph const *OverlayWindow::Resolve_toolbar_button_glyph(
+    core::AnnotationToolbarGlyph glyph) const noexcept {
+    if (resources_ == nullptr) {
+        return nullptr;
+    }
+    switch (glyph) {
+    case core::AnnotationToolbarGlyph::Brush:
+        return resources_->brush_tool_glyph.get();
+    case core::AnnotationToolbarGlyph::None:
+        return nullptr;
+    }
+    return nullptr;
+}
+
 void OverlayWindow::Rebuild_toolbar_buttons() {
     if (!controller_.Should_show_annotation_toolbar()) {
         (void)Clear_toolbar_hover_states();
@@ -314,8 +473,16 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
         ToolbarButtonEntry entry{};
         entry.tool_id = views[i].id;
         entry.tooltip = views[i].tooltip;
-        entry.button = std::make_unique<OverlayButton>(
-            positions[i], kToolbarButtonSizePx, views[i].label, false, views[i].active);
+        OverlayButtonGlyph const *const glyph =
+            Resolve_toolbar_button_glyph(views[i].glyph);
+        if (glyph != nullptr) {
+            entry.button = std::make_unique<OverlayButton>(
+                positions[i], kToolbarButtonSizePx, glyph, false, views[i].active);
+        } else {
+            entry.button =
+                std::make_unique<OverlayButton>(positions[i], kToolbarButtonSizePx,
+                                                views[i].label, false, views[i].active);
+        }
         toolbar_buttons_.push_back(std::move(entry));
     }
 }
@@ -356,7 +523,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     }
 
     if (!Capture_virtual_desktop(resources_->capture) ||
-        !resources_->Initialize_for_capture()) {
+        !resources_->Initialize_for_capture(hinstance_)) {
         DestroyWindow(hwnd);
         return false;
     }
@@ -696,7 +863,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         Apply_action(controller_.On_delete_selected_annotation());
         return 0;
     }
-    if (!eff_ctrl && !eff_alt && wparam == L'P') {
+    if (!eff_ctrl && !eff_alt && wparam == L'B') {
         Apply_action(
             controller_.On_annotation_tool_hotkey(static_cast<wchar_t>(wparam)));
         Refresh_cursor();

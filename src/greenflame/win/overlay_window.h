@@ -95,6 +95,8 @@ class OverlayWindow final {
     [[nodiscard]] bool Is_selection_stable_for_help() const;
     [[nodiscard]] std::wstring_view Hovered_toolbar_tooltip_text() const noexcept;
     [[nodiscard]] std::optional<core::RectPx> Hovered_toolbar_button_bounds() const;
+    [[nodiscard]] OverlayButtonGlyph const *
+    Resolve_toolbar_button_glyph(core::AnnotationToolbarGlyph glyph) const noexcept;
 
     void Rebuild_toolbar_buttons();
     [[nodiscard]] std::vector<core::PointPx>

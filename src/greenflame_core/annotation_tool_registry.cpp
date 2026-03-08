@@ -13,7 +13,9 @@ namespace {
 
 class BrushTool final : public IAnnotationTool {
   public:
-    BrushTool() : descriptor_{AnnotationToolId::Freehand, L"Brush tool", L'P', L"P"} {}
+    BrushTool()
+        : descriptor_{AnnotationToolId::Freehand, L"Brush tool", L'B', L"B",
+                      AnnotationToolbarGlyph::Brush} {}
 
     [[nodiscard]] AnnotationToolDescriptor const &Descriptor() const noexcept override {
         return descriptor_;
@@ -89,6 +91,7 @@ AnnotationToolRegistry::Build_toolbar_button_views(
         AnnotationToolDescriptor const &descriptor = tool->Descriptor();
         views.push_back(AnnotationToolbarButtonView{
             descriptor.id, descriptor.toolbar_label, descriptor.name,
+            descriptor.toolbar_glyph,
             active_tool.has_value() && descriptor.id == *active_tool});
     }
     return views;
