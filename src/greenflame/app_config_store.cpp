@@ -4,6 +4,9 @@ namespace greenflame {
 
 namespace {
 
+constexpr int64_t kInt32MaxValue = std::numeric_limits<int32_t>::max();
+constexpr int64_t kInt32MinMagnitude = kInt32MaxValue + 1;
+
 [[nodiscard]] std::filesystem::path Get_config_path() {
     wchar_t home[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_PROFILE, nullptr, 0, home))) {
@@ -82,12 +85,12 @@ namespace {
             return false;
         }
         parsed = parsed * 10 + static_cast<int64_t>(ch - '0');
-        if (!negative && parsed > 2147483647LL) {
-            out = 2147483647;
+        if (!negative && parsed > kInt32MaxValue) {
+            out = std::numeric_limits<int32_t>::max();
             return true;
         }
-        if (negative && parsed > 2147483648LL) {
-            out = -2147483647 - 1;
+        if (negative && parsed > kInt32MinMagnitude) {
+            out = std::numeric_limits<int32_t>::min();
             return true;
         }
     }
@@ -216,7 +219,8 @@ bool Save_app_config(core::AppConfig const &config) {
                       config.show_selection_size_side_labels);
         write_ui_bool("show_selection_size_center_label",
                       config.show_selection_size_center_label);
-        if (config.tool_size_overlay_duration_ms != defaults.tool_size_overlay_duration_ms) {
+        if (config.tool_size_overlay_duration_ms !=
+            defaults.tool_size_overlay_duration_ms) {
             if (!wrote_ui_header) {
                 file << "[ui]\n";
                 wrote_ui_header = true;

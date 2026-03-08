@@ -134,8 +134,7 @@ std::optional<int32_t> OverlayController::Adjust_brush_width(int32_t delta_steps
             std::optional<AnnotationToolId>{AnnotationToolId::Freehand}) {
         return std::nullopt;
     }
-    int32_t const updated_width =
-        annotation_controller_.Brush_width_px() + delta_steps;
+    int32_t const updated_width = annotation_controller_.Brush_width_px() + delta_steps;
     if (!annotation_controller_.Set_brush_width_px(updated_width)) {
         return std::nullopt;
     }

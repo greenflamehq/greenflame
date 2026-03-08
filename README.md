@@ -33,6 +33,7 @@ Once a region is selected:
 - With **no annotation tool selected**, **click and drag an annotation** to **select** and **move** it.
 - Press **P** or use the toolbar to toggle the **Brush tool** on or off.
 - With the **Brush tool** active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change brush width from **1** to **50**.
+- With the **Brush tool** active, the overlay shows an anti-aliased circular size preview around the cursor hotspot.
 - **Ctrl-S** ➜ save directly (no dialog) to the configured default save folder as the configured format (default PNG), then close.
 - **Ctrl-Shift-S** ➜ open **Save As** dialog, then save and close.
 - **Ctrl-Alt-S** ➜ save directly (no dialog), copy the saved file to the clipboard, then close.

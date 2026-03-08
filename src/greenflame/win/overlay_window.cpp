@@ -29,7 +29,6 @@ constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
 constexpr int kFreehandCursorResourceId = 102;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
-constexpr int32_t kDefaultToolSizeOverlayDurationMs = 800;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -161,8 +160,7 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     return LoadCursorW(nullptr, IDC_CROSS);
 }
 
-[[nodiscard]] std::optional<int32_t>
-Brush_width_delta_for_key(WPARAM wparam) noexcept {
+[[nodiscard]] std::optional<int32_t> Brush_width_delta_for_key(WPARAM wparam) noexcept {
     switch (wparam) {
     case VK_OEM_PLUS:
     case VK_ADD:
@@ -362,8 +360,9 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     }
 
     controller_.Reset_for_session(Get_monitors_with_bounds());
-    controller_.Set_brush_width_px(config_ != nullptr ? config_->brush_width_px
-                                                      : core::StrokeStyle::kDefaultWidthPx);
+    controller_.Set_brush_width_px(config_ != nullptr
+                                       ? config_->brush_width_px
+                                       : core::StrokeStyle::kDefaultWidthPx);
     ShowWindow(hwnd, SW_SHOW);
     return true;
 }
@@ -394,7 +393,7 @@ bool OverlayWindow::Handle_brush_width_delta(int32_t delta_steps) {
 void OverlayWindow::Show_brush_size_overlay(int32_t width_px) {
     int32_t const duration_ms =
         (config_ != nullptr) ? config_->tool_size_overlay_duration_ms
-                             : kDefaultToolSizeOverlayDurationMs;
+                             : core::AppConfig::kDefaultToolSizeOverlayDurationMs;
     if (duration_ms <= 0) {
         Clear_brush_size_overlay(true);
         return;
@@ -429,6 +428,15 @@ bool OverlayWindow::Clear_toolbar_hover_states() {
         }
     }
     return changed;
+}
+
+bool OverlayWindow::Should_show_brush_cursor_preview() const {
+    auto const &s = controller_.State();
+    return controller_.Active_annotation_tool() ==
+               std::optional<core::AnnotationToolId>{
+                   core::AnnotationToolId::Freehand} &&
+           !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
+           !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value();
 }
 
 bool OverlayWindow::Is_selection_stable_for_help() const {
@@ -663,7 +671,8 @@ LRESULT OverlayWindow::On_l_button_down() {
         return 0;
     }
     // Route click to any hovered toolbar button (consume — do not start dragging).
-    if (controller_.Can_interact_with_annotation_toolbar() && !toolbar_buttons_.empty()) {
+    if (controller_.Can_interact_with_annotation_toolbar() &&
+        !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
         for (auto const &btn : toolbar_buttons_) {
             if (btn.button && btn.button->Is_hovered()) {
@@ -767,16 +776,18 @@ LRESULT OverlayWindow::On_mouse_move() {
                 ? core::Index_of_monitor_containing(cursor_screen, s.cached_monitors)
                 : std::nullopt;
     }
-    Apply_action(controller_.On_pointer_move(mods, cursor_client, cursor_screen,
-                                             win_rect, vdesk, monitor_idx, ox, oy,
-                                             static_cast<uint64_t>(GetTickCount64())));
+    core::OverlayAction const action = controller_.On_pointer_move(
+        mods, cursor_client, cursor_screen, win_rect, vdesk, monitor_idx, ox, oy,
+        static_cast<uint64_t>(GetTickCount64()));
+    Apply_action(action);
 
     if (Refresh_hover_handle()) {
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
     // Update toolbar button hover state.
-    if (controller_.Can_interact_with_annotation_toolbar() && !toolbar_buttons_.empty()) {
+    if (controller_.Can_interact_with_annotation_toolbar() &&
+        !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
         bool any_changed = false;
         for (auto const &btn : toolbar_buttons_) {
@@ -795,6 +806,11 @@ LRESULT OverlayWindow::On_mouse_move() {
         }
     } else if (Clear_toolbar_hover_states()) {
         InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    if (Should_show_brush_cursor_preview()) {
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
 
     return 0;
@@ -828,7 +844,8 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
 
 LRESULT OverlayWindow::On_l_button_up() {
     // Route release to any hovered toolbar button.
-    if (controller_.Can_interact_with_annotation_toolbar() && !toolbar_buttons_.empty()) {
+    if (controller_.Can_interact_with_annotation_toolbar() &&
+        !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
         for (auto const &btn : toolbar_buttons_) {
             if (btn.button && btn.button->Is_hovered()) {
@@ -1342,6 +1359,9 @@ LRESULT OverlayWindow::On_paint() {
                    !controller_.Has_active_annotation_gesture()) {
             input.highlight_handle = last_hover_handle_;
         }
+        if (Should_show_brush_cursor_preview()) {
+            input.brush_cursor_preview_width_px = controller_.Brush_width_px();
+        }
         std::vector<IOverlayButton *> btn_ptrs;
         btn_ptrs.reserve(toolbar_buttons_.size());
         for (auto const &u : toolbar_buttons_) {
@@ -1381,6 +1401,10 @@ void OverlayWindow::Refresh_cursor() {
     auto const &s = controller_.State();
     if (s.move_dragging || controller_.Is_annotation_dragging()) {
         SetCursor(Move_mode_cursor());
+        return;
+    }
+    if (controller_.Has_active_annotation_gesture()) {
+        SetCursor(nullptr);
         return;
     }
     if (s.handle_dragging && s.resize_handle.has_value()) {

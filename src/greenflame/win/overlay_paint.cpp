@@ -33,6 +33,8 @@ constexpr COLORREF kMagnifierCheckerLight = RGB(224, 224, 224);
 constexpr COLORREF kMagnifierCheckerDark = RGB(168, 168, 168);
 constexpr int kColorChannelMax = 255;
 constexpr float kColorChannelMaxF = static_cast<float>(kColorChannelMax);
+constexpr Gdiplus::REAL kBrushPreviewWhiteStrokeWidth = 3.0f;
+constexpr Gdiplus::REAL kBrushPreviewBlackStrokeWidth = 1.0f;
 
 constexpr int kSelDashPx = 4;
 constexpr int kSelGapPx = 3;
@@ -397,6 +399,21 @@ void Draw_draft_freehand_stroke(HDC dc,
 
     int const width_px = std::max<int32_t>(1, style.width_px);
     HBRUSH const brush = CreateSolidBrush(style.color);
+    HGDIOBJ const fill_brush = (brush != nullptr) ? brush : GetStockObject(NULL_BRUSH);
+
+    if (points.size() == 1) {
+        int const left = points.front().x - width_px / 2;
+        int const top = points.front().y - width_px / 2;
+        HGDIOBJ const old_brush = SelectObject(dc, fill_brush);
+        HGDIOBJ const old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
+        Ellipse(dc, left, top, left + width_px, top + width_px);
+        SelectObject(dc, old_pen);
+        SelectObject(dc, old_brush);
+        if (brush != nullptr) {
+            DeleteObject(brush);
+        }
+        return;
+    }
 
     LOGBRUSH log_brush{};
     log_brush.lbStyle = BS_SOLID;
@@ -414,23 +431,14 @@ void Draw_draft_freehand_stroke(HDC dc,
     }
 
     HGDIOBJ const old_pen = SelectObject(dc, pen);
-    HGDIOBJ const old_brush =
-        SelectObject(dc, brush != nullptr ? brush : GetStockObject(NULL_BRUSH));
-
-    if (points.size() == 1) {
-        int const left = points.front().x - width_px / 2;
-        int const top = points.front().y - width_px / 2;
-        Ellipse(dc, left, top, left + width_px, top + width_px);
-    } else {
-        std::vector<POINT> polyline_points;
-        polyline_points.reserve(points.size());
-        for (greenflame::core::PointPx const point : points) {
-            polyline_points.push_back({point.x, point.y});
-        }
-        if (!polyline_points.empty()) {
-            Polyline(dc, polyline_points.data(),
-                     static_cast<int>(polyline_points.size()));
-        }
+    HGDIOBJ const old_brush = SelectObject(dc, fill_brush);
+    std::vector<POINT> polyline_points;
+    polyline_points.reserve(points.size());
+    for (greenflame::core::PointPx const point : points) {
+        polyline_points.push_back({point.x, point.y});
+    }
+    if (!polyline_points.empty()) {
+        Polyline(dc, polyline_points.data(), static_cast<int>(polyline_points.size()));
     }
 
     SelectObject(dc, old_brush);
@@ -468,6 +476,43 @@ void Draw_annotation_selection_corners(HDC dc, HPEN pen,
     LineTo(dc, r.right - 1, r.bottom - 1 - corner_h);
 
     SelectObject(dc, old_pen);
+}
+
+void Draw_brush_cursor_preview(HDC dc, int cx, int cy,
+                               int32_t brush_width_px) noexcept {
+    if (dc == nullptr || !Ensure_gdiplus()) {
+        return;
+    }
+
+    Gdiplus::REAL const inner_diameter = static_cast<Gdiplus::REAL>(
+        std::max<int32_t>(greenflame::core::StrokeStyle::kMinWidthPx, brush_width_px));
+    // The preview's white ring starts exactly where the committed brush footprint ends.
+    Gdiplus::REAL const preview_path_diameter =
+        inner_diameter + kBrushPreviewWhiteStrokeWidth;
+    Gdiplus::REAL const left =
+        static_cast<Gdiplus::REAL>(cx) - preview_path_diameter / 2.0f;
+    Gdiplus::REAL const top =
+        static_cast<Gdiplus::REAL>(cy) - preview_path_diameter / 2.0f;
+
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+    BYTE constexpr k_brush_preview_alpha = 0xFF;
+    BYTE constexpr k_brush_preview_white_channel = 0xFF;
+    BYTE constexpr k_brush_preview_black_channel = 0x00;
+
+    Gdiplus::Pen white_pen(
+        Gdiplus::Color(k_brush_preview_alpha, k_brush_preview_white_channel,
+                       k_brush_preview_white_channel, k_brush_preview_white_channel),
+        kBrushPreviewWhiteStrokeWidth);
+    Gdiplus::Pen black_pen(
+        Gdiplus::Color(k_brush_preview_alpha, k_brush_preview_black_channel,
+                       k_brush_preview_black_channel, k_brush_preview_black_channel),
+        kBrushPreviewBlackStrokeWidth);
+    (void)graphics.DrawEllipse(&white_pen, left, top, preview_path_diameter,
+                               preview_path_diameter);
+    (void)graphics.DrawEllipse(&black_pen, left, top, preview_path_diameter,
+                               preview_path_diameter);
 }
 
 void Draw_toolbar_tooltip(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
@@ -917,7 +962,8 @@ void Draw_transient_center_label(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
                                  std::span<uint8_t> pixels,
                                  greenflame::PaintResources const *res,
                                  std::wstring_view text) {
-    if (sel.Is_empty() || text.empty() || res == nullptr || res->font_center == nullptr) {
+    if (sel.Is_empty() || text.empty() || res == nullptr ||
+        res->font_center == nullptr) {
         return;
     }
 
@@ -1268,6 +1314,9 @@ void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &
         in.resources->handle_pen) {
         Draw_annotation_selection_corners(buf_dc, in.resources->handle_pen,
                                           *in.selected_annotation_bounds);
+    }
+    if (in.brush_cursor_preview_width_px.has_value()) {
+        Draw_brush_cursor_preview(buf_dc, cx, cy, *in.brush_cursor_preview_width_px);
     }
 
     if (!in.toolbar_buttons.empty()) {

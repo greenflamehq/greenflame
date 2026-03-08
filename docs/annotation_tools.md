@@ -60,6 +60,8 @@ The annotation system applies only to the interactive overlay flow.
   off.
 - While the Brush tool is active, mouse-wheel up/down or `Ctrl+=` / `Ctrl+-`
   increases or decreases brush width within the `1..50` range.
+- While the Brush tool is active, the overlay draws an anti-aliased circular size
+  preview around the cursor hotspot.
 - Brush-width changes show a temporary centered size overlay inside the current
   selection using the same visual treatment as the center selection-size label.
 - Brush width persists in the INI file at `[tools] brush_width`.

@@ -83,6 +83,7 @@ class OverlayWindow final {
     void Show_brush_size_overlay(int32_t width_px);
     void Clear_brush_size_overlay(bool repaint);
     [[nodiscard]] bool Clear_toolbar_hover_states();
+    [[nodiscard]] bool Should_show_brush_cursor_preview() const;
     [[nodiscard]] bool Is_selection_stable_for_help() const;
     [[nodiscard]] std::wstring_view Hovered_toolbar_tooltip_text() const noexcept;
     [[nodiscard]] std::optional<core::RectPx> Hovered_toolbar_button_bounds() const;

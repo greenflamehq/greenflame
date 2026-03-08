@@ -769,7 +769,8 @@ TEST(overlay_controller, BrushWidthAdjust_ClampsAndReturnsUpdatedWidth) {
     EXPECT_EQ(c.Adjust_brush_width(-100), std::optional<int32_t>{1});
 }
 
-TEST(overlay_controller, AnnotationToolbar_FreehandStrokeStaysVisibleButNonInteractive) {
+TEST(overlay_controller,
+     AnnotationToolbar_FreehandStrokeStaysVisibleButNonInteractive) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});

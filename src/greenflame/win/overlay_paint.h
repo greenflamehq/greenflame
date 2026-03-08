@@ -36,6 +36,7 @@ struct PaintOverlayInput {
     std::span<const core::Annotation> annotations = {};
     std::span<const core::PointPx> draft_freehand_points = {};
     std::optional<core::StrokeStyle> draft_freehand_style = std::nullopt;
+    std::optional<int32_t> brush_cursor_preview_width_px = std::nullopt;
     bool dragging = false;
     bool handle_dragging = false;
     bool move_dragging = false;

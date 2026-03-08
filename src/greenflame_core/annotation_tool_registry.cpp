@@ -13,8 +13,7 @@ namespace {
 
 class BrushTool final : public IAnnotationTool {
   public:
-    BrushTool()
-        : descriptor_{AnnotationToolId::Freehand, L"Brush tool", L'P', L"P"} {}
+    BrushTool() : descriptor_{AnnotationToolId::Freehand, L"Brush tool", L'P', L"P"} {}
 
     [[nodiscard]] AnnotationToolDescriptor const &Descriptor() const noexcept override {
         return descriptor_;
