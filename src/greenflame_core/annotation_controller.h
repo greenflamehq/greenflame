@@ -25,7 +25,7 @@ class PassthroughStrokeSmoother final : public IStrokeSmoother {
     Smooth(std::span<const PointPx> points) const override;
 };
 
-class AnnotationController final {
+class AnnotationController final : public IAnnotationToolHost {
   public:
     AnnotationController();
 
@@ -56,9 +56,7 @@ class AnnotationController final {
         return document_.annotations;
     }
     [[nodiscard]] Annotation const *Draft_annotation() const noexcept;
-    [[nodiscard]] std::span<const PointPx> Draft_freehand_points() const noexcept {
-        return freehand_points_;
-    }
+    [[nodiscard]] std::span<const PointPx> Draft_freehand_points() const noexcept;
     [[nodiscard]] std::optional<StrokeStyle> Draft_freehand_style() const noexcept;
     [[nodiscard]] std::optional<double> Draft_line_angle_radians() const noexcept;
     [[nodiscard]] std::optional<uint64_t> Selected_annotation_id() const noexcept {
@@ -91,14 +89,6 @@ class AnnotationController final {
     [[nodiscard]] bool
     Set_selected_annotation(std::optional<uint64_t> selected_annotation_id) noexcept;
     [[nodiscard]] bool Select_topmost_annotation(PointPx cursor);
-    void Begin_freehand_stroke(PointPx start);
-    [[nodiscard]] bool Append_freehand_point(PointPx point);
-    [[nodiscard]] bool Commit_freehand_stroke(UndoStack &undo_stack);
-    [[nodiscard]] bool Cancel_freehand_stroke();
-    void Begin_line(PointPx start);
-    [[nodiscard]] bool Update_line(PointPx point);
-    [[nodiscard]] bool Commit_line(UndoStack &undo_stack);
-    [[nodiscard]] bool Cancel_line();
     [[nodiscard]] bool Begin_annotation_drag(uint64_t id, PointPx cursor);
     [[nodiscard]] bool Update_annotation_drag(PointPx cursor);
     [[nodiscard]] bool Commit_annotation_drag(UndoStack &undo_stack);
@@ -124,30 +114,27 @@ class AnnotationController final {
                              std::optional<uint64_t> selected_annotation_id);
 
   private:
+    [[nodiscard]] StrokeStyle Current_stroke_style() const noexcept override;
+    [[nodiscard]] uint64_t Next_annotation_id() const noexcept override;
+    [[nodiscard]] std::vector<PointPx>
+    Smooth_points(std::span<const PointPx> points) const override;
+    void Commit_new_annotation(UndoStack &undo_stack, Annotation annotation) override;
+
     [[nodiscard]] IAnnotationTool *Active_tool_impl() noexcept;
     [[nodiscard]] IAnnotationTool const *Active_tool_impl() const noexcept;
     [[nodiscard]] std::optional<size_t> Selected_annotation_index() const noexcept;
-    [[nodiscard]] Annotation
-    Build_freehand_annotation(std::span<const PointPx> raw_points) const;
-    [[nodiscard]] Annotation Build_line_annotation(PointPx start, PointPx end) const;
 
     AnnotationDocument document_ = {};
     AnnotationToolRegistry registry_ = {};
     PassthroughStrokeSmoother smoother_ = {};
     std::optional<AnnotationToolId> active_tool_ = std::nullopt;
     StrokeStyle brush_style_ = {};
-    bool freehand_drawing_ = false;
-    bool line_drawing_ = false;
     bool annotation_dragging_ = false;
     bool line_endpoint_dragging_ = false;
-    std::vector<PointPx> freehand_points_ = {};
-    PointPx line_start_ = {};
-    PointPx line_end_ = {};
     PointPx annotation_drag_start_ = {};
     Annotation annotation_drag_before_ = {};
     Annotation annotation_edit_before_ = {};
     std::optional<AnnotationLineEndpoint> active_line_endpoint_drag_ = std::nullopt;
-    mutable std::optional<Annotation> draft_annotation_cache_ = std::nullopt;
 };
 
 } // namespace greenflame::core

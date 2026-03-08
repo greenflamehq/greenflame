@@ -24,18 +24,13 @@ void AnnotationController::Reset_for_session() {
     document_ = {};
     active_tool_.reset();
     brush_style_ = {};
-    freehand_drawing_ = false;
-    line_drawing_ = false;
     annotation_dragging_ = false;
     line_endpoint_dragging_ = false;
-    freehand_points_.clear();
-    line_start_ = {};
-    line_end_ = {};
     annotation_drag_start_ = {};
     annotation_drag_before_ = {};
     annotation_edit_before_ = {};
     active_line_endpoint_drag_.reset();
-    draft_annotation_cache_.reset();
+    registry_.Reset_all();
 }
 
 bool AnnotationController::Toggle_tool(AnnotationToolId id) {
@@ -78,7 +73,7 @@ bool AnnotationController::Set_brush_width_px(int32_t width_px) noexcept {
         return false;
     }
     brush_style_.width_px = clamped_width;
-    draft_annotation_cache_.reset();
+    registry_.On_stroke_style_changed();
     return true;
 }
 
@@ -87,48 +82,29 @@ bool AnnotationController::Set_annotation_color(COLORREF color) noexcept {
         return false;
     }
     brush_style_.color = color;
-    draft_annotation_cache_.reset();
+    registry_.On_stroke_style_changed();
     return true;
 }
 
 Annotation const *AnnotationController::Draft_annotation() const noexcept {
-    if (freehand_drawing_) {
-        if (freehand_points_.empty()) {
-            return nullptr;
-        }
-        if (!draft_annotation_cache_.has_value()) {
-            draft_annotation_cache_ = Build_freehand_annotation(freehand_points_);
-        }
-        return &*draft_annotation_cache_;
-    }
-
-    if (line_drawing_) {
-        if (!draft_annotation_cache_.has_value()) {
-            draft_annotation_cache_ = Build_line_annotation(line_start_, line_end_);
-        }
-        return &*draft_annotation_cache_;
-    }
-
-    return nullptr;
+    IAnnotationTool const *const tool = Active_tool_impl();
+    return tool == nullptr ? nullptr : tool->Draft_annotation(*this);
 }
 
 std::optional<StrokeStyle> AnnotationController::Draft_freehand_style() const noexcept {
-    if (!freehand_drawing_ || freehand_points_.empty()) {
+    IAnnotationTool const *const tool = Active_tool_impl();
+    if (tool == nullptr) {
         return std::nullopt;
     }
-    return brush_style_;
+    return tool->Draft_freehand_style(*this);
 }
 
 std::optional<double> AnnotationController::Draft_line_angle_radians() const noexcept {
-    if (!line_drawing_) {
+    IAnnotationTool const *const tool = Active_tool_impl();
+    if (tool == nullptr) {
         return std::nullopt;
     }
-    int32_t const dx = line_end_.x - line_start_.x;
-    int32_t const dy = line_end_.y - line_start_.y;
-    if (dx == 0 && dy == 0) {
-        return std::nullopt;
-    }
-    return std::atan2(static_cast<double>(dy), static_cast<double>(dx));
+    return tool->Draft_line_angle_radians();
 }
 
 std::optional<size_t> AnnotationController::Selected_annotation_index() const noexcept {
@@ -167,7 +143,8 @@ AnnotationController::Selected_line_handle_at(PointPx cursor) const noexcept {
 }
 
 bool AnnotationController::Has_active_tool_gesture() const noexcept {
-    return freehand_drawing_ || line_drawing_;
+    IAnnotationTool const *const tool = Active_tool_impl();
+    return tool != nullptr && tool->Has_active_gesture();
 }
 
 bool AnnotationController::Has_active_gesture() const noexcept {
@@ -244,18 +221,13 @@ bool AnnotationController::Delete_selected_annotation(UndoStack &undo_stack) {
 void AnnotationController::Clear_annotations() noexcept {
     document_.annotations.clear();
     document_.selected_annotation_id = std::nullopt;
-    freehand_drawing_ = false;
-    line_drawing_ = false;
     annotation_dragging_ = false;
     line_endpoint_dragging_ = false;
-    freehand_points_.clear();
-    line_start_ = {};
-    line_end_ = {};
     annotation_drag_start_ = {};
     annotation_drag_before_ = {};
     annotation_edit_before_ = {};
     active_line_endpoint_drag_.reset();
-    draft_annotation_cache_.reset();
+    registry_.Reset_all();
 }
 
 void AnnotationController::Reset_for_selection_mode() noexcept {
@@ -286,97 +258,33 @@ bool AnnotationController::Select_topmost_annotation(PointPx cursor) {
     return Set_selected_annotation(Annotation_id_at(cursor));
 }
 
-void AnnotationController::Begin_freehand_stroke(PointPx start) {
-    freehand_drawing_ = true;
-    freehand_points_.clear();
-    freehand_points_.push_back(start);
-    draft_annotation_cache_.reset();
+std::span<const PointPx> AnnotationController::Draft_freehand_points() const noexcept {
+    IAnnotationTool const *const tool = Active_tool_impl();
+    if (tool == nullptr) {
+        return {};
+    }
+    return tool->Draft_freehand_points();
 }
 
-bool AnnotationController::Append_freehand_point(PointPx point) {
-    if (!freehand_drawing_) {
-        return false;
-    }
-    if (!freehand_points_.empty() && freehand_points_.back() == point) {
-        return false;
-    }
-    freehand_points_.push_back(point);
-    draft_annotation_cache_.reset();
-    return true;
+StrokeStyle AnnotationController::Current_stroke_style() const noexcept {
+    return brush_style_;
 }
 
-bool AnnotationController::Commit_freehand_stroke(UndoStack &undo_stack) {
-    if (!freehand_drawing_) {
-        return false;
-    }
-    freehand_drawing_ = false;
-    draft_annotation_cache_.reset();
-    if (freehand_points_.empty()) {
-        return true;
-    }
+uint64_t AnnotationController::Next_annotation_id() const noexcept {
+    return document_.next_annotation_id;
+}
 
-    Annotation annotation = Build_freehand_annotation(freehand_points_);
-    freehand_points_.clear();
+std::vector<PointPx>
+AnnotationController::Smooth_points(std::span<const PointPx> points) const {
+    return smoother_.Smooth(points);
+}
+
+void AnnotationController::Commit_new_annotation(UndoStack &undo_stack,
+                                                 Annotation annotation) {
     size_t const insert_index = document_.annotations.size();
     undo_stack.Push(std::make_unique<AddAnnotationCommand>(
         this, insert_index, std::move(annotation), document_.selected_annotation_id,
         document_.selected_annotation_id));
-    return true;
-}
-
-bool AnnotationController::Cancel_freehand_stroke() {
-    if (!freehand_drawing_) {
-        return false;
-    }
-    freehand_drawing_ = false;
-    freehand_points_.clear();
-    draft_annotation_cache_.reset();
-    return true;
-}
-
-void AnnotationController::Begin_line(PointPx start) {
-    line_drawing_ = true;
-    line_start_ = start;
-    line_end_ = start;
-    draft_annotation_cache_.reset();
-}
-
-bool AnnotationController::Update_line(PointPx point) {
-    if (!line_drawing_ || line_end_ == point) {
-        return false;
-    }
-    line_end_ = point;
-    draft_annotation_cache_.reset();
-    return true;
-}
-
-bool AnnotationController::Commit_line(UndoStack &undo_stack) {
-    if (!line_drawing_) {
-        return false;
-    }
-
-    line_drawing_ = false;
-    draft_annotation_cache_.reset();
-    Annotation annotation = Build_line_annotation(line_start_, line_end_);
-    line_start_ = {};
-    line_end_ = {};
-
-    size_t const insert_index = document_.annotations.size();
-    undo_stack.Push(std::make_unique<AddAnnotationCommand>(
-        this, insert_index, std::move(annotation), document_.selected_annotation_id,
-        document_.selected_annotation_id));
-    return true;
-}
-
-bool AnnotationController::Cancel_line() {
-    if (!line_drawing_) {
-        return false;
-    }
-    line_drawing_ = false;
-    line_start_ = {};
-    line_end_ = {};
-    draft_annotation_cache_.reset();
-    return true;
 }
 
 bool AnnotationController::Begin_annotation_drag(uint64_t id, PointPx cursor) {
@@ -598,31 +506,6 @@ IAnnotationTool const *AnnotationController::Active_tool_impl() const noexcept {
         return nullptr;
     }
     return registry_.Find_by_id(*active_tool_);
-}
-
-Annotation AnnotationController::Build_freehand_annotation(
-    std::span<const PointPx> raw_points) const {
-    Annotation annotation{};
-    annotation.id = document_.next_annotation_id;
-    annotation.kind = AnnotationKind::Freehand;
-    annotation.freehand.style = brush_style_;
-    annotation.freehand.points = smoother_.Smooth(raw_points);
-    annotation.freehand.raster = Rasterize_freehand_stroke(annotation.freehand.points,
-                                                           annotation.freehand.style);
-    return annotation;
-}
-
-Annotation AnnotationController::Build_line_annotation(PointPx start,
-                                                       PointPx end) const {
-    Annotation annotation{};
-    annotation.id = document_.next_annotation_id;
-    annotation.kind = AnnotationKind::Line;
-    annotation.line.start = start;
-    annotation.line.end = end;
-    annotation.line.style = brush_style_;
-    annotation.line.raster = Rasterize_line_segment(
-        annotation.line.start, annotation.line.end, annotation.line.style);
-    return annotation;
 }
 
 } // namespace greenflame::core

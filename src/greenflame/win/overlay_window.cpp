@@ -1693,9 +1693,13 @@ LRESULT OverlayWindow::On_paint() {
         input.paint_buffer = std::span<uint8_t>(resources_->paint_buffer);
         input.resources = &resources_->paint;
         input.annotations = controller_.Annotations();
-        input.draft_annotation = controller_.Draft_annotation();
         input.draft_freehand_points = controller_.Draft_freehand_points();
         input.draft_freehand_style = controller_.Draft_freehand_style();
+        // Freehand preview draws directly from points/style; avoid building the
+        // full rasterized draft annotation unless a non-freehand tool needs it.
+        if (!input.draft_freehand_style.has_value()) {
+            input.draft_annotation = controller_.Draft_annotation();
+        }
         input.selected_annotation = controller_.Selected_annotation();
         input.selected_annotation_bounds = controller_.Selected_annotation_bounds();
         input.transient_center_label_text = brush_size_overlay_text_;

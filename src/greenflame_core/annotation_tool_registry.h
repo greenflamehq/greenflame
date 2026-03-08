@@ -14,6 +14,8 @@ class AnnotationToolRegistry final {
     [[nodiscard]] IAnnotationTool *Find_by_hotkey(wchar_t hotkey) noexcept;
     [[nodiscard]] std::vector<AnnotationToolbarButtonView>
     Build_toolbar_button_views(std::optional<AnnotationToolId> active_tool) const;
+    void Reset_all() noexcept;
+    void On_stroke_style_changed() noexcept;
 
   private:
     std::vector<std::unique_ptr<IAnnotationTool>> tools_ = {};

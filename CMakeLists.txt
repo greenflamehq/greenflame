@@ -104,6 +104,10 @@ add_library(greenflame_core STATIC
     src/greenflame_core/annotation_raster.cpp
     src/greenflame_core/annotation_raster.h
     src/greenflame_core/annotation_tool.h
+    src/greenflame_core/freehand_annotation_tool.cpp
+    src/greenflame_core/freehand_annotation_tool.h
+    src/greenflame_core/line_annotation_tool.cpp
+    src/greenflame_core/line_annotation_tool.h
     src/greenflame_core/annotation_tool_registry.cpp
     src/greenflame_core/annotation_tool_registry.h
     src/greenflame_core/color_wheel.cpp

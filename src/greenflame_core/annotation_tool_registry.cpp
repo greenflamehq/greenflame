@@ -1,7 +1,7 @@
 #include "greenflame_core/annotation_tool_registry.h"
 
-#include "greenflame_core/annotation_controller.h"
-#include "greenflame_core/undo_stack.h"
+#include "greenflame_core/freehand_annotation_tool.h"
+#include "greenflame_core/line_annotation_tool.h"
 
 namespace greenflame::core {
 
@@ -11,79 +11,11 @@ namespace {
     return static_cast<wchar_t>(std::towupper(hotkey));
 }
 
-class BrushTool final : public IAnnotationTool {
-  public:
-    BrushTool()
-        : descriptor_{AnnotationToolId::Freehand, L"Brush tool", L'B', L"B",
-                      AnnotationToolbarGlyph::Brush} {}
-
-    [[nodiscard]] AnnotationToolDescriptor const &Descriptor() const noexcept override {
-        return descriptor_;
-    }
-
-    [[nodiscard]] bool On_primary_press(AnnotationController &controller,
-                                        PointPx cursor) override {
-        controller.Begin_freehand_stroke(cursor);
-        return true;
-    }
-
-    [[nodiscard]] bool On_pointer_move(AnnotationController &controller,
-                                       PointPx cursor) override {
-        return controller.Append_freehand_point(cursor);
-    }
-
-    [[nodiscard]] bool On_primary_release(AnnotationController &controller,
-                                          UndoStack &undo_stack) override {
-        return controller.Commit_freehand_stroke(undo_stack);
-    }
-
-    [[nodiscard]] bool On_cancel(AnnotationController &controller) override {
-        return controller.Cancel_freehand_stroke();
-    }
-
-  private:
-    AnnotationToolDescriptor descriptor_;
-};
-
-class LineTool final : public IAnnotationTool {
-  public:
-    LineTool()
-        : descriptor_{AnnotationToolId::Line, L"Line tool", L'L', L"L",
-                      AnnotationToolbarGlyph::Line} {}
-
-    [[nodiscard]] AnnotationToolDescriptor const &Descriptor() const noexcept override {
-        return descriptor_;
-    }
-
-    [[nodiscard]] bool On_primary_press(AnnotationController &controller,
-                                        PointPx cursor) override {
-        controller.Begin_line(cursor);
-        return true;
-    }
-
-    [[nodiscard]] bool On_pointer_move(AnnotationController &controller,
-                                       PointPx cursor) override {
-        return controller.Update_line(cursor);
-    }
-
-    [[nodiscard]] bool On_primary_release(AnnotationController &controller,
-                                          UndoStack &undo_stack) override {
-        return controller.Commit_line(undo_stack);
-    }
-
-    [[nodiscard]] bool On_cancel(AnnotationController &controller) override {
-        return controller.Cancel_line();
-    }
-
-  private:
-    AnnotationToolDescriptor descriptor_;
-};
-
 } // namespace
 
 AnnotationToolRegistry::AnnotationToolRegistry() {
-    tools_.push_back(std::make_unique<BrushTool>());
-    tools_.push_back(std::make_unique<LineTool>());
+    tools_.push_back(std::make_unique<FreehandAnnotationTool>());
+    tools_.push_back(std::make_unique<LineAnnotationTool>());
 }
 
 IAnnotationTool const *
@@ -130,6 +62,18 @@ AnnotationToolRegistry::Build_toolbar_button_views(
             active_tool.has_value() && descriptor.id == *active_tool});
     }
     return views;
+}
+
+void AnnotationToolRegistry::Reset_all() noexcept {
+    for (auto &tool : tools_) {
+        tool->Reset();
+    }
+}
+
+void AnnotationToolRegistry::On_stroke_style_changed() noexcept {
+    for (auto &tool : tools_) {
+        tool->On_stroke_style_changed();
+    }
 }
 
 } // namespace greenflame::core
