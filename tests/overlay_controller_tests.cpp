@@ -583,6 +583,24 @@ TEST(overlay_controller, G_Cancel_FinalSelectionAlsoClearsAnnotations) {
     EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_TRUE(c.State().final_selection.Is_empty());
     EXPECT_TRUE(c.Annotations().empty());
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+}
+
+TEST(overlay_controller, G_Cancel_FinalSelectionResetsActiveToolForNextSelection) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.Active_annotation_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
+
+    EXPECT_EQ(c.On_cancel(), OverlayAction::Repaint);
+    EXPECT_TRUE(c.State().final_selection.Is_empty());
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+
+    EXPECT_EQ(Press(c, {400, 400}), OverlayAction::Repaint);
+    EXPECT_EQ(Release(c, {600, 600}), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
 TEST(overlay_controller, G_Cancel_AllClear_ReturnsClose) {

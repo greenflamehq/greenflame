@@ -79,6 +79,7 @@ class AnnotationController final {
     [[nodiscard]] bool On_cancel();
     [[nodiscard]] bool Delete_selected_annotation(UndoStack &undo_stack);
     void Clear_annotations() noexcept;
+    void Reset_for_selection_mode() noexcept;
 
     // Tool-support API
     [[nodiscard]] std::optional<uint64_t>

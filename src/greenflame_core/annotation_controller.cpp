@@ -194,6 +194,11 @@ void AnnotationController::Clear_annotations() noexcept {
     freehand_preview_.reset();
 }
 
+void AnnotationController::Reset_for_selection_mode() noexcept {
+    active_tool_.reset();
+    Clear_annotations();
+}
+
 std::optional<uint64_t>
 AnnotationController::Annotation_id_at(PointPx cursor) const noexcept {
     std::optional<size_t> const index =

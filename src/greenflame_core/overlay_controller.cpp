@@ -52,7 +52,7 @@ void OverlayController::Reset_for_session(std::vector<MonitorWithBounds> monitor
 void OverlayController::Set_final_selection(RectPx r) {
     state_.final_selection = r;
     if (r.Is_empty()) {
-        annotation_controller_.Clear_annotations();
+        annotation_controller_.Reset_for_selection_mode();
     }
 }
 
