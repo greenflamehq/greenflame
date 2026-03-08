@@ -212,7 +212,9 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
     core::OverlayHelpSection tools{};
     tools.title = L"Annotation Tools";
     tools.entries = {
-        {L"P", L"Toggle freehand annotations"},
+        {L"P", L"Toggle Brush tool"},
+        {L"Wheel Up / Ctrl + =", L"Increase Brush tool width"},
+        {L"Wheel Down / Ctrl + -", L"Decrease Brush tool width"},
     };
     content.sections.push_back(std::move(tools));
 

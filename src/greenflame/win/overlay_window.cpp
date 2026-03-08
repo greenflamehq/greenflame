@@ -2,6 +2,7 @@
 
 #include "win/overlay_window.h"
 
+#include "app_config_store.h"
 #include "greenflame_core/app_config.h"
 #include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
@@ -27,6 +28,8 @@ constexpr int kHelpHintFontHeight = 16;
 constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
 constexpr int kFreehandCursorResourceId = 102;
+constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
+constexpr int32_t kDefaultToolSizeOverlayDurationMs = 800;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -158,6 +161,20 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     return LoadCursorW(nullptr, IDC_CROSS);
 }
 
+[[nodiscard]] std::optional<int32_t>
+Brush_width_delta_for_key(WPARAM wparam) noexcept {
+    switch (wparam) {
+    case VK_OEM_PLUS:
+    case VK_ADD:
+        return 1;
+    case VK_OEM_MINUS:
+    case VK_SUBTRACT:
+        return -1;
+    default:
+        return std::nullopt;
+    }
+}
+
 } // namespace
 
 namespace greenflame {
@@ -281,17 +298,8 @@ OverlayWindow::Compute_toolbar_positions(int button_count) const {
 }
 
 void OverlayWindow::Rebuild_toolbar_buttons() {
-    auto const &s = controller_.State();
-    bool const stable = !s.final_selection.Is_empty() && !s.dragging &&
-                        !s.handle_dragging && !s.move_dragging &&
-                        !controller_.Has_active_annotation_gesture();
-
-    if (!stable) {
-        for (auto const &btn : toolbar_buttons_) {
-            if (btn.button) {
-                btn.button->On_mouse_leave();
-            }
-        }
+    if (!controller_.Should_show_annotation_toolbar()) {
+        (void)Clear_toolbar_hover_states();
         toolbar_buttons_.clear();
         return;
     }
@@ -335,6 +343,8 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     }
     hinstance_ = hinstance;
     resources_->Reset();
+    mouse_wheel_delta_remainder_ = 0;
+    brush_size_overlay_text_.clear();
 
     core::RectPx const bounds = Get_virtual_desktop_bounds_px();
     HWND const hwnd = CreateWindowExW(
@@ -352,6 +362,8 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     }
 
     controller_.Reset_for_session(Get_monitors_with_bounds());
+    controller_.Set_brush_width_px(config_ != nullptr ? config_->brush_width_px
+                                                      : core::StrokeStyle::kDefaultWidthPx);
     ShowWindow(hwnd, SW_SHOW);
     return true;
 }
@@ -365,6 +377,60 @@ void OverlayWindow::Destroy() {
 
 bool OverlayWindow::Is_open() const { return hwnd_ != nullptr && IsWindow(hwnd_) != 0; }
 
+bool OverlayWindow::Handle_brush_width_delta(int32_t delta_steps) {
+    std::optional<int32_t> const width = controller_.Adjust_brush_width(delta_steps);
+    if (!width.has_value()) {
+        return false;
+    }
+    if (config_ != nullptr) {
+        config_->brush_width_px = *width;
+        config_->Normalize();
+        (void)Save_app_config(*config_);
+    }
+    Show_brush_size_overlay(*width);
+    return true;
+}
+
+void OverlayWindow::Show_brush_size_overlay(int32_t width_px) {
+    int32_t const duration_ms =
+        (config_ != nullptr) ? config_->tool_size_overlay_duration_ms
+                             : kDefaultToolSizeOverlayDurationMs;
+    if (duration_ms <= 0) {
+        Clear_brush_size_overlay(true);
+        return;
+    }
+
+    brush_size_overlay_text_ = std::to_wstring(width_px);
+    brush_size_overlay_text_ += L" px";
+    (void)SetTimer(hwnd_, kBrushSizeOverlayTimerId, static_cast<UINT>(duration_ms),
+                   nullptr);
+    InvalidateRect(hwnd_, nullptr, FALSE);
+}
+
+void OverlayWindow::Clear_brush_size_overlay(bool repaint) {
+    if (hwnd_ != nullptr) {
+        (void)KillTimer(hwnd_, kBrushSizeOverlayTimerId);
+    }
+    if (brush_size_overlay_text_.empty()) {
+        return;
+    }
+    brush_size_overlay_text_.clear();
+    if (repaint && hwnd_ != nullptr) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+}
+
+bool OverlayWindow::Clear_toolbar_hover_states() {
+    bool changed = false;
+    for (auto const &entry : toolbar_buttons_) {
+        if (entry.button != nullptr && entry.button->Is_hovered()) {
+            entry.button->On_mouse_leave();
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 bool OverlayWindow::Is_selection_stable_for_help() const {
     auto const &s = controller_.State();
     return !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
@@ -373,6 +439,9 @@ bool OverlayWindow::Is_selection_stable_for_help() const {
 }
 
 std::wstring_view OverlayWindow::Hovered_toolbar_tooltip_text() const noexcept {
+    if (!controller_.Can_interact_with_annotation_toolbar()) {
+        return {};
+    }
     for (auto const &entry : toolbar_buttons_) {
         if (entry.button && entry.button->Is_hovered()) {
             return entry.tooltip;
@@ -382,6 +451,9 @@ std::wstring_view OverlayWindow::Hovered_toolbar_tooltip_text() const noexcept {
 }
 
 std::optional<core::RectPx> OverlayWindow::Hovered_toolbar_button_bounds() const {
+    if (!controller_.Can_interact_with_annotation_toolbar()) {
+        return std::nullopt;
+    }
     for (auto const &entry : toolbar_buttons_) {
         if (entry.button && entry.button->Is_hovered()) {
             return entry.button->Bounds();
@@ -505,6 +577,13 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         Apply_action(controller_.On_copy_to_clipboard_requested());
         return 0;
     }
+    if (eff_ctrl && !eff_alt) {
+        if (std::optional<int32_t> const delta = Brush_width_delta_for_key(wparam);
+            delta.has_value()) {
+            (void)Handle_brush_width_delta(*delta);
+            return 0;
+        }
+    }
     if (wparam == VK_DELETE) {
         Apply_action(controller_.On_delete_selected_annotation());
         return 0;
@@ -584,7 +663,7 @@ LRESULT OverlayWindow::On_l_button_down() {
         return 0;
     }
     // Route click to any hovered toolbar button (consume — do not start dragging).
-    if (!toolbar_buttons_.empty()) {
+    if (controller_.Can_interact_with_annotation_toolbar() && !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
         for (auto const &btn : toolbar_buttons_) {
             if (btn.button && btn.button->Is_hovered()) {
@@ -697,7 +776,7 @@ LRESULT OverlayWindow::On_mouse_move() {
     }
 
     // Update toolbar button hover state.
-    if (!toolbar_buttons_.empty()) {
+    if (controller_.Can_interact_with_annotation_toolbar() && !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
         bool any_changed = false;
         for (auto const &btn : toolbar_buttons_) {
@@ -714,14 +793,42 @@ LRESULT OverlayWindow::On_mouse_move() {
         if (any_changed) {
             InvalidateRect(hwnd_, nullptr, FALSE);
         }
+    } else if (Clear_toolbar_hover_states()) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
     return 0;
 }
 
+LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
+    if (hotkey_help_overlay_.Is_visible()) {
+        return 0;
+    }
+    if (controller_.Active_annotation_tool() !=
+        std::optional<core::AnnotationToolId>{core::AnnotationToolId::Freehand}) {
+        mouse_wheel_delta_remainder_ = 0;
+        return 0;
+    }
+
+    mouse_wheel_delta_remainder_ += GET_WHEEL_DELTA_WPARAM(wparam);
+    int32_t delta_steps = 0;
+    while (mouse_wheel_delta_remainder_ >= WHEEL_DELTA) {
+        ++delta_steps;
+        mouse_wheel_delta_remainder_ -= WHEEL_DELTA;
+    }
+    while (mouse_wheel_delta_remainder_ <= -WHEEL_DELTA) {
+        --delta_steps;
+        mouse_wheel_delta_remainder_ += WHEEL_DELTA;
+    }
+    if (delta_steps != 0) {
+        (void)Handle_brush_width_delta(delta_steps);
+    }
+    return 0;
+}
+
 LRESULT OverlayWindow::On_l_button_up() {
     // Route release to any hovered toolbar button.
-    if (!toolbar_buttons_.empty()) {
+    if (controller_.Can_interact_with_annotation_toolbar() && !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
         for (auto const &btn : toolbar_buttons_) {
             if (btn.button && btn.button->Is_hovered()) {
@@ -781,6 +888,14 @@ LRESULT OverlayWindow::On_l_button_up() {
     return 0;
 }
 
+LRESULT OverlayWindow::On_timer(WPARAM wparam) {
+    if (wparam == kBrushSizeOverlayTimerId) {
+        Clear_brush_size_overlay(true);
+        return 0;
+    }
+    return DefWindowProcW(hwnd_, WM_TIMER, wparam, 0);
+}
+
 bool OverlayWindow::Refresh_hover_handle() {
     auto const &s = controller_.State();
     if (!s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
@@ -814,12 +929,16 @@ LRESULT OverlayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
         return On_l_button_down();
     case WM_MOUSEMOVE:
         return On_mouse_move();
+    case WM_MOUSEWHEEL:
+        return On_mouse_wheel(wparam);
     case WM_LBUTTONUP:
         return On_l_button_up();
     case WM_PAINT:
         return On_paint();
     case WM_SETCURSOR:
         return On_set_cursor(wparam, lparam);
+    case WM_TIMER:
+        return On_timer(wparam);
     case WM_ERASEBKGND:
         return 1;
     case WM_DESTROY:
@@ -1214,6 +1333,7 @@ LRESULT OverlayWindow::On_paint() {
         input.draft_freehand_points = controller_.Draft_freehand_points();
         input.draft_freehand_style = controller_.Draft_freehand_style();
         input.selected_annotation_bounds = controller_.Selected_annotation_bounds();
+        input.transient_center_label_text = brush_size_overlay_text_;
         input.toolbar_tooltip_text = Hovered_toolbar_tooltip_text();
         input.hovered_toolbar_bounds = Hovered_toolbar_button_bounds();
         if (s.handle_dragging && s.resize_handle.has_value()) {
@@ -1236,6 +1356,8 @@ LRESULT OverlayWindow::On_paint() {
 }
 
 LRESULT OverlayWindow::On_destroy() {
+    Clear_brush_size_overlay(false);
+    mouse_wheel_delta_remainder_ = 0;
     toolbar_buttons_.clear();
     resources_->Reset();
     controller_.Reset_for_session({});

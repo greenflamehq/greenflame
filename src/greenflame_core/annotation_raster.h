@@ -9,7 +9,9 @@ enum class AnnotationKind : uint8_t {
 };
 
 struct StrokeStyle final {
-    static constexpr int32_t kDefaultWidthPx = 5;
+    static constexpr int32_t kMinWidthPx = 1;
+    static constexpr int32_t kDefaultWidthPx = 2;
+    static constexpr int32_t kMaxWidthPx = 50;
     static constexpr COLORREF kDefaultColor = static_cast<COLORREF>(0x000000FFu);
 
     int32_t width_px = kDefaultWidthPx;

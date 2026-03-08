@@ -6,6 +6,8 @@ namespace {
 
 constexpr size_t kMaxWindowsPathChars = 260;
 constexpr size_t kMaxConfigPathChars = kMaxWindowsPathChars - 1;
+constexpr int32_t kMinBrushWidthPx = 1;
+constexpr int32_t kMaxBrushWidthPx = 50;
 
 } // namespace
 
@@ -26,6 +28,10 @@ void AppConfig::Normalize() {
     clamp_pattern(filename_pattern_desktop);
     clamp_pattern(filename_pattern_monitor);
     clamp_pattern(filename_pattern_window);
+    brush_width_px =
+        std::clamp(brush_width_px, kMinBrushWidthPx, kMaxBrushWidthPx);
+    tool_size_overlay_duration_ms =
+        std::max(tool_size_overlay_duration_ms, 0);
 
     if (default_save_format.empty()) {
         return;

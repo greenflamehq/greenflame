@@ -746,3 +746,99 @@ TEST(overlay_controller, AnnotationToolHotkey_TogglesFreehand) {
     EXPECT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
+
+TEST(overlay_controller, BrushWidthAdjust_IgnoresInactiveBrushTool) {
+    auto c = Make_controller();
+
+    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+}
+
+TEST(overlay_controller, BrushWidthAdjust_ClampsAndReturnsUpdatedWidth) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+
+    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_brush_width(1), std::optional<int32_t>{3});
+    EXPECT_EQ(c.Adjust_brush_width(100), std::optional<int32_t>{50});
+    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+    EXPECT_EQ(c.Adjust_brush_width(-100), std::optional<int32_t>{1});
+}
+
+TEST(overlay_controller, AnnotationToolbar_FreehandStrokeStaysVisibleButNonInteractive) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+
+    EXPECT_TRUE(c.Should_show_annotation_toolbar());
+    EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    EXPECT_TRUE(c.Should_show_annotation_toolbar());
+    EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
+
+    EXPECT_EQ(c.On_primary_release(No_mods(), {140, 140}), OverlayAction::Repaint);
+    EXPECT_TRUE(c.Should_show_annotation_toolbar());
+    EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
+}
+
+TEST(overlay_controller, AnnotationToolbar_MoveAndResizeHideToolbar) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+
+    ASSERT_TRUE(c.Should_show_annotation_toolbar());
+    ASSERT_TRUE(c.Can_interact_with_annotation_toolbar());
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {200, 200}, {200, 200}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    EXPECT_FALSE(c.Should_show_annotation_toolbar());
+    EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
+    EXPECT_EQ(c.On_primary_release(No_mods(), {220, 220}), OverlayAction::Repaint);
+    EXPECT_TRUE(c.Should_show_annotation_toolbar());
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {100, 100}, {100, 100}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    EXPECT_FALSE(c.Should_show_annotation_toolbar());
+    EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
+    EXPECT_EQ(c.On_primary_release(No_mods(), {90, 90}), OverlayAction::Repaint);
+    EXPECT_TRUE(c.Should_show_annotation_toolbar());
+    EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
+}
+
+TEST(overlay_controller, AnnotationToolbar_AnnotationDragHidesToolbar) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {140, 140}), OverlayAction::Repaint);
+    ASSERT_EQ(c.Annotations().size(), 1u);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'P'), OverlayAction::Repaint);
+
+    ASSERT_TRUE(c.Should_show_annotation_toolbar());
+    ASSERT_EQ(c.On_primary_press(No_mods(), {130, 130}, {130, 130}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    EXPECT_FALSE(c.Should_show_annotation_toolbar());
+    EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
+    EXPECT_EQ(c.On_primary_release(No_mods(), {150, 150}), OverlayAction::Repaint);
+    EXPECT_TRUE(c.Should_show_annotation_toolbar());
+    EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
+}

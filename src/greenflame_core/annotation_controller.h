@@ -43,6 +43,10 @@ class AnnotationController final {
     Build_toolbar_button_views() const;
     [[nodiscard]] std::optional<AnnotationToolId>
     Tool_id_from_hotkey(wchar_t hotkey) const;
+    [[nodiscard]] int32_t Brush_width_px() const noexcept {
+        return brush_style_.width_px;
+    }
+    [[nodiscard]] bool Set_brush_width_px(int32_t width_px) noexcept;
 
     [[nodiscard]] std::span<const Annotation> Annotations() const noexcept {
         return document_.annotations;
@@ -104,6 +108,7 @@ class AnnotationController final {
     AnnotationToolRegistry registry_ = {};
     PassthroughStrokeSmoother smoother_ = {};
     std::optional<AnnotationToolId> active_tool_ = std::nullopt;
+    StrokeStyle brush_style_ = {};
     bool freehand_drawing_ = false;
     bool annotation_dragging_ = false;
     std::vector<PointPx> freehand_points_ = {};

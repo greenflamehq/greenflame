@@ -120,6 +120,39 @@ OverlayController::Active_annotation_tool() const noexcept {
     return annotation_controller_.Active_tool();
 }
 
+int32_t OverlayController::Brush_width_px() const noexcept {
+    return annotation_controller_.Brush_width_px();
+}
+
+void OverlayController::Set_brush_width_px(int32_t width_px) noexcept {
+    (void)annotation_controller_.Set_brush_width_px(width_px);
+}
+
+std::optional<int32_t> OverlayController::Adjust_brush_width(int32_t delta_steps) {
+    if (delta_steps == 0 || state_.final_selection.Is_empty() ||
+        annotation_controller_.Active_tool() !=
+            std::optional<AnnotationToolId>{AnnotationToolId::Freehand}) {
+        return std::nullopt;
+    }
+    int32_t const updated_width =
+        annotation_controller_.Brush_width_px() + delta_steps;
+    if (!annotation_controller_.Set_brush_width_px(updated_width)) {
+        return std::nullopt;
+    }
+    return annotation_controller_.Brush_width_px();
+}
+
+bool OverlayController::Should_show_annotation_toolbar() const noexcept {
+    return !state_.final_selection.Is_empty() && !state_.dragging &&
+           !state_.handle_dragging && !state_.move_dragging &&
+           !annotation_controller_.Is_annotation_dragging();
+}
+
+bool OverlayController::Can_interact_with_annotation_toolbar() const noexcept {
+    return Should_show_annotation_toolbar() &&
+           !annotation_controller_.Has_active_gesture();
+}
+
 bool OverlayController::Has_active_annotation_gesture() const noexcept {
     return annotation_controller_.Has_active_gesture();
 }

@@ -912,6 +912,71 @@ void Draw_dimension_labels(
     }
 }
 
+void Draw_transient_center_label(HDC buf_dc, HBITMAP buf_bmp, int w, int h,
+                                 greenflame::core::RectPx const &sel,
+                                 std::span<uint8_t> pixels,
+                                 greenflame::PaintResources const *res,
+                                 std::wstring_view text) {
+    if (sel.Is_empty() || text.empty() || res == nullptr || res->font_center == nullptr) {
+        return;
+    }
+
+    int const row_bytes = greenflame::Row_bytes32(w);
+    size_t const pix_size = static_cast<size_t>(row_bytes) * static_cast<size_t>(h);
+    if (pixels.size() < pix_size) {
+        return;
+    }
+
+    std::wstring const label(text);
+    HGDIOBJ const old_font = SelectObject(buf_dc, res->font_center);
+
+    DimLabelPositions positions{};
+    int const center_x = (sel.left + sel.right) / 2;
+    int const center_y = (sel.top + sel.bottom) / 2;
+    Compute_center_label_position(positions, buf_dc, sel, center_x, center_y, label,
+                                  res->font_center);
+    SelectObject(buf_dc, old_font);
+    if (!positions.draw_center_box) {
+        return;
+    }
+
+    BITMAPINFOHEADER bmi{};
+    greenflame::Fill_bmi32_top_down(bmi, w, h);
+    if (GetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
+                  reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS) == 0) {
+        return;
+    }
+
+    greenflame::core::Blend_rect_onto_pixels(
+        pixels, w, h, row_bytes, positions.center_box_rect, greenflame::kCoordTooltipBg,
+        greenflame::kCoordTooltipAlpha);
+    SetDIBits(buf_dc, buf_bmp, 0, static_cast<UINT>(h), pixels.data(),
+              reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
+
+    HPEN const border_pen = CreatePen(PS_SOLID, 1, greenflame::kCoordTooltipText);
+    if (border_pen != nullptr) {
+        HGDIOBJ const old_pen = SelectObject(buf_dc, border_pen);
+        HGDIOBJ const old_brush = SelectObject(buf_dc, GetStockObject(NULL_BRUSH));
+        Rectangle(buf_dc, positions.center_box_left, positions.center_box_top,
+                  positions.center_box_left + positions.center_box_w,
+                  positions.center_box_top + positions.center_box_h);
+        SelectObject(buf_dc, old_brush);
+        SelectObject(buf_dc, old_pen);
+        DeleteObject(border_pen);
+    }
+
+    RECT text_rect = {positions.center_box_left + kDimMargin,
+                      positions.center_box_top + kDimMargin,
+                      positions.center_box_left + positions.center_box_w - kDimMargin,
+                      positions.center_box_top + positions.center_box_h - kDimMargin};
+    SetBkMode(buf_dc, TRANSPARENT);
+    SetTextColor(buf_dc, greenflame::kCoordTooltipText);
+    HGDIOBJ const old_center_font = SelectObject(buf_dc, res->font_center);
+    DrawTextW(buf_dc, label.c_str(), -1, &text_rect,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(buf_dc, old_center_font);
+}
+
 static void Draw_magnifier(HDC buf_dc, HBITMAP buf_bmp, int w, int h, int cx, int cy,
                            int mon_left, int mon_top, int mon_right, int mon_bottom,
                            std::span<uint8_t> pixels,
@@ -1173,6 +1238,11 @@ void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &
                               in.paint_buffer, in.resources,
                               in.show_selection_size_side_labels,
                               in.show_selection_size_center_label, false);
+    }
+    if (!in.transient_center_label_text.empty() && !in.final_selection.Is_empty()) {
+        Draw_transient_center_label(buf_dc, buf_bmp, w, h, in.final_selection,
+                                    in.paint_buffer, in.resources,
+                                    in.transient_center_label_text);
     }
 
     bool const show_crosshair = in.final_selection.Is_empty() && !in.dragging &&

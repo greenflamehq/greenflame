@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-07
+last_updated: 2026-03-08
 tags:
   - overlay
   - annotations
@@ -43,8 +43,8 @@ The annotation system applies only to the interactive overlay flow.
   - click and drag an annotation to select it and move it
   - click and drag empty space inside the selection to move the selection
   - clicking empty space outside the selection clears the selected annotation
-- When the freehand tool is active, ordinary clicks are routed to that tool instead
-  of the default selection/move behavior.
+- When the Brush tool is active, ordinary clicks are routed to that tool instead of
+  the default selection/move behavior.
 - If a gesture is already in progress, competing resize, selection-move, and
   annotation-move interactions do not steal that gesture.
 
@@ -52,12 +52,19 @@ The annotation system applies only to the interactive overlay flow.
 
 - Default mode: no tool selected
 - Registered tools:
-  - `Freehand` hotkey `P`
+  - `Brush tool` hotkey `P`
 - The toolbar is anchored to the current selection border.
 - Toolbar buttons currently display the tool hotkey letter.
 - Hovering a toolbar button shows a tooltip with the full tool name.
-- Pressing `P` or clicking the `Freehand` toolbar button toggles that tool on or
+- Pressing `P` or clicking the `Brush tool` toolbar button toggles that tool on or
   off.
+- While the Brush tool is active, mouse-wheel up/down or `Ctrl+=` / `Ctrl+-`
+  increases or decreases brush width within the `1..50` range.
+- Brush-width changes show a temporary centered size overlay inside the current
+  selection using the same visual treatment as the center selection-size label.
+- Brush width persists in the INI file at `[tools] brush_width`.
+- The size-overlay duration persists in the INI file at
+  `[ui] tool_size_overlay_duration_ms`.
 - Completing an annotation does not change the active tool.
 - Starting a selection move clears the selected annotation.
 
@@ -111,7 +118,7 @@ The registry lives in core.
 - `IAnnotationTool`
   - interface implemented by each tool object
   - current concrete tools:
-    - `FreehandTool`
+    - `BrushTool`
 
 Tools are objects so behavior remains encapsulated and future tools can be added
 without pushing per-tool logic into the Win32 layer.

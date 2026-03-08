@@ -5,6 +5,14 @@
 
 namespace greenflame::core {
 
+namespace {
+
+[[nodiscard]] int32_t Clamp_brush_width_px(int32_t width_px) noexcept {
+    return std::clamp(width_px, StrokeStyle::kMinWidthPx, StrokeStyle::kMaxWidthPx);
+}
+
+} // namespace
+
 std::vector<PointPx>
 PassthroughStrokeSmoother::Smooth(std::span<const PointPx> points) const {
     return {points.begin(), points.end()};
@@ -15,6 +23,7 @@ AnnotationController::AnnotationController() = default;
 void AnnotationController::Reset_for_session() {
     document_ = {};
     active_tool_.reset();
+    brush_style_ = {};
     freehand_drawing_ = false;
     annotation_dragging_ = false;
     freehand_points_.clear();
@@ -57,6 +66,16 @@ AnnotationController::Tool_id_from_hotkey(wchar_t hotkey) const {
     return tool->Descriptor().id;
 }
 
+bool AnnotationController::Set_brush_width_px(int32_t width_px) noexcept {
+    int32_t const clamped_width = Clamp_brush_width_px(width_px);
+    if (brush_style_.width_px == clamped_width) {
+        return false;
+    }
+    brush_style_.width_px = clamped_width;
+    freehand_preview_.reset();
+    return true;
+}
+
 Annotation const *AnnotationController::Draft_annotation() const noexcept {
     if (!freehand_drawing_ || freehand_points_.empty()) {
         return nullptr;
@@ -71,7 +90,7 @@ std::optional<StrokeStyle> AnnotationController::Draft_freehand_style() const no
     if (!freehand_drawing_ || freehand_points_.empty()) {
         return std::nullopt;
     }
-    return StrokeStyle{};
+    return brush_style_;
 }
 
 std::optional<RectPx>
@@ -374,7 +393,7 @@ Annotation AnnotationController::Build_freehand_annotation(
     Annotation annotation{};
     annotation.id = document_.next_annotation_id;
     annotation.kind = AnnotationKind::Freehand;
-    annotation.freehand.style = {};
+    annotation.freehand.style = brush_style_;
     annotation.freehand.points = smoother_.Smooth(raw_points);
     annotation.freehand.raster = Rasterize_freehand_stroke(annotation.freehand.points,
                                                            annotation.freehand.style);

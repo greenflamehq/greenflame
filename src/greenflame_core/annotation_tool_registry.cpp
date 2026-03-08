@@ -11,9 +11,10 @@ namespace {
     return static_cast<wchar_t>(std::towupper(hotkey));
 }
 
-class FreehandTool final : public IAnnotationTool {
+class BrushTool final : public IAnnotationTool {
   public:
-    FreehandTool() : descriptor_{AnnotationToolId::Freehand, L"Pencil", L'P', L"P"} {}
+    BrushTool()
+        : descriptor_{AnnotationToolId::Freehand, L"Brush tool", L'P', L"P"} {}
 
     [[nodiscard]] AnnotationToolDescriptor const &Descriptor() const noexcept override {
         return descriptor_;
@@ -46,7 +47,7 @@ class FreehandTool final : public IAnnotationTool {
 } // namespace
 
 AnnotationToolRegistry::AnnotationToolRegistry() {
-    tools_.push_back(std::make_unique<FreehandTool>());
+    tools_.push_back(std::make_unique<BrushTool>());
 }
 
 IAnnotationTool const *

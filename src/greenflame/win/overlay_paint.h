@@ -44,6 +44,7 @@ struct PaintOverlayInput {
     bool show_selection_size_center_label = true;
     std::optional<core::SelectionHandle> highlight_handle = std::nullopt;
     std::optional<core::RectPx> selected_annotation_bounds = std::nullopt;
+    std::wstring_view transient_center_label_text = {};
     std::span<IOverlayButton *const> toolbar_buttons = {};
     std::wstring_view toolbar_tooltip_text = {};
     std::optional<core::RectPx> hovered_toolbar_bounds = std::nullopt;

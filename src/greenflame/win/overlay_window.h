@@ -55,7 +55,9 @@ class OverlayWindow final {
     LRESULT On_key_up(WPARAM wparam, LPARAM lparam);
     LRESULT On_l_button_down();
     LRESULT On_mouse_move();
+    LRESULT On_mouse_wheel(WPARAM wparam);
     LRESULT On_l_button_up();
+    LRESULT On_timer(WPARAM wparam);
 
     void Build_default_save_name(std::wstring_view save_dir_for_num_scan,
                                  std::span<wchar_t> out) const;
@@ -77,6 +79,10 @@ class OverlayWindow final {
     LRESULT On_set_cursor(WPARAM wparam, LPARAM lparam);
     void Refresh_cursor();
     bool Refresh_hover_handle();
+    [[nodiscard]] bool Handle_brush_width_delta(int32_t delta_steps);
+    void Show_brush_size_overlay(int32_t width_px);
+    void Clear_brush_size_overlay(bool repaint);
+    [[nodiscard]] bool Clear_toolbar_hover_states();
     [[nodiscard]] bool Is_selection_stable_for_help() const;
     [[nodiscard]] std::wstring_view Hovered_toolbar_tooltip_text() const noexcept;
     [[nodiscard]] std::optional<core::RectPx> Hovered_toolbar_button_bounds() const;
@@ -107,6 +113,8 @@ class OverlayWindow final {
     std::optional<core::SelectionHandle> last_hover_handle_;
     OverlayHelpOverlay hotkey_help_overlay_ = {};
     bool testing_toolbar_ = false;
+    int mouse_wheel_delta_remainder_ = 0;
+    std::wstring brush_size_overlay_text_ = {};
     std::vector<ToolbarButtonEntry> toolbar_buttons_;
 };
 

@@ -28,6 +28,7 @@ add_executable(greenflame_tests
     window_filter_tests.cpp
     output_path_tests.cpp
     cli_options_tests.cpp
+    app_config_tests.cpp
     annotation_controller_tests.cpp
     overlay_controller_tests.cpp
     app_controller_tests.cpp

@@ -36,7 +36,7 @@ TEST(annotation_controller, ToolbarViews_ExposeFreehandOnly) {
     ASSERT_EQ(views.size(), 1u);
     EXPECT_EQ(views[0].id, AnnotationToolId::Freehand);
     EXPECT_EQ(views[0].label, L"P");
-    EXPECT_EQ(views[0].tooltip, L"Pencil");
+    EXPECT_EQ(views[0].tooltip, L"Brush tool");
     EXPECT_FALSE(views[0].active);
 }
 
@@ -138,6 +138,32 @@ TEST(annotation_controller, FreehandDraftPointsTrackActiveGesture) {
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
     EXPECT_TRUE(controller.Draft_freehand_points().empty());
     EXPECT_EQ(controller.Draft_freehand_style(), std::nullopt);
+}
+
+TEST(annotation_controller, BrushWidth_ClampsToSupportedRange) {
+    AnnotationController controller;
+
+    EXPECT_TRUE(controller.Set_brush_width_px(0));
+    EXPECT_EQ(controller.Brush_width_px(), StrokeStyle::kMinWidthPx);
+    EXPECT_TRUE(controller.Set_brush_width_px(500));
+    EXPECT_EQ(controller.Brush_width_px(), StrokeStyle::kMaxWidthPx);
+}
+
+TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedStrokeStyle) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+
+    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    ASSERT_TRUE(controller.Draft_freehand_style().has_value());
+    EXPECT_EQ(controller.Draft_freehand_style()->width_px, 12);
+
+    EXPECT_TRUE(controller.On_pointer_move({20, 10}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Annotations()[0].freehand.style.width_px, 12);
 }
 
 TEST(annotation_controller, CancelDuringFreehand_ClearsDraftWithoutCommit) {

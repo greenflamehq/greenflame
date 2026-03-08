@@ -31,7 +31,8 @@ Once a region is selected:
 - **Drag the handles** on the selection to resize (hold **Alt** to disable snapping).
 - With **no annotation tool selected** (the default mode), **click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
 - With **no annotation tool selected**, **click and drag an annotation** to **select** and **move** it.
-- Press **P** or use the toolbar to toggle the **freehand annotation** tool on or off.
+- Press **P** or use the toolbar to toggle the **Brush tool** on or off.
+- With the **Brush tool** active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change brush width from **1** to **50**.
 - **Ctrl-S** ➜ save directly (no dialog) to the configured default save folder as the configured format (default PNG), then close.
 - **Ctrl-Shift-S** ➜ open **Save As** dialog, then save and close.
 - **Ctrl-Alt-S** ➜ save directly (no dialog), copy the saved file to the clipboard, then close.
@@ -141,6 +142,8 @@ Greenflame reads `~/.config/greenflame/greenflame.ini` (i.e. `%USERPROFILE%\.con
 | `[ui]` | `show_balloons` | `true` | Show tray toast notifications after copy/save actions. |
 | `[ui]` | `show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
 | `[ui]` | `show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
+| `[ui]` | `tool_size_overlay_duration_ms` | `800` | How long the centered Brush tool size overlay stays visible after a size change. `0` disables it. |
+| `[tools]` | `brush_width` | `2` | Default Brush tool stroke width in physical pixels. Runtime adjustments are clamped to `1..50` and persisted here. |
 | `[save]` | `default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
 | `[save]` | `last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
 | `[save]` | `default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
@@ -156,6 +159,10 @@ Example:
 show_balloons=true
 show_selection_size_side_labels=true
 show_selection_size_center_label=true
+tool_size_overlay_duration_ms=800
+
+[tools]
+brush_width=2
 
 [save]
 default_save_dir=C:\Users\you\Pictures\greenflame
