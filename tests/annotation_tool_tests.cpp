@@ -7,6 +7,16 @@ using namespace greenflame::core;
 
 namespace {
 
+[[nodiscard]] AnnotationToolDescriptor Line_tool_descriptor() {
+    return AnnotationToolDescriptor{AnnotationToolId::Line, L"Line tool", L'L', L"L",
+                                    AnnotationToolbarGlyph::Line};
+}
+
+[[nodiscard]] AnnotationToolDescriptor Arrow_tool_descriptor() {
+    return AnnotationToolDescriptor{AnnotationToolId::Arrow, L"Arrow tool", L'A', L"A",
+                                    AnnotationToolbarGlyph::Arrow};
+}
+
 [[nodiscard]] AnnotationToolDescriptor Rectangle_tool_descriptor() {
     return AnnotationToolDescriptor{AnnotationToolId::Rectangle, L"Rectangle tool",
                                     L'R', L"R", AnnotationToolbarGlyph::Rectangle};
@@ -102,7 +112,7 @@ TEST(annotation_tool, FreehandTool_RefreshesDraftAfterStyleChangeNotification) {
 TEST(annotation_tool, LineTool_UsesHostStyleAngleAndCommit) {
     RecordingAnnotationToolHost host;
     UndoStack undo_stack;
-    LineAnnotationTool tool;
+    LineAnnotationTool tool(Line_tool_descriptor(), false);
 
     host.next_annotation_id = 7;
     host.stroke_style = StrokeStyle{11, RGB(0x22, 0x44, 0x66)};
@@ -112,6 +122,7 @@ TEST(annotation_tool, LineTool_UsesHostStyleAngleAndCommit) {
     ASSERT_NE(tool.Draft_annotation(host), nullptr);
     EXPECT_EQ(tool.Draft_annotation(host)->kind, AnnotationKind::Line);
     EXPECT_EQ(tool.Draft_annotation(host)->id, 7u);
+    EXPECT_FALSE(tool.Draft_annotation(host)->line.arrow_head);
     EXPECT_EQ(tool.Draft_annotation(host)->line.style, host.stroke_style);
     EXPECT_EQ(tool.Draft_annotation(host)->line.start, (PointPx{15, 20}));
     EXPECT_EQ(tool.Draft_annotation(host)->line.end, (PointPx{45, 60}));
@@ -123,6 +134,7 @@ TEST(annotation_tool, LineTool_UsesHostStyleAngleAndCommit) {
     EXPECT_EQ(tool.Draft_annotation(host), nullptr);
     ASSERT_EQ(host.committed_annotations.size(), 1u);
     EXPECT_EQ(host.committed_annotations[0].kind, AnnotationKind::Line);
+    EXPECT_FALSE(host.committed_annotations[0].line.arrow_head);
     EXPECT_EQ(host.committed_annotations[0].id, 7u);
     EXPECT_EQ(host.committed_annotations[0].line.style, host.stroke_style);
     EXPECT_EQ(host.committed_annotations[0].line.start, (PointPx{15, 20}));
@@ -131,7 +143,7 @@ TEST(annotation_tool, LineTool_UsesHostStyleAngleAndCommit) {
 
 TEST(annotation_tool, LineTool_RefreshesDraftAfterStyleChangeNotification) {
     RecordingAnnotationToolHost host;
-    LineAnnotationTool tool;
+    LineAnnotationTool tool(Line_tool_descriptor(), false);
 
     host.stroke_style = StrokeStyle{3, RGB(0x01, 0x02, 0x03)};
     EXPECT_TRUE(tool.On_primary_press(host, {30, 30}));
@@ -144,6 +156,29 @@ TEST(annotation_tool, LineTool_RefreshesDraftAfterStyleChangeNotification) {
 
     ASSERT_NE(tool.Draft_annotation(host), nullptr);
     EXPECT_EQ(tool.Draft_annotation(host)->line.style, host.stroke_style);
+}
+
+TEST(annotation_tool, ArrowTool_UsesHostStyleAndCommit) {
+    RecordingAnnotationToolHost host;
+    UndoStack undo_stack;
+    LineAnnotationTool tool(Arrow_tool_descriptor(), true);
+
+    host.next_annotation_id = 13;
+    host.stroke_style = StrokeStyle{5, RGB(0x22, 0x88, 0x44)};
+
+    EXPECT_TRUE(tool.On_primary_press(host, {20, 30}));
+    EXPECT_TRUE(tool.On_pointer_move(host, {60, 45}));
+    ASSERT_NE(tool.Draft_annotation(host), nullptr);
+    EXPECT_EQ(tool.Draft_annotation(host)->kind, AnnotationKind::Line);
+    EXPECT_TRUE(tool.Draft_annotation(host)->line.arrow_head);
+    EXPECT_EQ(tool.Draft_annotation(host)->line.style, host.stroke_style);
+    EXPECT_EQ(tool.Draft_annotation(host)->line.start, (PointPx{20, 30}));
+    EXPECT_EQ(tool.Draft_annotation(host)->line.end, (PointPx{60, 45}));
+
+    EXPECT_TRUE(tool.On_primary_release(host, undo_stack));
+    ASSERT_EQ(host.committed_annotations.size(), 1u);
+    EXPECT_TRUE(host.committed_annotations[0].line.arrow_head);
+    EXPECT_EQ(host.committed_annotations[0].line.style, host.stroke_style);
 }
 
 TEST(annotation_tool, RectangleTool_UsesHostStyleAndCommit) {

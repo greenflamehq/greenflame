@@ -2,9 +2,9 @@
 
 namespace greenflame::core {
 
-LineAnnotationTool::LineAnnotationTool()
-    : descriptor_{AnnotationToolId::Line, L"Line tool", L'L', L"L",
-                  AnnotationToolbarGlyph::Line} {}
+LineAnnotationTool::LineAnnotationTool(AnnotationToolDescriptor descriptor,
+                                       bool arrow_head)
+    : descriptor_(std::move(descriptor)), arrow_head_(arrow_head) {}
 
 AnnotationToolDescriptor const &LineAnnotationTool::Descriptor() const noexcept {
     return descriptor_;
@@ -98,8 +98,10 @@ Annotation LineAnnotationTool::Build_annotation(IAnnotationToolHost const &host,
     annotation.line.start = start;
     annotation.line.end = end;
     annotation.line.style = host.Current_stroke_style();
-    annotation.line.raster = Rasterize_line_segment(
-        annotation.line.start, annotation.line.end, annotation.line.style);
+    annotation.line.arrow_head = arrow_head_;
+    annotation.line.raster =
+        Rasterize_line_segment(annotation.line.start, annotation.line.end,
+                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 

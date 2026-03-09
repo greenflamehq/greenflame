@@ -156,8 +156,9 @@ class LineEndpointEditInteraction final : public IAnnotationEditInteraction {
         } else {
             edited.line.end = cursor;
         }
-        edited.line.raster = Rasterize_line_segment(edited.line.start, edited.line.end,
-                                                    edited.line.style);
+        edited.line.raster =
+            Rasterize_line_segment(edited.line.start, edited.line.end,
+                                   edited.line.style, edited.line.arrow_head);
         if (*current == edited) {
             return false;
         }

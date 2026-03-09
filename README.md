@@ -31,16 +31,17 @@ Once a region is selected:
 - **Drag the handles** on the selection to resize (hold **Alt** to disable snapping).
 - With **no annotation tool selected** (the default mode), **click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
 - With **no annotation tool selected**, **click and drag an annotation** to **select** and **move** it.
-- With **no annotation tool selected**, a **selected line annotation** shows draggable endpoint handles you can drag to reshape the line.
+- With **no annotation tool selected**, a **selected line or arrow annotation** shows draggable endpoint handles you can drag to reshape it.
 - With **no annotation tool selected**, a **selected rectangle annotation** shows draggable resize handles on the corners and sides.
 - Press **B** or use the toolbar to toggle the **Brush tool** on or off.
 - Press **L** or use the toolbar to toggle the **Line tool** on or off.
+- Press **A** or use the toolbar to toggle the **Arrow tool** on or off.
 - Press **R** or use the toolbar to toggle the **Rectangle tool** on or off.
 - Press **F** or use the toolbar to toggle the **Filled Rectangle tool** on or off.
 - With an annotation tool active, **right-click** anywhere to open the **color wheel** at the cursor. **Left-click** a segment to select that color, or press **Escape** to dismiss the wheel.
-- With the **Brush**, **Line**, or **Rectangle** tool active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change stroke width from **1** to **50**.
+- With the **Brush**, **Line**, **Arrow**, or **Rectangle** tool active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change stroke width from **1** to **50**.
 - With the **Brush tool** active, the overlay shows an anti-aliased circular size preview around the cursor hotspot.
-- With the **Line tool** active, the overlay shows an anti-aliased square size preview around the cursor hotspot aligned to the current line.
+- With the **Line** or **Arrow** tool active, the overlay shows an anti-aliased square size preview around the cursor hotspot aligned to the current line direction.
 - The **Rectangle** and **Filled Rectangle** tools do not draw a cursor size preview overlay.
 - **Ctrl-S** ➜ save directly (no dialog) to the configured default save folder as the configured format (default PNG), then close.
 - **Ctrl-Shift-S** ➜ open **Save As** dialog, then save and close.
@@ -152,7 +153,7 @@ Greenflame reads `~/.config/greenflame/greenflame.ini` (i.e. `%USERPROFILE%\.con
 | `[ui]` | `show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
 | `[ui]` | `show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
 | `[ui]` | `tool_size_overlay_duration_ms` | `800` | How long the centered tool-size overlay stays visible after a stroke-width change. `0` disables it. |
-| `[tools]` | `brush_width` | `2` | Default Brush/Line/Rectangle stroke width in physical pixels. Runtime adjustments are clamped to `1..50` and persisted here. Filled rectangles ignore it. |
+| `[tools]` | `brush_width` | `2` | Default Brush/Line/Arrow/Rectangle stroke width in physical pixels. Runtime adjustments are clamped to `1..50` and persisted here. Filled rectangles ignore it. |
 | `[tools]` | `current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
 | `[tools]` | `color_0` ... `color_7` | `#000000`, `#ff0000`, `#00ff00`, `#0000ff`, `#ffff00`, `#ff00ff`, `#00ffff`, `#ffffff` | Annotation color wheel slots, starting at the top-right segment and moving clockwise. Values use `#rrggbb`. |
 | `[save]` | `default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |

@@ -9,6 +9,7 @@ class UndoStack;
 enum class AnnotationToolId : uint8_t {
     Freehand,
     Line,
+    Arrow,
     Rectangle,
     FilledRectangle,
 };
@@ -17,6 +18,7 @@ enum class AnnotationToolbarGlyph : uint8_t {
     None = 0,
     Brush,
     Line,
+    Arrow,
     Rectangle,
     FilledRectangle,
 };

@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-08
+last_updated: 2026-03-09
 tags:
   - overlay
   - annotations
@@ -55,6 +55,7 @@ The annotation system applies only to the interactive overlay flow.
 - Registered tools:
   - `Brush tool` hotkey `B`
   - `Line tool` hotkey `L`
+  - `Arrow tool` hotkey `A`
   - `Rectangle tool` hotkey `R`
   - `Filled rectangle tool` hotkey `F`
 - The toolbar is anchored to the current selection border.
@@ -63,6 +64,8 @@ The annotation system applies only to the interactive overlay flow.
 - Pressing `B` or clicking the `Brush tool` toolbar button toggles that tool on or
   off.
 - Pressing `L` or clicking the `Line tool` toolbar button toggles that tool on or
+  off.
+- Pressing `A` or clicking the `Arrow tool` toolbar button toggles that tool on or
   off.
 - Pressing `R` or clicking the `Rectangle tool` toolbar button toggles that tool on
   or off.
@@ -75,13 +78,13 @@ The annotation system applies only to the interactive overlay flow.
   - left-clicking a slot selects that color for future annotations and closes the
     wheel
   - `Esc` closes the wheel without changing color
-- While the Brush, Line, or Rectangle tool is active, mouse-wheel up/down or
-  `Ctrl+=` / `Ctrl+-` increases or decreases stroke width within the `1..50`
+- While the Brush, Line, Arrow, or Rectangle tool is active, mouse-wheel up/down
+  or `Ctrl+=` / `Ctrl+-` increases or decreases stroke width within the `1..50`
   range.
 - While the Brush tool is active, the overlay draws an anti-aliased circular size
   preview around the cursor hotspot.
-- While the Line tool is active, the overlay draws an anti-aliased square size
-  preview around the cursor hotspot aligned to the current line direction.
+- While the Line or Arrow tool is active, the overlay draws an anti-aliased square
+  size preview around the cursor hotspot aligned to the current line direction.
 - The Rectangle and Filled rectangle tools do not draw a cursor size preview
   overlay.
 - Stroke-width changes show a temporary centered size overlay inside the current
@@ -103,8 +106,8 @@ The annotation system applies only to the interactive overlay flow.
   begins moving it immediately.
 - Selected freehand annotations are shown by drawing the corners of their bounding
   box.
-- Selected line annotations are shown by drawing 5px hollow endpoint handles with a
-  1px white inner and outer halo.
+- Selected line and arrow annotations are shown by drawing 5px hollow endpoint
+  handles with a 1px white inner and outer halo.
 - Selected rectangle annotations are shown by drawing eight resize handles when
   space permits; corner handles take precedence over side handles when the bounds
   are too small to show all handles without overlap.
@@ -151,10 +154,11 @@ The registry lives in core.
 - `IAnnotationTool`
   - interface implemented by each tool object
   - current concrete tools:
-    - `BrushTool`
-    - `LineTool`
-    - `RectangleTool`
-    - `FilledRectangleTool`
+    - `FreehandAnnotationTool`
+    - `LineAnnotationTool` configured for plain lines
+    - `LineAnnotationTool` configured for arrows
+    - `RectangleAnnotationTool` configured for outlined rectangles
+    - `RectangleAnnotationTool` configured for filled rectangles
 
 Tools are objects so behavior remains encapsulated and future tools can be added
 without pushing per-tool logic into the Win32 layer.
@@ -187,6 +191,7 @@ without pushing per-tool logic into the Win32 layer.
 - `LineAnnotation`
   - start/end points in physical pixels
   - stroke style
+  - optional filled arrowhead anchored at the dragged end point
   - cached raster coverage with square end caps
   - committed on mouse-up, then becomes undoable
 
@@ -233,11 +238,11 @@ Important rule: committed annotations must not gain a separate Win32-only paint 
 that diverges from core hit-testing. Paint, hit-testing, and output must agree on
 coverage once an annotation is committed.
 
-### Draft line preview
+### Draft line and arrow preview
 
-The in-progress line preview reuses the committed core raster path:
+The in-progress Line and Arrow previews reuse the committed core raster path:
 
-- the draft line is rasterized in core during the gesture
+- the draft line or arrow is rasterized in core during the gesture
 - the overlay composites that draft raster above committed annotations
 - hit-testing and save/copy still ignore the draft until mouse-up commits it
 
@@ -288,13 +293,13 @@ The overlay paint path draws in this order:
 3. committed annotations
 4. in-progress annotation preview
    - freehand preview is drawn directly from draft points for responsiveness
-   - line preview is composited from the draft core raster
+   - line and arrow previews are composited from the draft core raster
    - rectangle and filled-rectangle previews are composited from the draft core
      raster
 5. selection labels / crosshair / region handles
 6. selected-annotation markers
    - freehand uses bounding-box corners
-   - line uses endpoint handles
+   - line and arrow use endpoint handles
    - rectangle uses corner/side resize handles
 7. toolbar buttons and tooltip
 8. color wheel, when visible

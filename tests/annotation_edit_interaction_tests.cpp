@@ -16,15 +16,18 @@ Annotation Make_stroke(uint64_t id, std::initializer_list<PointPx> points) {
 }
 
 Annotation Make_line(uint64_t id, PointPx start, PointPx end,
-                     int32_t width_px = StrokeStyle::kDefaultWidthPx) {
+                     int32_t width_px = StrokeStyle::kDefaultWidthPx,
+                     bool arrow_head = false) {
     Annotation annotation{};
     annotation.id = id;
     annotation.kind = AnnotationKind::Line;
     annotation.line.start = start;
     annotation.line.end = end;
     annotation.line.style.width_px = width_px;
-    annotation.line.raster = Rasterize_line_segment(
-        annotation.line.start, annotation.line.end, annotation.line.style);
+    annotation.line.arrow_head = arrow_head;
+    annotation.line.raster =
+        Rasterize_line_segment(annotation.line.start, annotation.line.end,
+                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 
@@ -104,6 +107,25 @@ TEST(annotation_edit_interaction, MoveInteraction_ProducesUndoableCommandData) {
 }
 
 TEST(annotation_edit_interaction,
+     MoveInteraction_PreservesArrowHeadCoverageWhenMovingArrow) {
+    RecordingEditInteractionHost host;
+    host.annotations.push_back(Make_line(9, {10, 10}, {50, 10}, 4, true));
+
+    std::unique_ptr<IAnnotationEditInteraction> interaction =
+        Create_annotation_edit_interaction(
+            AnnotationEditTarget{9, AnnotationEditTargetKind::Body}, 0,
+            host.annotations[0], {30, 10});
+    ASSERT_NE(interaction, nullptr);
+
+    EXPECT_TRUE(interaction->Update(host, {50, 25}));
+    EXPECT_TRUE(host.annotations[0].line.arrow_head);
+    EXPECT_EQ(host.annotations[0].line.start, (PointPx{30, 25}));
+    EXPECT_EQ(host.annotations[0].line.end, (PointPx{70, 25}));
+    EXPECT_TRUE(Annotation_hits_point(host.annotations[0], {70, 25}));
+    EXPECT_TRUE(Annotation_hits_point(host.annotations[0], {60, 22}));
+}
+
+TEST(annotation_edit_interaction,
      LineEndpointInteraction_CancelRestoresOriginalLineAndExposesHandle) {
     RecordingEditInteractionHost host;
     Annotation const original = Make_line(1, {40, 40}, {90, 40}, 6);
@@ -124,6 +146,29 @@ TEST(annotation_edit_interaction,
     EXPECT_TRUE(interaction->Cancel(host));
     EXPECT_EQ(host.annotations[0], original);
     EXPECT_EQ(host.selected_annotation_id, std::optional<uint64_t>{1});
+}
+
+TEST(annotation_edit_interaction,
+     LineEndpointInteraction_PreservesArrowHeadWhenUpdatingArrow) {
+    RecordingEditInteractionHost host;
+    Annotation const original = Make_line(2, {40, 40}, {90, 40}, 6, true);
+    host.annotations.push_back(original);
+
+    std::unique_ptr<IAnnotationEditInteraction> interaction =
+        Create_annotation_edit_interaction(
+            AnnotationEditTarget{2, AnnotationEditTargetKind::LineEndHandle}, 0,
+            original, {90, 40});
+    ASSERT_NE(interaction, nullptr);
+    EXPECT_EQ(interaction->Active_handle(), std::optional<AnnotationEditHandleKind>{
+                                                AnnotationEditHandleKind::LineEnd});
+
+    EXPECT_TRUE(interaction->Update(host, {120, 70}));
+    EXPECT_TRUE(host.annotations[0].line.arrow_head);
+    EXPECT_EQ(host.annotations[0].line.end, (PointPx{120, 70}));
+    EXPECT_EQ(host.annotations[0].line.raster,
+              Rasterize_line_segment(host.annotations[0].line.start,
+                                     host.annotations[0].line.end,
+                                     host.annotations[0].line.style, true));
 }
 
 TEST(annotation_edit_interaction,

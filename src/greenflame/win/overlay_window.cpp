@@ -30,8 +30,9 @@ constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
 constexpr int kAnnotationToolCursorResourceId = 102;
 constexpr int kBrushToolGlyphResourceId = 103;
 constexpr int kLineToolGlyphResourceId = 104;
-constexpr int kRectangleToolGlyphResourceId = 105;
-constexpr int kFilledRectangleToolGlyphResourceId = 106;
+constexpr int kArrowToolGlyphResourceId = 105;
+constexpr int kRectangleToolGlyphResourceId = 106;
+constexpr int kFilledRectangleToolGlyphResourceId = 107;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 
 constexpr int kThumbnailMaxWidth = 320;
@@ -388,6 +389,7 @@ struct OverlayWindow::OverlayResources {
     PaintResources paint = {};
     std::shared_ptr<OverlayButtonGlyph const> brush_tool_glyph = {};
     std::shared_ptr<OverlayButtonGlyph const> line_tool_glyph = {};
+    std::shared_ptr<OverlayButtonGlyph const> arrow_tool_glyph = {};
     std::shared_ptr<OverlayButtonGlyph const> rectangle_tool_glyph = {};
     std::shared_ptr<OverlayButtonGlyph const> filled_rectangle_tool_glyph = {};
 
@@ -429,6 +431,8 @@ struct OverlayWindow::OverlayResources {
             Load_png_resource_alpha_mask(hinstance, kBrushToolGlyphResourceId);
         line_tool_glyph =
             Load_png_resource_alpha_mask(hinstance, kLineToolGlyphResourceId);
+        arrow_tool_glyph =
+            Load_png_resource_alpha_mask(hinstance, kArrowToolGlyphResourceId);
         rectangle_tool_glyph =
             Load_png_resource_alpha_mask(hinstance, kRectangleToolGlyphResourceId);
         filled_rectangle_tool_glyph = Load_png_resource_alpha_mask(
@@ -441,6 +445,7 @@ struct OverlayWindow::OverlayResources {
         paint_buffer.clear();
         brush_tool_glyph.reset();
         line_tool_glyph.reset();
+        arrow_tool_glyph.reset();
         rectangle_tool_glyph.reset();
         filled_rectangle_tool_glyph.reset();
         if (paint.font_dim) {
@@ -526,6 +531,8 @@ OverlayButtonGlyph const *OverlayWindow::Resolve_toolbar_button_glyph(
         return resources_->brush_tool_glyph.get();
     case core::AnnotationToolbarGlyph::Line:
         return resources_->line_tool_glyph.get();
+    case core::AnnotationToolbarGlyph::Arrow:
+        return resources_->arrow_tool_glyph.get();
     case core::AnnotationToolbarGlyph::Rectangle:
         return resources_->rectangle_tool_glyph.get();
     case core::AnnotationToolbarGlyph::FilledRectangle:
@@ -777,8 +784,11 @@ bool OverlayWindow::Should_show_line_cursor_preview() const {
         return false;
     }
     auto const &s = controller_.State();
-    return controller_.Active_annotation_tool() ==
-               std::optional<core::AnnotationToolId>{core::AnnotationToolId::Line} &&
+    std::optional<core::AnnotationToolId> const active_tool =
+        controller_.Active_annotation_tool();
+    return active_tool.has_value() &&
+           (*active_tool == core::AnnotationToolId::Line ||
+            *active_tool == core::AnnotationToolId::Arrow) &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value();
 }
@@ -1226,6 +1236,7 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
     if (!active_tool.has_value() ||
         (*active_tool != core::AnnotationToolId::Freehand &&
          *active_tool != core::AnnotationToolId::Line &&
+         *active_tool != core::AnnotationToolId::Arrow &&
          *active_tool != core::AnnotationToolId::Rectangle)) {
         mouse_wheel_delta_remainder_ = 0;
         return 0;
@@ -1908,6 +1919,7 @@ void OverlayWindow::Refresh_cursor() {
         }
         if (*active_tool == core::AnnotationToolId::Freehand ||
             *active_tool == core::AnnotationToolId::Line ||
+            *active_tool == core::AnnotationToolId::Arrow ||
             *active_tool == core::AnnotationToolId::Rectangle ||
             *active_tool == core::AnnotationToolId::FilledRectangle) {
             SetCursor(Load_annotation_tool_cursor(hinstance_));

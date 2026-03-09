@@ -17,15 +17,18 @@ Annotation Make_stroke(uint64_t id, std::initializer_list<PointPx> points) {
 }
 
 Annotation Make_line(uint64_t id, PointPx start, PointPx end,
-                     int32_t width_px = StrokeStyle::kDefaultWidthPx) {
+                     int32_t width_px = StrokeStyle::kDefaultWidthPx,
+                     bool arrow_head = false) {
     Annotation annotation{};
     annotation.id = id;
     annotation.kind = AnnotationKind::Line;
     annotation.line.start = start;
     annotation.line.end = end;
     annotation.line.style.width_px = width_px;
-    annotation.line.raster = Rasterize_line_segment(
-        annotation.line.start, annotation.line.end, annotation.line.style);
+    annotation.line.arrow_head = arrow_head;
+    annotation.line.raster =
+        Rasterize_line_segment(annotation.line.start, annotation.line.end,
+                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 
@@ -60,7 +63,7 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     std::vector<AnnotationToolbarButtonView> const views =
         controller.Build_toolbar_button_views();
 
-    ASSERT_EQ(views.size(), 4u);
+    ASSERT_EQ(views.size(), 5u);
     EXPECT_EQ(views[0].id, AnnotationToolId::Freehand);
     EXPECT_EQ(views[0].label, L"B");
     EXPECT_EQ(views[0].tooltip, L"Brush tool");
@@ -71,16 +74,21 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     EXPECT_EQ(views[1].tooltip, L"Line tool");
     EXPECT_EQ(views[1].glyph, AnnotationToolbarGlyph::Line);
     EXPECT_FALSE(views[1].active);
-    EXPECT_EQ(views[2].id, AnnotationToolId::Rectangle);
-    EXPECT_EQ(views[2].label, L"R");
-    EXPECT_EQ(views[2].tooltip, L"Rectangle tool");
-    EXPECT_EQ(views[2].glyph, AnnotationToolbarGlyph::Rectangle);
+    EXPECT_EQ(views[2].id, AnnotationToolId::Arrow);
+    EXPECT_EQ(views[2].label, L"A");
+    EXPECT_EQ(views[2].tooltip, L"Arrow tool");
+    EXPECT_EQ(views[2].glyph, AnnotationToolbarGlyph::Arrow);
     EXPECT_FALSE(views[2].active);
-    EXPECT_EQ(views[3].id, AnnotationToolId::FilledRectangle);
-    EXPECT_EQ(views[3].label, L"F");
-    EXPECT_EQ(views[3].tooltip, L"Filled rectangle tool");
-    EXPECT_EQ(views[3].glyph, AnnotationToolbarGlyph::FilledRectangle);
+    EXPECT_EQ(views[3].id, AnnotationToolId::Rectangle);
+    EXPECT_EQ(views[3].label, L"R");
+    EXPECT_EQ(views[3].tooltip, L"Rectangle tool");
+    EXPECT_EQ(views[3].glyph, AnnotationToolbarGlyph::Rectangle);
     EXPECT_FALSE(views[3].active);
+    EXPECT_EQ(views[4].id, AnnotationToolId::FilledRectangle);
+    EXPECT_EQ(views[4].label, L"F");
+    EXPECT_EQ(views[4].tooltip, L"Filled rectangle tool");
+    EXPECT_EQ(views[4].glyph, AnnotationToolbarGlyph::FilledRectangle);
+    EXPECT_FALSE(views[4].active);
 }
 
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFreehand) {
@@ -108,6 +116,16 @@ TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesLine) {
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Line});
     EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'l'));
+    EXPECT_EQ(controller.Active_tool(), std::nullopt);
+}
+
+TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesArrow) {
+    AnnotationController controller;
+
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'A'));
+    EXPECT_EQ(controller.Active_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Arrow});
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'a'));
     EXPECT_EQ(controller.Active_tool(), std::nullopt);
 }
 
@@ -207,6 +225,26 @@ TEST(annotation_controller, LineRelease_AddsAnnotationAndKeepsSelectionEmpty) {
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Line});
     EXPECT_EQ(controller.Annotations()[0].kind, AnnotationKind::Line);
+    EXPECT_FALSE(controller.Annotations()[0].line.arrow_head);
+    EXPECT_EQ(controller.Annotations()[0].line.start, (PointPx{15, 25}));
+    EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{45, 55}));
+}
+
+TEST(annotation_controller, ArrowRelease_AddsAnnotationAndKeepsSelectionEmpty) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
+
+    EXPECT_TRUE(controller.On_primary_press({15, 25}));
+    EXPECT_TRUE(controller.On_pointer_move({45, 55}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
+    EXPECT_EQ(controller.Active_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Arrow});
+    EXPECT_EQ(controller.Annotations()[0].kind, AnnotationKind::Line);
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
     EXPECT_EQ(controller.Annotations()[0].line.start, (PointPx{15, 25}));
     EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{45, 55}));
 }
@@ -300,6 +338,28 @@ TEST(annotation_controller, LineDraftTracksActiveGestureAndAngle) {
 
     ASSERT_NE(controller.Draft_annotation(), nullptr);
     EXPECT_EQ(controller.Draft_annotation()->kind, AnnotationKind::Line);
+    EXPECT_FALSE(controller.Draft_annotation()->line.arrow_head);
+    EXPECT_EQ(controller.Draft_annotation()->line.start, (PointPx{10, 10}));
+    EXPECT_EQ(controller.Draft_annotation()->line.end, (PointPx{20, 20}));
+    ASSERT_TRUE(controller.Draft_line_angle_radians().has_value());
+    EXPECT_NEAR(*controller.Draft_line_angle_radians(), 0.78539816339, 1e-6);
+
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(controller.Draft_line_angle_radians(), std::nullopt);
+}
+
+TEST(annotation_controller, ArrowDraftTracksActiveGestureAndAngle) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
+
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    EXPECT_TRUE(controller.On_pointer_move({20, 20}));
+
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(controller.Draft_annotation()->kind, AnnotationKind::Line);
+    EXPECT_TRUE(controller.Draft_annotation()->line.arrow_head);
     EXPECT_EQ(controller.Draft_annotation()->line.start, (PointPx{10, 10}));
     EXPECT_EQ(controller.Draft_annotation()->line.end, (PointPx{20, 20}));
     ASSERT_TRUE(controller.Draft_line_angle_radians().has_value());
@@ -371,6 +431,25 @@ TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedLineStyle) {
     EXPECT_EQ(controller.Annotations()[0].line.style.width_px, 12);
 }
 
+TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedArrowStyle) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+
+    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(controller.Draft_annotation()->line.style.width_px, 12);
+    EXPECT_TRUE(controller.Draft_annotation()->line.arrow_head);
+
+    EXPECT_TRUE(controller.On_pointer_move({20, 10}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Annotations()[0].line.style.width_px, 12);
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
+}
+
 TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedRectangleStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
@@ -424,6 +503,26 @@ TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedLineStyle) {
     EXPECT_EQ(controller.Annotations()[0].line.style.color, green);
 }
 
+TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedArrowStyle) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    COLORREF const green = RGB(0x12, 0xA4, 0x56);
+
+    EXPECT_TRUE(controller.Set_annotation_color(green));
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(controller.Draft_annotation()->line.style.color, green);
+    EXPECT_TRUE(controller.Draft_annotation()->line.arrow_head);
+
+    EXPECT_TRUE(controller.On_pointer_move({20, 10}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Annotations()[0].line.style.color, green);
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
+}
+
 TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedFilledRectangle) {
     AnnotationController controller;
     UndoStack undo_stack;
@@ -459,6 +558,19 @@ TEST(annotation_controller, CancelDuringFreehand_ClearsDraftWithoutCommit) {
 TEST(annotation_controller, CancelDuringLine_ClearsDraftWithoutCommit) {
     AnnotationController controller;
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Line));
+
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    EXPECT_TRUE(controller.On_pointer_move({25, 18}));
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+
+    EXPECT_TRUE(controller.On_cancel());
+    EXPECT_EQ(controller.Draft_annotation(), nullptr);
+    EXPECT_TRUE(controller.Annotations().empty());
+}
+
+TEST(annotation_controller, CancelDuringArrow_ClearsDraftWithoutCommit) {
+    AnnotationController controller;
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
 
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
     EXPECT_TRUE(controller.On_pointer_move({25, 18}));
@@ -568,6 +680,34 @@ TEST(annotation_controller, CancelDuringAnnotationDrag_RestoresOriginalAnnotatio
     EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
 }
 
+TEST(annotation_controller, ArrowBodyDragRelease_PreservesArrowHeadCoverage) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    Annotation const original = Make_line(1, {10, 10}, {50, 10}, 4, true);
+    controller.Insert_annotation_at(0, original, std::optional<uint64_t>{1});
+
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::Body}, {30, 10}));
+    EXPECT_TRUE(controller.On_pointer_move({50, 25}));
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
+    EXPECT_EQ(controller.Annotations()[0].line.start, (PointPx{30, 25}));
+    EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{70, 25}));
+    EXPECT_TRUE(Annotation_hits_point(controller.Annotations()[0], {70, 25}));
+    EXPECT_TRUE(Annotation_hits_point(controller.Annotations()[0], {60, 22}));
+
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Annotations()[0], original);
+
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
+    EXPECT_TRUE(Annotation_hits_point(controller.Annotations()[0], {70, 25}));
+    EXPECT_TRUE(Annotation_hits_point(controller.Annotations()[0], {60, 22}));
+}
+
 TEST(annotation_controller, LineEndpointDragRelease_UpdatesLineAndIsUndoable) {
     AnnotationController controller;
     UndoStack undo_stack;
@@ -611,6 +751,43 @@ TEST(annotation_controller, CancelDuringLineEndpointDrag_RestoresOriginalLine) {
     EXPECT_EQ(controller.Active_annotation_edit_handle(), std::nullopt);
     EXPECT_EQ(controller.Annotations()[0], original);
     EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+}
+
+TEST(annotation_controller, ArrowEndpointDragRelease_UpdatesArrowAndPreservesHead) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    Annotation const original = Make_line(1, {40, 40}, {90, 40}, 6, true);
+    controller.Insert_annotation_at(0, original, std::optional<uint64_t>{1});
+
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::LineEndHandle}, {90, 40}));
+    EXPECT_EQ(
+        controller.Active_annotation_edit_handle(),
+        std::optional<AnnotationEditHandleKind>{AnnotationEditHandleKind::LineEnd});
+    EXPECT_TRUE(controller.On_pointer_move({120, 70}));
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
+    EXPECT_EQ(controller.Annotations()[0].line.start, (PointPx{40, 40}));
+    EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{120, 70}));
+    EXPECT_EQ(controller.Annotations()[0].line.raster,
+              Rasterize_line_segment(controller.Annotations()[0].line.start,
+                                     controller.Annotations()[0].line.end,
+                                     controller.Annotations()[0].line.style, true));
+
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Active_annotation_edit_handle(), std::nullopt);
+
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Annotations()[0], original);
+
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
+    EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{120, 70}));
+    EXPECT_EQ(controller.Annotations()[0].line.raster,
+              Rasterize_line_segment(controller.Annotations()[0].line.start,
+                                     controller.Annotations()[0].line.end,
+                                     controller.Annotations()[0].line.style, true));
 }
 
 TEST(annotation_controller, RectangleHandleDragRelease_UpdatesBoundsAndIsUndoable) {

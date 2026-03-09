@@ -165,6 +165,7 @@ std::optional<int32_t> OverlayController::Adjust_brush_width(int32_t delta_steps
         !active_tool.has_value() ||
         (*active_tool != AnnotationToolId::Freehand &&
          *active_tool != AnnotationToolId::Line &&
+         *active_tool != AnnotationToolId::Arrow &&
          *active_tool != AnnotationToolId::Rectangle)) {
         return std::nullopt;
     }

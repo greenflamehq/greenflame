@@ -16,7 +16,14 @@ namespace {
 
 AnnotationToolRegistry::AnnotationToolRegistry() {
     tools_.push_back(std::make_unique<FreehandAnnotationTool>());
-    tools_.push_back(std::make_unique<LineAnnotationTool>());
+    tools_.push_back(std::make_unique<LineAnnotationTool>(
+        AnnotationToolDescriptor{AnnotationToolId::Line, L"Line tool", L'L', L"L",
+                                 AnnotationToolbarGlyph::Line},
+        false));
+    tools_.push_back(std::make_unique<LineAnnotationTool>(
+        AnnotationToolDescriptor{AnnotationToolId::Arrow, L"Arrow tool", L'A', L"A",
+                                 AnnotationToolbarGlyph::Arrow},
+        true));
     tools_.push_back(std::make_unique<RectangleAnnotationTool>(
         AnnotationToolDescriptor{AnnotationToolId::Rectangle, L"Rectangle tool", L'R',
                                  L"R", AnnotationToolbarGlyph::Rectangle},

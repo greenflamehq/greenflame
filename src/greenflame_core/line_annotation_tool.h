@@ -6,7 +6,7 @@ namespace greenflame::core {
 
 class LineAnnotationTool final : public IAnnotationTool {
   public:
-    LineAnnotationTool();
+    LineAnnotationTool(AnnotationToolDescriptor descriptor, bool arrow_head);
 
     [[nodiscard]] AnnotationToolDescriptor const &Descriptor() const noexcept override;
 
@@ -31,6 +31,7 @@ class LineAnnotationTool final : public IAnnotationTool {
     void Invalidate_draft() noexcept;
 
     AnnotationToolDescriptor descriptor_ = {};
+    bool arrow_head_ = false;
     bool drawing_ = false;
     PointPx start_ = {};
     PointPx end_ = {};

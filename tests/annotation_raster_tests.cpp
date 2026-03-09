@@ -5,15 +5,18 @@ using namespace greenflame::core;
 namespace {
 
 Annotation Make_line(uint64_t id, PointPx start, PointPx end,
-                     int32_t width_px = StrokeStyle::kDefaultWidthPx) {
+                     int32_t width_px = StrokeStyle::kDefaultWidthPx,
+                     bool arrow_head = false) {
     Annotation annotation{};
     annotation.id = id;
     annotation.kind = AnnotationKind::Line;
     annotation.line.start = start;
     annotation.line.end = end;
     annotation.line.style.width_px = width_px;
-    annotation.line.raster = Rasterize_line_segment(
-        annotation.line.start, annotation.line.end, annotation.line.style);
+    annotation.line.arrow_head = arrow_head;
+    annotation.line.raster =
+        Rasterize_line_segment(annotation.line.start, annotation.line.end,
+                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 
@@ -58,6 +61,14 @@ TEST(annotation_raster, AnnotationHitsPoint_LineUsesSquareCaps) {
     EXPECT_FALSE(Annotation_hits_point(line, {22, 10}));
 }
 
+TEST(annotation_raster, AnnotationHitsPoint_ArrowCoversTipAndHeadBase) {
+    Annotation const arrow = Make_line(8, {10, 10}, {50, 10}, 4, true);
+
+    EXPECT_TRUE(Annotation_hits_point(arrow, {50, 10}));
+    EXPECT_TRUE(Annotation_hits_point(arrow, {40, 7}));
+    EXPECT_FALSE(Annotation_hits_point(arrow, {50, 2}));
+}
+
 TEST(annotation_raster, TranslateAnnotation_LineMovesEndpointsAndBounds) {
     Annotation const line = Make_line(9, {20, 30}, {40, 30}, 6);
     RectPx const before_bounds = line.line.raster.bounds;
@@ -66,6 +77,20 @@ TEST(annotation_raster, TranslateAnnotation_LineMovesEndpointsAndBounds) {
 
     EXPECT_EQ(moved.line.start, (PointPx{25, 27}));
     EXPECT_EQ(moved.line.end, (PointPx{45, 27}));
+    EXPECT_EQ(moved.line.raster.bounds,
+              (RectPx::From_ltrb(before_bounds.left + 5, before_bounds.top - 3,
+                                 before_bounds.right + 5, before_bounds.bottom - 3)));
+}
+
+TEST(annotation_raster, TranslateAnnotation_ArrowMovesEndpointsAndBounds) {
+    Annotation const arrow = Make_line(10, {20, 30}, {60, 45}, 6, true);
+    RectPx const before_bounds = arrow.line.raster.bounds;
+
+    Annotation const moved = Translate_annotation(arrow, {5, -3});
+
+    EXPECT_TRUE(moved.line.arrow_head);
+    EXPECT_EQ(moved.line.start, (PointPx{25, 27}));
+    EXPECT_EQ(moved.line.end, (PointPx{65, 42}));
     EXPECT_EQ(moved.line.raster.bounds,
               (RectPx::From_ltrb(before_bounds.left + 5, before_bounds.top - 3,
                                  before_bounds.right + 5, before_bounds.bottom - 3)));

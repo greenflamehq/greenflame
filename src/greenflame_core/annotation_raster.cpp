@@ -12,6 +12,16 @@ struct PointF final {
 constexpr COLORREF kByteMask = static_cast<COLORREF>(0xFF);
 constexpr uint8_t kFullOpacity = 255;
 constexpr int kLineRasterSamplesPerAxis = 4;
+constexpr float kHalf = 0.5F;
+constexpr float kArrowHeadBaseWidthPx = 10.0F;
+constexpr float kArrowHeadBaseLengthPx = 18.0F;
+constexpr float kArrowHeadWidthPerStrokePx = 2.0F;
+constexpr float kArrowHeadLengthPerStrokePx = 4.0F;
+constexpr float kArrowHeadShaftOverlapPerStrokePx = 2.0F;
+
+[[nodiscard]] PointF To_point_f(PointPx point) noexcept {
+    return {static_cast<float>(point.x), static_cast<float>(point.y)};
+}
 
 [[nodiscard]] float Distance_sq_to_segment(float px, float py, PointPx a,
                                            PointPx b) noexcept {
@@ -115,20 +125,20 @@ struct LineRasterFrame final {
     std::array<PointF, 4> corners = {};
 };
 
-[[nodiscard]] LineRasterFrame Build_line_raster_frame(PointPx start, PointPx end,
+struct TriangleRasterShape final {
+    std::array<PointF, 3> vertices = {};
+};
+
+[[nodiscard]] LineRasterFrame Build_line_raster_frame(PointF start, PointF end,
                                                       StrokeStyle style) noexcept {
-    float const sx = static_cast<float>(start.x);
-    float const sy = static_cast<float>(start.y);
-    float const ex = static_cast<float>(end.x);
-    float const ey = static_cast<float>(end.y);
-    float const dx = ex - sx;
-    float const dy = ey - sy;
+    float const dx = end.x - start.x;
+    float const dy = end.y - start.y;
     float const line_length = std::sqrt(dx * dx + dy * dy);
 
     LineRasterFrame frame{};
-    frame.center = {(sx + ex) * 0.5F, (sy + ey) * 0.5F};
-    frame.half_width = std::max(1.0F, static_cast<float>(style.width_px)) * 0.5F;
-    frame.half_length = (line_length * 0.5F) + frame.half_width;
+    frame.center = {(start.x + end.x) * kHalf, (start.y + end.y) * kHalf};
+    frame.half_width = std::max(1.0F, static_cast<float>(style.width_px)) * kHalf;
+    frame.half_length = (line_length * kHalf) + frame.half_width;
 
     if (line_length > 0.0F) {
         frame.axis_u = {dx / line_length, dy / line_length};
@@ -187,18 +197,18 @@ struct LineRasterFrame final {
     size_t const height = static_cast<size_t>(raster.Height());
     raster.coverage.assign(width * height, 0);
 
-    int constexpr kSamplesPerPixel =
+    int constexpr samples_per_pixel =
         kLineRasterSamplesPerAxis * kLineRasterSamplesPerAxis;
-    float constexpr kStep = 1.0F / static_cast<float>(kLineRasterSamplesPerAxis);
+    float constexpr step = 1.0F / static_cast<float>(kLineRasterSamplesPerAxis);
     for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
         for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
             int covered_samples = 0;
             for (int sy = 0; sy < kLineRasterSamplesPerAxis; ++sy) {
                 float const sample_y =
-                    static_cast<float>(y) + (static_cast<float>(sy) + 0.5F) * kStep;
+                    static_cast<float>(y) + (static_cast<float>(sy) + kHalf) * step;
                 for (int sx = 0; sx < kLineRasterSamplesPerAxis; ++sx) {
                     float const sample_x =
-                        static_cast<float>(x) + (static_cast<float>(sx) + 0.5F) * kStep;
+                        static_cast<float>(x) + (static_cast<float>(sx) + kHalf) * step;
                     if (Point_inside_line_shape(sample_x, sample_y, frame)) {
                         ++covered_samples;
                     }
@@ -211,13 +221,177 @@ struct LineRasterFrame final {
 
             uint8_t const coverage =
                 static_cast<uint8_t>((covered_samples * static_cast<int>(kFullOpacity) +
-                                      (kSamplesPerPixel / 2)) /
-                                     kSamplesPerPixel);
+                                      (samples_per_pixel / 2)) /
+                                     samples_per_pixel);
             raster.coverage[Coverage_index(raster, {x, y})] = coverage;
         }
     }
 
     return raster;
+}
+
+[[nodiscard]] float Triangle_edge_function(PointF a, PointF b, float px,
+                                           float py) noexcept {
+    return (px - a.x) * (b.y - a.y) - (py - a.y) * (b.x - a.x);
+}
+
+[[nodiscard]] bool Point_inside_triangle(float px, float py,
+                                         TriangleRasterShape const &triangle) noexcept {
+    float const e0 =
+        Triangle_edge_function(triangle.vertices[0], triangle.vertices[1], px, py);
+    float const e1 =
+        Triangle_edge_function(triangle.vertices[1], triangle.vertices[2], px, py);
+    float const e2 =
+        Triangle_edge_function(triangle.vertices[2], triangle.vertices[0], px, py);
+    bool const has_negative = e0 < 0.0F || e1 < 0.0F || e2 < 0.0F;
+    bool const has_positive = e0 > 0.0F || e1 > 0.0F || e2 > 0.0F;
+    return !(has_negative && has_positive);
+}
+
+[[nodiscard]] AnnotationRaster
+Rasterize_triangle_shape(TriangleRasterShape const &triangle) {
+    AnnotationRaster raster{};
+
+    float min_x = triangle.vertices[0].x;
+    float min_y = triangle.vertices[0].y;
+    float max_x = triangle.vertices[0].x;
+    float max_y = triangle.vertices[0].y;
+    for (PointF const vertex : triangle.vertices) {
+        min_x = std::min(min_x, vertex.x);
+        min_y = std::min(min_y, vertex.y);
+        max_x = std::max(max_x, vertex.x);
+        max_y = std::max(max_y, vertex.y);
+    }
+
+    raster.bounds = RectPx::From_ltrb(static_cast<int32_t>(std::floor(min_x)) - 1,
+                                      static_cast<int32_t>(std::floor(min_y)) - 1,
+                                      static_cast<int32_t>(std::ceil(max_x)) + 2,
+                                      static_cast<int32_t>(std::ceil(max_y)) + 2);
+    if (raster.bounds.Is_empty()) {
+        return raster;
+    }
+
+    size_t const width = static_cast<size_t>(raster.Width());
+    size_t const height = static_cast<size_t>(raster.Height());
+    raster.coverage.assign(width * height, 0);
+
+    int constexpr samples_per_pixel =
+        kLineRasterSamplesPerAxis * kLineRasterSamplesPerAxis;
+    float constexpr step = 1.0F / static_cast<float>(kLineRasterSamplesPerAxis);
+    for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
+        for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
+            int covered_samples = 0;
+            for (int sy = 0; sy < kLineRasterSamplesPerAxis; ++sy) {
+                float const sample_y =
+                    static_cast<float>(y) + (static_cast<float>(sy) + kHalf) * step;
+                for (int sx = 0; sx < kLineRasterSamplesPerAxis; ++sx) {
+                    float const sample_x =
+                        static_cast<float>(x) + (static_cast<float>(sx) + kHalf) * step;
+                    if (Point_inside_triangle(sample_x, sample_y, triangle)) {
+                        ++covered_samples;
+                    }
+                }
+            }
+
+            if (covered_samples == 0) {
+                continue;
+            }
+
+            uint8_t const coverage =
+                static_cast<uint8_t>((covered_samples * static_cast<int>(kFullOpacity) +
+                                      (samples_per_pixel / 2)) /
+                                     samples_per_pixel);
+            raster.coverage[Coverage_index(raster, {x, y})] = coverage;
+        }
+    }
+
+    return raster;
+}
+
+[[nodiscard]] AnnotationRaster Combine_rasters(AnnotationRaster const &first,
+                                               AnnotationRaster const &second) {
+    if (first.Is_empty()) {
+        return second;
+    }
+    if (second.Is_empty()) {
+        return first;
+    }
+
+    AnnotationRaster combined{};
+    combined.bounds =
+        RectPx::From_ltrb(std::min(first.bounds.left, second.bounds.left),
+                          std::min(first.bounds.top, second.bounds.top),
+                          std::max(first.bounds.right, second.bounds.right),
+                          std::max(first.bounds.bottom, second.bounds.bottom));
+    if (combined.bounds.Is_empty()) {
+        return combined;
+    }
+
+    size_t const width = static_cast<size_t>(combined.Width());
+    size_t const height = static_cast<size_t>(combined.Height());
+    combined.coverage.assign(width * height, 0);
+
+    auto merge_coverage = [&](AnnotationRaster const &source) noexcept {
+        for (int32_t y = source.bounds.top; y < source.bounds.bottom; ++y) {
+            for (int32_t x = source.bounds.left; x < source.bounds.right; ++x) {
+                size_t const source_index = Coverage_index(source, {x, y});
+                if (source_index >= source.coverage.size()) {
+                    continue;
+                }
+                size_t const combined_index = Coverage_index(combined, {x, y});
+                combined.coverage[combined_index] = std::max(
+                    combined.coverage[combined_index], source.coverage[source_index]);
+            }
+        }
+    };
+
+    merge_coverage(first);
+    merge_coverage(second);
+    return combined;
+}
+
+[[nodiscard]] AnnotationRaster Rasterize_arrow_segment(PointPx start, PointPx end,
+                                                       StrokeStyle style) {
+    PointF const start_f = To_point_f(start);
+    PointF const end_f = To_point_f(end);
+    float const dx = end_f.x - start_f.x;
+    float const dy = end_f.y - start_f.y;
+    float const line_length = std::sqrt(dx * dx + dy * dy);
+    if (line_length <= 0.0F) {
+        return Rasterize_line_frame(Build_line_raster_frame(start_f, end_f, style));
+    }
+
+    float const stroke_width = std::max(1.0F, static_cast<float>(style.width_px));
+    float const head_base_width =
+        kArrowHeadBaseWidthPx + (stroke_width * kArrowHeadWidthPerStrokePx);
+    float const raw_head_length =
+        kArrowHeadBaseLengthPx + (stroke_width * kArrowHeadLengthPerStrokePx);
+    float const head_length = std::min(
+        line_length,
+        std::max(stroke_width,
+                 raw_head_length - (stroke_width * kArrowHeadShaftOverlapPerStrokePx)));
+
+    PointF const axis_u{dx / line_length, dy / line_length};
+    PointF const axis_v{-axis_u.y, axis_u.x};
+    PointF const head_tip{end_f.x + axis_u.x * kHalf, end_f.y + axis_u.y * kHalf};
+    PointF const head_base_center{end_f.x - axis_u.x * head_length,
+                                  end_f.y - axis_u.y * head_length};
+    float const half_head_base_width = head_base_width * kHalf;
+    TriangleRasterShape const head_triangle{std::array<PointF, 3>{
+        head_tip,
+        PointF{head_base_center.x + axis_v.x * half_head_base_width,
+               head_base_center.y + axis_v.y * half_head_base_width},
+        PointF{head_base_center.x - axis_v.x * half_head_base_width,
+               head_base_center.y - axis_v.y * half_head_base_width},
+    }};
+
+    AnnotationRaster shaft_raster{};
+    if (head_length < line_length) {
+        shaft_raster = Rasterize_line_frame(
+            Build_line_raster_frame(start_f, head_base_center, style));
+    }
+    AnnotationRaster const head_raster = Rasterize_triangle_shape(head_triangle);
+    return Combine_rasters(shaft_raster, head_raster);
 }
 
 } // namespace
@@ -255,8 +429,8 @@ AnnotationRaster Rasterize_freehand_stroke(std::span<const PointPx> points,
     float const radius_sq = radius * radius;
     for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
         for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
-            float const center_x = static_cast<float>(x) + 0.5F;
-            float const center_y = static_cast<float>(y) + 0.5F;
+            float const center_x = static_cast<float>(x) + kHalf;
+            float const center_y = static_cast<float>(y) + kHalf;
             if (!Pixel_covered_by_polyline(center_x, center_y, points, radius_sq)) {
                 continue;
             }
@@ -267,8 +441,13 @@ AnnotationRaster Rasterize_freehand_stroke(std::span<const PointPx> points,
     return raster;
 }
 
-AnnotationRaster Rasterize_line_segment(PointPx start, PointPx end, StrokeStyle style) {
-    return Rasterize_line_frame(Build_line_raster_frame(start, end, style));
+AnnotationRaster Rasterize_line_segment(PointPx start, PointPx end, StrokeStyle style,
+                                        bool arrow_head) {
+    if (arrow_head) {
+        return Rasterize_arrow_segment(start, end, style);
+    }
+    return Rasterize_line_frame(
+        Build_line_raster_frame(To_point_f(start), To_point_f(end), style));
 }
 
 AnnotationRaster Rasterize_rectangle(RectPx outer_bounds, StrokeStyle style,
@@ -468,7 +647,7 @@ Hit_test_rectangle_resize_handles(RectPx outer_bounds, PointPx cursor) noexcept 
 
 RectPx Resize_rectangle_from_handle(RectPx outer_bounds, SelectionHandle handle,
                                     PointPx cursor) noexcept {
-    constexpr int32_t kMinSizePx = 1;
+    constexpr int32_t min_size_px = 1;
 
     RectPx r = outer_bounds.Normalized();
     if (r.Is_empty()) {
@@ -507,20 +686,20 @@ RectPx Resize_rectangle_from_handle(RectPx outer_bounds, SelectionHandle handle,
     }
 
     r = r.Normalized();
-    if (r.Width() < kMinSizePx) {
+    if (r.Width() < min_size_px) {
         if (handle == SelectionHandle::Left || handle == SelectionHandle::TopLeft ||
             handle == SelectionHandle::BottomLeft) {
-            r.left = r.right - kMinSizePx;
+            r.left = r.right - min_size_px;
         } else {
-            r.right = r.left + kMinSizePx;
+            r.right = r.left + min_size_px;
         }
     }
-    if (r.Height() < kMinSizePx) {
+    if (r.Height() < min_size_px) {
         if (handle == SelectionHandle::Top || handle == SelectionHandle::TopLeft ||
             handle == SelectionHandle::TopRight) {
-            r.top = r.bottom - kMinSizePx;
+            r.top = r.bottom - min_size_px;
         } else {
-            r.bottom = r.top + kMinSizePx;
+            r.bottom = r.top + min_size_px;
         }
     }
     return r.Normalized();

@@ -49,6 +49,7 @@ struct LineAnnotation final {
     PointPx start = {};
     PointPx end = {};
     StrokeStyle style = {};
+    bool arrow_head = false;
     AnnotationRaster raster = {};
 
     constexpr bool operator==(LineAnnotation const &) const noexcept = default;
@@ -95,7 +96,8 @@ struct AnnotationDocument final {
 [[nodiscard]] AnnotationRaster
 Rasterize_freehand_stroke(std::span<const PointPx> points, StrokeStyle style);
 [[nodiscard]] AnnotationRaster Rasterize_line_segment(PointPx start, PointPx end,
-                                                      StrokeStyle style);
+                                                      StrokeStyle style,
+                                                      bool arrow_head = false);
 [[nodiscard]] AnnotationRaster
 Rasterize_rectangle(RectPx outer_bounds, StrokeStyle style, bool filled) noexcept;
 [[nodiscard]] RectPx Annotation_bounds(Annotation const &annotation) noexcept;

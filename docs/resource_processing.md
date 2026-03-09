@@ -5,7 +5,7 @@ audience: contributors
 status: reference
 owners:
   - core-team
-last_updated: 2026-03-08
+last_updated: 2026-03-09
 tags:
   - resources
   - icons
@@ -39,6 +39,7 @@ Examples of source files:
 
 - `resources/brush.png`
 - `resources/line.png`
+- `resources/arrow.png`
 - `resources/rectangle.png`
 - `resources/filled_rectangle.png`
 
@@ -46,6 +47,7 @@ Derived embedded assets follow the same naming pattern:
 
 - `resources/brush-mask.png`
 - `resources/line-mask.png`
+- `resources/arrow-mask.png`
 - `resources/rectangle-mask.png`
 - `resources/filled_rectangle-mask.png`
 
@@ -58,6 +60,7 @@ magick resources\brush.png -colorspace Gray -negate -alpha copy -fill white -col
 For example:
 
 ```bat
+magick resources\arrow.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\arrow-mask.png
 magick resources\rectangle.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\rectangle-mask.png
 magick resources\filled_rectangle.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\filled_rectangle-mask.png
 ```
