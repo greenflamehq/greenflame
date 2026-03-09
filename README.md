@@ -43,6 +43,9 @@ Once a region is selected:
 - With the **Brush tool** active, the overlay shows an anti-aliased circular size preview around the cursor hotspot.
 - With the **Line** or **Arrow** tool active, the overlay shows an anti-aliased square size preview around the cursor hotspot aligned to the current line direction.
 - The **Rectangle** and **Filled Rectangle** tools do not draw a cursor size preview overlay.
+- **Delete** ➜ remove the selected annotation.
+- **Ctrl-Z** ➜ undo the last region or annotation change.
+- **Ctrl-Shift-Z** ➜ redo the last undone region or annotation change.
 - **Ctrl-S** ➜ save directly (no dialog) to the configured default save folder as the configured format (default PNG), then close.
 - **Ctrl-Shift-S** ➜ open **Save As** dialog, then save and close.
 - **Ctrl-Alt-S** ➜ save directly (no dialog), copy the saved file to the clipboard, then close.
