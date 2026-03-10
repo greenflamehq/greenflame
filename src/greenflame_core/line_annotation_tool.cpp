@@ -99,9 +99,6 @@ Annotation LineAnnotationTool::Build_annotation(IAnnotationToolHost const &host,
     annotation.line.end = end;
     annotation.line.style = host.Current_stroke_style();
     annotation.line.arrow_head = arrow_head_;
-    annotation.line.raster =
-        Rasterize_line_segment(annotation.line.start, annotation.line.end,
-                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 

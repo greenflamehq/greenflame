@@ -1,39 +1,24 @@
 #pragma once
 
-// Overlay painting: capture blit, selection dim/border, dimension labels,
-// crosshair, round magnifier, coord tooltip, contour handles. Caller provides
-// read-only paint input; no dependency on OverlayState or window state
-// accessors.
+// Direct2D overlay paint pipeline.
 
-#include "greenflame_core/annotation_raster.h"
+#include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/color_wheel.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/selection_handles.h"
 
 namespace greenflame {
 
-struct GdiCaptureResult;
-
-// Cached GDI resources created once at overlay init, reused every frame.
-struct PaintResources {
-    HFONT font_dim = nullptr;       // 14pt "Segoe UI" normal
-    HFONT font_center = nullptr;    // 36pt "Segoe UI" black weight
-    HFONT font_help_hint = nullptr; // 16pt "Segoe UI" normal
-    HPEN crosshair_pen = nullptr;
-    HPEN border_pen = nullptr;
-    HPEN handle_pen = nullptr;
-};
-
+struct D2DOverlayResources;
 class IOverlayButton;
+class OverlayHelpOverlay;
 
-struct PaintOverlayInput {
-    GdiCaptureResult const *capture = nullptr;
+// Per-frame paint input for the Direct2D overlay renderer.
+struct D2DPaintInput {
     core::RectPx live_rect = {};
     core::RectPx final_selection = {};
     core::PointPx cursor_client_px = {};
     std::span<const core::RectPx> monitor_rects_client = {};
-    std::span<uint8_t> paint_buffer = {};
-    PaintResources const *resources = nullptr;
     std::span<const core::Annotation> annotations = {};
     core::Annotation const *draft_annotation = nullptr;
     std::span<const core::PointPx> draft_freehand_points = {};
@@ -44,7 +29,8 @@ struct PaintOverlayInput {
     bool dragging = false;
     bool handle_dragging = false;
     bool move_dragging = false;
-    bool modifier_preview = false; // Shift/Ctrl: live_rect = window or monitor
+    bool annotation_editing = false; // annotation endpoint/resize/translate in progress
+    bool modifier_preview = false;
     bool show_selection_size_side_labels = true;
     bool show_selection_size_center_label = true;
     std::optional<core::SelectionHandle> highlight_handle = std::nullopt;
@@ -52,6 +38,8 @@ struct PaintOverlayInput {
     std::optional<core::RectPx> selected_annotation_bounds = std::nullopt;
     std::wstring_view transient_center_label_text = {};
     std::span<IOverlayButton *const> toolbar_buttons = {};
+    // Parallel to toolbar_buttons: D2D glyph bitmap for each button (may be null).
+    std::span<ID2D1Bitmap *const> toolbar_button_glyphs = {};
     std::wstring_view toolbar_tooltip_text = {};
     std::optional<core::RectPx> hovered_toolbar_bounds = std::nullopt;
     bool show_color_wheel = false;
@@ -61,6 +49,21 @@ struct PaintOverlayInput {
     std::optional<size_t> color_wheel_hovered_segment = std::nullopt;
 };
 
-void Paint_overlay(HDC hdc, HWND hwnd, const RECT &rc, const PaintOverlayInput &in);
+// Rebuild the annotations off-screen bitmap from committed annotations.
+// Sets res.annotations_valid = true on success.
+void Rebuild_annotations_bitmap(D2DOverlayResources &res,
+                                std::span<const core::Annotation> annotations);
+
+// Rebuild the frozen off-screen bitmap: screenshot + dim + selection restore +
+// annotations. Sets res.frozen_valid = true on success.
+void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
+                           int vd_width, int vd_height);
+
+// Draw one complete frame. Returns false on D2DERR_RECREATE_TARGET (device lost).
+// If help_overlay is non-null and visible, it is drawn on top of everything else within
+// the same BeginDraw/EndDraw pair.
+[[nodiscard]] bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input,
+                                   int vd_width, int vd_height,
+                                   OverlayHelpOverlay *help_overlay = nullptr);
 
 } // namespace greenflame

@@ -82,7 +82,7 @@ OverlayAction OverlayController::On_select_annotation_tool(AnnotationToolId id) 
 
 OverlayAction OverlayController::On_delete_selected_annotation() {
     if (annotation_controller_.Delete_selected_annotation(undo_stack_)) {
-        return OverlayAction::Repaint;
+        return OverlayAction::InvalidateFrozenCache;
     }
     return OverlayAction::None;
 }
@@ -297,7 +297,7 @@ OverlayAction OverlayController::On_cancel() {
     if (!state_.final_selection.Is_empty()) {
         Set_final_selection({});
         state_.live_rect = {};
-        return OverlayAction::Repaint;
+        return OverlayAction::InvalidateFrozenCache;
     }
     return OverlayAction::Close;
 }
@@ -485,7 +485,7 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
             Allowed_selection_rect(to_commit, center, state_.cached_monitors);
         state_.move_dragging = false;
         state_.live_rect = {};
-        return OverlayAction::Repaint;
+        return OverlayAction::InvalidateFrozenCache;
     }
 
     if (state_.handle_dragging && state_.resize_handle.has_value()) {
@@ -501,7 +501,7 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
         state_.handle_dragging = false;
         state_.resize_handle = std::nullopt;
         state_.live_rect = {};
-        return OverlayAction::Repaint;
+        return OverlayAction::InvalidateFrozenCache;
     }
 
     if (state_.dragging) {
@@ -516,12 +516,12 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
         state_.selection_window = std::nullopt;
         state_.selection_monitor_index = std::nullopt;
         state_.dragging = false;
-        return OverlayAction::Repaint;
+        return OverlayAction::InvalidateFrozenCache;
     }
 
     if (annotation_controller_.Has_active_gesture()) {
         return annotation_controller_.On_primary_release(undo_stack_)
-                   ? OverlayAction::Repaint
+                   ? OverlayAction::InvalidateFrozenCache
                    : OverlayAction::None;
     }
 

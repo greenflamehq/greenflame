@@ -2,8 +2,6 @@
 #include "greenflame_core/modification_command.h"
 #include "greenflame_core/undo_stack.h"
 
-#include <gtest/gtest.h>
-
 using namespace greenflame::core;
 
 TEST(undo_stack, EmptyStack_CanUndoCanRedoFalse) {

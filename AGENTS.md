@@ -48,7 +48,7 @@ Before considering any task complete:
   Win32 application shell and OS integration
   - `main.cpp`: process entry, CLI parse handoff, single-instance tray guard
   - `greenflame_app.*`: app lifecycle, message loop, wiring between UI events and controllers
-  - `win/`: Win32 adapter layer (window classes, tray/overlay UI, GDI capture/paint, file dialogs/startup, concrete service implementations)
+  - `win/`: Win32 adapter layer (window classes, Direct2D overlay UI, tray UI, GDI capture, file dialogs/startup, concrete service implementations)
 
 - `src/greenflame_core/`
   Testable core logic and controller policies
@@ -91,8 +91,9 @@ Greenflame is controller-centric rather than strict MVC.
 Capture/overlay stack (current):
 
 - Capture: GDI virtual-desktop capture before overlay display (capture-first)
-- Overlay rendering: GDI in a fullscreen borderless topmost window
-- No Direct3D/Direct2D/DirectComposition in the current path
+- Overlay rendering: Direct2D/DirectWrite in a fullscreen borderless topmost window
+- Tray toast rendering: GDI/GDI+ (intentional small Win32 UI path)
+- No Direct3D/DirectComposition in the current path
 
 Breaking these rules is a correctness bug.
 

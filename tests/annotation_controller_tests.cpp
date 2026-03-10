@@ -1,4 +1,5 @@
 #include "greenflame_core/annotation_controller.h"
+#include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/undo_stack.h"
 
 using namespace greenflame::core;
@@ -11,8 +12,6 @@ Annotation Make_stroke(uint64_t id, std::initializer_list<PointPx> points) {
     annotation.kind = AnnotationKind::Freehand;
     annotation.freehand.style = {};
     annotation.freehand.points.assign(points.begin(), points.end());
-    annotation.freehand.raster = Rasterize_freehand_stroke(annotation.freehand.points,
-                                                           annotation.freehand.style);
     return annotation;
 }
 
@@ -26,9 +25,6 @@ Annotation Make_line(uint64_t id, PointPx start, PointPx end,
     annotation.line.end = end;
     annotation.line.style.width_px = width_px;
     annotation.line.arrow_head = arrow_head;
-    annotation.line.raster =
-        Rasterize_line_segment(annotation.line.start, annotation.line.end,
-                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 
@@ -40,9 +36,6 @@ Annotation Make_rectangle(uint64_t id, RectPx outer_bounds, int32_t width_px,
     annotation.rectangle.outer_bounds = outer_bounds;
     annotation.rectangle.style.width_px = width_px;
     annotation.rectangle.filled = filled;
-    annotation.rectangle.raster =
-        Rasterize_rectangle(annotation.rectangle.outer_bounds,
-                            annotation.rectangle.style, annotation.rectangle.filled);
     return annotation;
 }
 
@@ -633,11 +626,10 @@ TEST(annotation_controller, AnnotationDragRelease_MovesAnnotationAndIsUndoable) 
     AnnotationController controller;
     UndoStack undo_stack;
     Annotation const original = Make_stroke(1, {{40, 40}, {60, 40}});
+    RectPx const orig_bounds = Annotation_bounds(original);
     RectPx const expected_bounds =
-        RectPx::From_ltrb(original.freehand.raster.bounds.left + 20,
-                          original.freehand.raster.bounds.top + 20,
-                          original.freehand.raster.bounds.right + 20,
-                          original.freehand.raster.bounds.bottom + 20);
+        RectPx::From_ltrb(orig_bounds.left + 20, orig_bounds.top + 20,
+                          orig_bounds.right + 20, orig_bounds.bottom + 20);
 
     controller.Insert_annotation_at(0, original, std::nullopt);
 
@@ -768,10 +760,6 @@ TEST(annotation_controller, ArrowEndpointDragRelease_UpdatesArrowAndPreservesHea
     EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
     EXPECT_EQ(controller.Annotations()[0].line.start, (PointPx{40, 40}));
     EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{120, 70}));
-    EXPECT_EQ(controller.Annotations()[0].line.raster,
-              Rasterize_line_segment(controller.Annotations()[0].line.start,
-                                     controller.Annotations()[0].line.end,
-                                     controller.Annotations()[0].line.style, true));
 
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
     EXPECT_EQ(controller.Active_annotation_edit_handle(), std::nullopt);
@@ -784,10 +772,6 @@ TEST(annotation_controller, ArrowEndpointDragRelease_UpdatesArrowAndPreservesHea
     ASSERT_EQ(controller.Annotations().size(), 1u);
     EXPECT_TRUE(controller.Annotations()[0].line.arrow_head);
     EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{120, 70}));
-    EXPECT_EQ(controller.Annotations()[0].line.raster,
-              Rasterize_line_segment(controller.Annotations()[0].line.start,
-                                     controller.Annotations()[0].line.end,
-                                     controller.Annotations()[0].line.style, true));
 }
 
 TEST(annotation_controller, RectangleHandleDragRelease_UpdatesBoundsAndIsUndoable) {
@@ -845,7 +829,7 @@ TEST(annotation_controller, DeleteSelectedAnnotation_IsUndoableAndRedoable) {
 TEST(annotation_controller, SelectedAnnotationBounds_FollowSelectedAnnotation) {
     AnnotationController controller;
     Annotation const stroke = Make_stroke(1, {{40, 40}, {60, 40}});
-    RectPx const expected = stroke.freehand.raster.bounds;
+    RectPx const expected = Annotation_bounds(stroke);
     controller.Insert_annotation_at(0, stroke, std::nullopt);
     ASSERT_TRUE(controller.Set_selected_annotation(std::optional<uint64_t>{1}));
 

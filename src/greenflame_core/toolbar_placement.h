@@ -1,8 +1,6 @@
 #pragma once
 
 #include "greenflame_core/rect_px.h"
-#include <span>
-#include <vector>
 
 namespace greenflame::core {
 

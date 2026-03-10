@@ -106,8 +106,6 @@ FreehandAnnotationTool::Build_annotation(IAnnotationToolHost const &host,
     annotation.kind = AnnotationKind::Freehand;
     annotation.freehand.style = host.Current_stroke_style();
     annotation.freehand.points = host.Smooth_points(raw_points);
-    annotation.freehand.raster = Rasterize_freehand_stroke(annotation.freehand.points,
-                                                           annotation.freehand.style);
     return annotation;
 }
 

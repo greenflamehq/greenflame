@@ -156,9 +156,6 @@ class LineEndpointEditInteraction final : public IAnnotationEditInteraction {
         } else {
             edited.line.end = cursor;
         }
-        edited.line.raster =
-            Rasterize_line_segment(edited.line.start, edited.line.end,
-                                   edited.line.style, edited.line.arrow_head);
         if (*current == edited) {
             return false;
         }
@@ -220,9 +217,6 @@ class RectangleResizeEditInteraction final : public IAnnotationEditInteraction {
         Annotation edited = annotation_before_;
         edited.rectangle.outer_bounds = Resize_rectangle_from_handle(
             annotation_before_.rectangle.outer_bounds, handle_, cursor);
-        edited.rectangle.raster =
-            Rasterize_rectangle(edited.rectangle.outer_bounds, edited.rectangle.style,
-                                edited.rectangle.filled);
         if (*current == edited) {
             return false;
         }

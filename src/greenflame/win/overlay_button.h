@@ -1,13 +1,14 @@
 #pragma once
 
 #include "greenflame_core/rect_px.h"
+#include "win/ui_palette.h"
 
 namespace greenflame {
 
 // Colors provided by the overlay paint system for drawing buttons.
 struct ButtonDrawContext {
-    COLORREF fill_color = RGB(217, 240, 227); // kCoordTooltipBg
-    COLORREF outline_color = RGB(26, 121, 6); // kCoordTooltipText
+    D2D1_COLOR_F fill_color = kOverlayButtonFillColor;
+    D2D1_COLOR_F outline_color = kOverlayButtonOutlineColor;
 };
 
 struct OverlayButtonGlyph final {
@@ -27,12 +28,14 @@ class IOverlayButton {
   public:
     virtual ~IOverlayButton() = default;
 
-    virtual void Draw(HDC dc, ButtonDrawContext const &ctx) const = 0;
+    virtual void Draw_d2d(ID2D1RenderTarget *rt, ID2D1SolidColorBrush *brush,
+                          ID2D1Bitmap *glyph, ButtonDrawContext const &ctx) const = 0;
 
     [[nodiscard]] virtual core::RectPx Bounds() const = 0;
     [[nodiscard]] virtual bool Hit_test(core::PointPx pt) const = 0;
     [[nodiscard]] virtual bool Is_hovered() const = 0;
     [[nodiscard]] virtual bool Is_active() const = 0;
+    [[nodiscard]] virtual bool Is_pressed() const noexcept { return false; }
 
     virtual void Set_position(core::PointPx top_left) = 0;
     virtual void Set_active(bool active) = 0;
@@ -52,11 +55,13 @@ class OverlayButton final : public IOverlayButton {
     OverlayButton(core::PointPx position, int diameter, OverlayButtonGlyph const *glyph,
                   bool is_toggle = false, bool active = false);
 
-    void Draw(HDC dc, ButtonDrawContext const &ctx) const override;
+    void Draw_d2d(ID2D1RenderTarget *rt, ID2D1SolidColorBrush *brush,
+                  ID2D1Bitmap *glyph, ButtonDrawContext const &ctx) const override;
     [[nodiscard]] core::RectPx Bounds() const override;
     [[nodiscard]] bool Hit_test(core::PointPx pt) const override;
     [[nodiscard]] bool Is_hovered() const override { return hovered_; }
     [[nodiscard]] bool Is_active() const override { return active_; }
+    [[nodiscard]] bool Is_pressed() const noexcept override { return pressed_; }
     void Set_position(core::PointPx top_left) override;
     void Set_active(bool active) override { active_ = active; }
     void On_mouse_enter() override { hovered_ = true; }
@@ -71,7 +76,6 @@ class OverlayButton final : public IOverlayButton {
     core::PointPx position_;
     int diameter_;
     std::wstring label_;
-    OverlayButtonGlyph const *glyph_ = nullptr;
     bool is_toggle_;
     bool hovered_ = false;
     bool active_ = false;

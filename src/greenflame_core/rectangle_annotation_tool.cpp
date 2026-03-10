@@ -1,5 +1,7 @@
 #include "greenflame_core/rectangle_annotation_tool.h"
 
+#include "greenflame_core/annotation_hit_test.h"
+
 namespace greenflame::core {
 
 RectangleAnnotationTool::RectangleAnnotationTool(AnnotationToolDescriptor descriptor,
@@ -88,9 +90,6 @@ Annotation RectangleAnnotationTool::Build_annotation(IAnnotationToolHost const &
     annotation.rectangle.outer_bounds = Rectangle_outer_bounds_from_corners(start, end);
     annotation.rectangle.style = host.Current_stroke_style();
     annotation.rectangle.filled = filled_;
-    annotation.rectangle.raster =
-        Rasterize_rectangle(annotation.rectangle.outer_bounds,
-                            annotation.rectangle.style, annotation.rectangle.filled);
     return annotation;
 }
 

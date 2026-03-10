@@ -118,8 +118,9 @@ add_library(greenflame_core STATIC
     src/greenflame_core/annotation_controller.h
     src/greenflame_core/annotation_edit_interaction.cpp
     src/greenflame_core/annotation_edit_interaction.h
-    src/greenflame_core/annotation_raster.cpp
-    src/greenflame_core/annotation_raster.h
+    src/greenflame_core/annotation_hit_test.cpp
+    src/greenflame_core/annotation_hit_test.h
+    src/greenflame_core/annotation_types.h
     src/greenflame_core/annotation_tool.h
     src/greenflame_core/freehand_annotation_tool.cpp
     src/greenflame_core/freehand_annotation_tool.h
@@ -216,8 +217,6 @@ add_executable(greenflame WIN32
     src/greenflame/win/gdi_capture.cpp
     src/greenflame/win/gdi_capture.h
     src/greenflame/win/save_image.cpp
-    src/greenflame/win/overlay_paint.cpp
-    src/greenflame/win/overlay_paint.h
     src/greenflame/win/overlay_help_overlay.cpp
     src/greenflame/win/overlay_help_overlay.h
     src/greenflame/win/overlay_window.cpp
@@ -234,6 +233,10 @@ add_executable(greenflame WIN32
     src/greenflame/win/win32_services.h
     src/greenflame/win/overlay_button.h
     src/greenflame/win/overlay_button.cpp
+    src/greenflame/win/d2d_overlay_resources.h
+    src/greenflame/win/d2d_overlay_resources.cpp
+    src/greenflame/win/d2d_paint.h
+    src/greenflame/win/d2d_paint.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/app.manifest
     ${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc
 )
@@ -305,7 +308,8 @@ target_link_libraries(greenflame PRIVATE
     Windowscodecs
     ole32
     gdiplus
-    msimg32
+    d2d1
+    dwrite
 )
 
 # -----------------------------

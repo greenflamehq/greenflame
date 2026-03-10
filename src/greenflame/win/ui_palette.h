@@ -2,16 +2,27 @@
 
 namespace greenflame {
 
-inline constexpr COLORREF kBorderColor =
-    RGB(135, 223, 0); // Magnifier contour + crosshair position border color
-inline constexpr COLORREF kOverlayCrosshair = kBorderColor; // The Crosshair color
-inline constexpr COLORREF kOverlayHandle = kBorderColor;    // Selection border color
+[[nodiscard]] constexpr D2D1_COLOR_F
+Make_d2d_color(uint8_t red, uint8_t green, uint8_t blue, float alpha = 1.f) noexcept {
+    constexpr float kD2dColorScale = 1.f / 255.f;
+    return {static_cast<float>(red) * kD2dColorScale,
+            static_cast<float>(green) * kD2dColorScale,
+            static_cast<float>(blue) * kD2dColorScale, alpha};
+}
 
-inline constexpr COLORREF kCoordTooltipBg = RGB(217, 240, 227); // light green
-inline constexpr COLORREF kCoordTooltipText =
-    RGB(26, 121, 6); // Text + size border color
-inline constexpr unsigned char kCoordTooltipAlpha = 200;
+// Shared Direct2D overlay palette.
+inline constexpr D2D1_COLOR_F kBorderColor =
+    Make_d2d_color(135, 223, 0); // Selection border, crosshair, help accent
+inline constexpr D2D1_COLOR_F kCoordTooltipBg = Make_d2d_color(217, 240, 227);
+inline constexpr D2D1_COLOR_F kCoordTooltipText =
+    Make_d2d_color(26, 121, 6); // Tooltip text + border
+inline constexpr float kCoordTooltipAlpha = 200.f / 255.f;
+inline constexpr D2D1_COLOR_F kOverlayButtonFillColor = kCoordTooltipBg;
+inline constexpr D2D1_COLOR_F kOverlayButtonOutlineColor = kCoordTooltipText;
+inline constexpr D2D1_COLOR_F kMagnifierCheckerDark = Make_d2d_color(168, 168, 168);
+inline constexpr D2D1_COLOR_F kMagnifierCheckerLight = Make_d2d_color(224, 224, 224);
 
+// GDI/GDI+ toast palette.
 inline constexpr COLORREF kToastBackground = RGB(250, 250, 250);
 inline constexpr COLORREF kToastTitleText = RGB(17, 17, 17);
 inline constexpr COLORREF kToastBodyText = RGB(32, 32, 32);

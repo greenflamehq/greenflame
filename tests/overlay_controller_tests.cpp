@@ -143,7 +143,7 @@ TEST(overlay_controller, B_Release_CommitsFinalSelection) {
     Press(c, {100, 200});
     Move(c, {300, 400});
     OverlayAction action = Release(c, {300, 400});
-    EXPECT_EQ(action, OverlayAction::Repaint);
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_FALSE(c.State().dragging);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(100, 200, 300, 400)));
     EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
@@ -382,7 +382,7 @@ TEST(overlay_controller, E_HandleRelease_CommitsFinalSelection) {
                            std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0, 0);
     Move(c, {50, 50});
     OverlayAction action = Release(c, {50, 50});
-    EXPECT_EQ(action, OverlayAction::Repaint);
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_FALSE(c.State().handle_dragging);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
 }
@@ -447,7 +447,7 @@ TEST(overlay_controller, F_MoveRelease_CommitsFinalSelection) {
                            std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0, 0);
     Move(c, {250, 250}, No_mods(), 100);
     OverlayAction action = Release(c, {250, 250});
-    EXPECT_EQ(action, OverlayAction::Repaint);
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_FALSE(c.State().move_dragging);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
 }
@@ -560,7 +560,7 @@ TEST(overlay_controller, G_Cancel_FinalSelection_ClearsSelection) {
     ASSERT_FALSE(c.State().final_selection.Is_empty());
 
     OverlayAction action = c.On_cancel();
-    EXPECT_EQ(action, OverlayAction::Repaint);
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.State().final_selection.Is_empty());
 }
 
@@ -582,7 +582,7 @@ TEST(overlay_controller, G_Cancel_FinalSelectionAlsoClearsAnnotations) {
     ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
 
     OverlayAction action = c.On_cancel();
-    EXPECT_EQ(action, OverlayAction::Repaint);
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.State().final_selection.Is_empty());
     EXPECT_TRUE(c.Annotations().empty());
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
@@ -600,11 +600,11 @@ TEST(overlay_controller, G_Cancel_ActiveTool_DeselectsBeforeClearingSelection) {
     EXPECT_FALSE(c.State().final_selection.Is_empty());
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 
-    EXPECT_EQ(c.On_cancel(), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_cancel(), OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.State().final_selection.Is_empty());
 
     EXPECT_EQ(Press(c, {400, 400}), OverlayAction::Repaint);
-    EXPECT_EQ(Release(c, {600, 600}), OverlayAction::Repaint);
+    EXPECT_EQ(Release(c, {600, 600}), OverlayAction::InvalidateFrozenCache);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
@@ -924,7 +924,8 @@ TEST(overlay_controller,
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
 
-    EXPECT_EQ(c.On_primary_release(No_mods(), {140, 140}), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_primary_release(No_mods(), {140, 140}),
+              OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
 }
@@ -943,7 +944,8 @@ TEST(overlay_controller, AnnotationToolbar_MoveAndResizeHideToolbar) {
               OverlayAction::Repaint);
     EXPECT_FALSE(c.Should_show_annotation_toolbar());
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
-    EXPECT_EQ(c.On_primary_release(No_mods(), {220, 220}), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_primary_release(No_mods(), {220, 220}),
+              OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
 
     ASSERT_EQ(c.On_primary_press(No_mods(), {100, 100}, {100, 100}, std::nullopt,
@@ -952,7 +954,8 @@ TEST(overlay_controller, AnnotationToolbar_MoveAndResizeHideToolbar) {
               OverlayAction::Repaint);
     EXPECT_FALSE(c.Should_show_annotation_toolbar());
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
-    EXPECT_EQ(c.On_primary_release(No_mods(), {90, 90}), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_primary_release(No_mods(), {90, 90}),
+              OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
 }
@@ -970,7 +973,8 @@ TEST(overlay_controller,
     ASSERT_EQ(c.On_pointer_move(No_mods(), {220, 180}, {220, 180}, std::nullopt, {},
                                 std::nullopt, 0, 0, 100u),
               OverlayAction::Repaint);
-    ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}),
+              OverlayAction::InvalidateFrozenCache);
     ASSERT_EQ(c.Annotations().size(), 1u);
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
     ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
@@ -1001,7 +1005,8 @@ TEST(overlay_controller, SelectedLineHandleDragTakesPriorityOverAnnotationMove) 
     ASSERT_EQ(c.On_pointer_move(No_mods(), {200, 180}, {200, 180}, std::nullopt, {},
                                 std::nullopt, 0, 0, 100u),
               OverlayAction::Repaint);
-    ASSERT_EQ(c.On_primary_release(No_mods(), {200, 180}), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {200, 180}),
+              OverlayAction::InvalidateFrozenCache);
     ASSERT_EQ(c.Annotations().size(), 1u);
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
     ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
@@ -1040,7 +1045,8 @@ TEST(overlay_controller,
     ASSERT_EQ(c.On_pointer_move(No_mods(), {220, 180}, {220, 180}, std::nullopt, {},
                                 std::nullopt, 0, 0, 100u),
               OverlayAction::Repaint);
-    ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}),
+              OverlayAction::InvalidateFrozenCache);
     ASSERT_EQ(c.Annotations().size(), 1u);
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
 
@@ -1064,7 +1070,8 @@ TEST(overlay_controller,
     EXPECT_EQ(c.On_pointer_move(No_mods(), {120, 130}, {120, 130}, std::nullopt, {},
                                 std::nullopt, 0, 0, 116u),
               OverlayAction::Repaint);
-    EXPECT_EQ(c.On_primary_release(No_mods(), {120, 130}), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_primary_release(No_mods(), {120, 130}),
+              OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
 }

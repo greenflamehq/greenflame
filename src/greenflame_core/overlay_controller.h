@@ -19,6 +19,7 @@ struct OverlayModifierState {
 enum class OverlayAction : uint8_t {
     None,
     Repaint,
+    InvalidateFrozenCache,
     Close,
     SaveDirect,            // Ctrl+S
     SaveDirectAndCopyFile, // Ctrl+Alt+S

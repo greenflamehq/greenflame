@@ -1,6 +1,6 @@
 #pragma once
 
-#include "greenflame_core/annotation_raster.h"
+#include "greenflame_core/annotation_hit_test.h"
 
 namespace greenflame::core {
 

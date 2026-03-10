@@ -1,4 +1,4 @@
-#include "greenflame_core/annotation_raster.h"
+#include "greenflame_core/annotation_hit_test.h"
 
 using namespace greenflame::core;
 
@@ -14,9 +14,6 @@ Annotation Make_line(uint64_t id, PointPx start, PointPx end,
     annotation.line.end = end;
     annotation.line.style.width_px = width_px;
     annotation.line.arrow_head = arrow_head;
-    annotation.line.raster =
-        Rasterize_line_segment(annotation.line.start, annotation.line.end,
-                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 
@@ -28,31 +25,12 @@ Annotation Make_rectangle(uint64_t id, RectPx outer_bounds, int32_t width_px,
     annotation.rectangle.outer_bounds = outer_bounds;
     annotation.rectangle.style.width_px = width_px;
     annotation.rectangle.filled = filled;
-    annotation.rectangle.raster =
-        Rasterize_rectangle(annotation.rectangle.outer_bounds,
-                            annotation.rectangle.style, annotation.rectangle.filled);
     return annotation;
 }
 
 } // namespace
 
-TEST(annotation_raster, RasterizeLineSegment_DiagonalHasPartialCoverage) {
-    AnnotationRaster const raster =
-        Rasterize_line_segment({10, 10}, {24, 24}, StrokeStyle{1, RGB(0, 0, 0)});
-
-    bool has_partial_coverage = false;
-    for (uint8_t const coverage : raster.coverage) {
-        if (coverage > 0 && coverage < 255) {
-            has_partial_coverage = true;
-            break;
-        }
-    }
-
-    EXPECT_FALSE(raster.Is_empty());
-    EXPECT_TRUE(has_partial_coverage);
-}
-
-TEST(annotation_raster, AnnotationHitsPoint_LineUsesSquareCaps) {
+TEST(annotation_hit_test, AnnotationHitsPoint_LineUsesSquareCaps) {
     Annotation const line = Make_line(7, {10, 10}, {20, 10}, 4);
 
     EXPECT_TRUE(Annotation_hits_point(line, {8, 10}));
@@ -61,7 +39,7 @@ TEST(annotation_raster, AnnotationHitsPoint_LineUsesSquareCaps) {
     EXPECT_FALSE(Annotation_hits_point(line, {22, 10}));
 }
 
-TEST(annotation_raster, AnnotationHitsPoint_ArrowCoversTipAndHeadBase) {
+TEST(annotation_hit_test, AnnotationHitsPoint_ArrowCoversTipAndHeadBase) {
     Annotation const arrow = Make_line(8, {10, 10}, {50, 10}, 4, true);
 
     EXPECT_TRUE(Annotation_hits_point(arrow, {50, 10}));
@@ -69,34 +47,26 @@ TEST(annotation_raster, AnnotationHitsPoint_ArrowCoversTipAndHeadBase) {
     EXPECT_FALSE(Annotation_hits_point(arrow, {50, 2}));
 }
 
-TEST(annotation_raster, TranslateAnnotation_LineMovesEndpointsAndBounds) {
+TEST(annotation_hit_test, TranslateAnnotation_LineMovesEndpoints) {
     Annotation const line = Make_line(9, {20, 30}, {40, 30}, 6);
-    RectPx const before_bounds = line.line.raster.bounds;
 
     Annotation const moved = Translate_annotation(line, {5, -3});
 
     EXPECT_EQ(moved.line.start, (PointPx{25, 27}));
     EXPECT_EQ(moved.line.end, (PointPx{45, 27}));
-    EXPECT_EQ(moved.line.raster.bounds,
-              (RectPx::From_ltrb(before_bounds.left + 5, before_bounds.top - 3,
-                                 before_bounds.right + 5, before_bounds.bottom - 3)));
 }
 
-TEST(annotation_raster, TranslateAnnotation_ArrowMovesEndpointsAndBounds) {
+TEST(annotation_hit_test, TranslateAnnotation_ArrowMovesEndpoints) {
     Annotation const arrow = Make_line(10, {20, 30}, {60, 45}, 6, true);
-    RectPx const before_bounds = arrow.line.raster.bounds;
 
     Annotation const moved = Translate_annotation(arrow, {5, -3});
 
     EXPECT_TRUE(moved.line.arrow_head);
     EXPECT_EQ(moved.line.start, (PointPx{25, 27}));
     EXPECT_EQ(moved.line.end, (PointPx{65, 42}));
-    EXPECT_EQ(moved.line.raster.bounds,
-              (RectPx::From_ltrb(before_bounds.left + 5, before_bounds.top - 3,
-                                 before_bounds.right + 5, before_bounds.bottom - 3)));
 }
 
-TEST(annotation_raster, HitTestLineEndpointHandles_FavorsNearestVisibleHandle) {
+TEST(annotation_hit_test, HitTestLineEndpointHandles_FavorsNearestVisibleHandle) {
     EXPECT_EQ(Hit_test_line_endpoint_handles({30, 40}, {90, 40}, {30, 40}),
               std::optional<AnnotationLineEndpoint>{AnnotationLineEndpoint::Start});
     EXPECT_EQ(Hit_test_line_endpoint_handles({30, 40}, {90, 40}, {90, 40}),
@@ -107,24 +77,23 @@ TEST(annotation_raster, HitTestLineEndpointHandles_FavorsNearestVisibleHandle) {
               std::nullopt);
 }
 
-TEST(annotation_raster, HitTestLineEndpointHandles_UsesElevenPixelPickupArea) {
+TEST(annotation_hit_test, HitTestLineEndpointHandles_UsesElevenPixelPickupArea) {
     EXPECT_EQ(Hit_test_line_endpoint_handles({30, 40}, {90, 40}, {35, 45}),
               std::optional<AnnotationLineEndpoint>{AnnotationLineEndpoint::Start});
     EXPECT_EQ(Hit_test_line_endpoint_handles({30, 40}, {90, 40}, {36, 45}),
               std::nullopt);
 }
 
-TEST(annotation_raster, RasterizeRectangle_UsesDraggedOuterBounds) {
+TEST(annotation_hit_test, AnnotationHitsPoint_RectangleOuterBoundaryHit) {
     Annotation const rectangle =
         Make_rectangle(1, RectPx::From_ltrb(10, 20, 31, 41), 4, false);
 
-    EXPECT_EQ(rectangle.rectangle.raster.bounds, rectangle.rectangle.outer_bounds);
     EXPECT_TRUE(Annotation_hits_point(rectangle, {10, 20}));
     EXPECT_TRUE(Annotation_hits_point(rectangle, {30, 40}));
     EXPECT_FALSE(Annotation_hits_point(rectangle, {31, 40}));
 }
 
-TEST(annotation_raster, RasterizeRectangle_OutlineStaysInsetFromOuterEdge) {
+TEST(annotation_hit_test, RasterizeRectangle_OutlineStaysInsetFromOuterEdge) {
     Annotation const rectangle =
         Make_rectangle(1, RectPx::From_ltrb(10, 10, 21, 21), 3, false);
 
@@ -133,7 +102,7 @@ TEST(annotation_raster, RasterizeRectangle_OutlineStaysInsetFromOuterEdge) {
     EXPECT_FALSE(Annotation_hits_point(rectangle, {13, 13}));
 }
 
-TEST(annotation_raster, RasterizeRectangle_FilledIgnoresInteriorHole) {
+TEST(annotation_hit_test, RasterizeRectangle_FilledIgnoresInteriorHole) {
     Annotation const rectangle =
         Make_rectangle(1, RectPx::From_ltrb(10, 10, 21, 21), 8, true);
 
@@ -142,7 +111,8 @@ TEST(annotation_raster, RasterizeRectangle_FilledIgnoresInteriorHole) {
     EXPECT_TRUE(Annotation_hits_point(rectangle, {20, 20}));
 }
 
-TEST(annotation_raster, RectangleResizeHandles_HideSideHandlesWhenTheyOverlapCorners) {
+TEST(annotation_hit_test,
+     RectangleResizeHandles_HideSideHandlesWhenTheyOverlapCorners) {
     std::array<bool, 8> const visible =
         Visible_rectangle_resize_handles(RectPx::From_ltrb(10, 10, 18, 18));
 
@@ -156,7 +126,7 @@ TEST(annotation_raster, RectangleResizeHandles_HideSideHandlesWhenTheyOverlapCor
     EXPECT_FALSE(visible[static_cast<size_t>(SelectionHandle::Left)]);
 }
 
-TEST(annotation_raster, HitTestRectangleResizeHandles_PrefersVisibleCorners) {
+TEST(annotation_hit_test, HitTestRectangleResizeHandles_PrefersVisibleCorners) {
     EXPECT_EQ(
         Hit_test_rectangle_resize_handles(RectPx::From_ltrb(10, 10, 18, 18), {10, 10}),
         std::optional<SelectionHandle>{SelectionHandle::TopLeft});
@@ -165,19 +135,18 @@ TEST(annotation_raster, HitTestRectangleResizeHandles_PrefersVisibleCorners) {
         std::optional<SelectionHandle>{SelectionHandle::Top});
 }
 
-TEST(annotation_raster, ResizeRectangleFromHandle_UsesInclusiveCursorForRightEdge) {
+TEST(annotation_hit_test, ResizeRectangleFromHandle_UsesInclusiveCursorForRightEdge) {
     RectPx const resized = Resize_rectangle_from_handle(
         RectPx::From_ltrb(10, 10, 21, 21), SelectionHandle::Right, {30, 15});
 
     EXPECT_EQ(resized, (RectPx::From_ltrb(10, 10, 31, 21)));
 }
 
-TEST(annotation_raster, TranslateAnnotation_RectangleMovesBoundsAndRaster) {
+TEST(annotation_hit_test, TranslateAnnotation_RectangleMovesBounds) {
     Annotation const rectangle =
         Make_rectangle(2, RectPx::From_ltrb(10, 10, 21, 21), 2, false);
 
     Annotation const moved = Translate_annotation(rectangle, {5, -3});
 
     EXPECT_EQ(moved.rectangle.outer_bounds, (RectPx::From_ltrb(15, 7, 26, 18)));
-    EXPECT_EQ(moved.rectangle.raster.bounds, (RectPx::From_ltrb(15, 7, 26, 18)));
 }

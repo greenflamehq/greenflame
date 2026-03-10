@@ -1,4 +1,4 @@
-#include "greenflame_core/annotation_raster.h"
+#include "greenflame_core/annotation_hit_test.h"
 
 namespace greenflame::core {
 
@@ -65,13 +65,6 @@ constexpr float kArrowHeadShaftOverlapPerStrokePx = 2.0F;
     return false;
 }
 
-[[nodiscard]] size_t Coverage_index(AnnotationRaster const &r, PointPx point) noexcept {
-    int32_t const local_x = point.x - r.bounds.left;
-    int32_t const local_y = point.y - r.bounds.top;
-    return static_cast<size_t>(local_y) * static_cast<size_t>(r.Width()) +
-           static_cast<size_t>(local_x);
-}
-
 [[nodiscard]] uint8_t Colorref_red(COLORREF color) noexcept {
     return static_cast<uint8_t>(color & kByteMask);
 }
@@ -125,7 +118,7 @@ struct LineRasterFrame final {
     std::array<PointF, 4> corners = {};
 };
 
-struct TriangleRasterShape final {
+struct TriangleShape final {
     std::array<PointF, 3> vertices = {};
 };
 
@@ -171,72 +164,13 @@ struct TriangleRasterShape final {
     return std::abs(major) <= frame.half_length && std::abs(minor) <= frame.half_width;
 }
 
-[[nodiscard]] AnnotationRaster Rasterize_line_frame(LineRasterFrame const &frame) {
-    AnnotationRaster raster{};
-
-    float min_x = frame.corners.front().x;
-    float min_y = frame.corners.front().y;
-    float max_x = frame.corners.front().x;
-    float max_y = frame.corners.front().y;
-    for (PointF const corner : frame.corners) {
-        min_x = std::min(min_x, corner.x);
-        min_y = std::min(min_y, corner.y);
-        max_x = std::max(max_x, corner.x);
-        max_y = std::max(max_y, corner.y);
-    }
-
-    raster.bounds = RectPx::From_ltrb(static_cast<int32_t>(std::floor(min_x)) - 1,
-                                      static_cast<int32_t>(std::floor(min_y)) - 1,
-                                      static_cast<int32_t>(std::ceil(max_x)) + 2,
-                                      static_cast<int32_t>(std::ceil(max_y)) + 2);
-    if (raster.bounds.Is_empty()) {
-        return raster;
-    }
-
-    size_t const width = static_cast<size_t>(raster.Width());
-    size_t const height = static_cast<size_t>(raster.Height());
-    raster.coverage.assign(width * height, 0);
-
-    int constexpr samples_per_pixel =
-        kLineRasterSamplesPerAxis * kLineRasterSamplesPerAxis;
-    float constexpr step = 1.0F / static_cast<float>(kLineRasterSamplesPerAxis);
-    for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
-        for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
-            int covered_samples = 0;
-            for (int sy = 0; sy < kLineRasterSamplesPerAxis; ++sy) {
-                float const sample_y =
-                    static_cast<float>(y) + (static_cast<float>(sy) + kHalf) * step;
-                for (int sx = 0; sx < kLineRasterSamplesPerAxis; ++sx) {
-                    float const sample_x =
-                        static_cast<float>(x) + (static_cast<float>(sx) + kHalf) * step;
-                    if (Point_inside_line_shape(sample_x, sample_y, frame)) {
-                        ++covered_samples;
-                    }
-                }
-            }
-
-            if (covered_samples == 0) {
-                continue;
-            }
-
-            uint8_t const coverage =
-                static_cast<uint8_t>((covered_samples * static_cast<int>(kFullOpacity) +
-                                      (samples_per_pixel / 2)) /
-                                     samples_per_pixel);
-            raster.coverage[Coverage_index(raster, {x, y})] = coverage;
-        }
-    }
-
-    return raster;
-}
-
 [[nodiscard]] float Triangle_edge_function(PointF a, PointF b, float px,
                                            float py) noexcept {
     return (px - a.x) * (b.y - a.y) - (py - a.y) * (b.x - a.x);
 }
 
 [[nodiscard]] bool Point_inside_triangle(float px, float py,
-                                         TriangleRasterShape const &triangle) noexcept {
+                                         TriangleShape const &triangle) noexcept {
     float const e0 =
         Triangle_edge_function(triangle.vertices[0], triangle.vertices[1], px, py);
     float const e1 =
@@ -248,117 +182,25 @@ struct TriangleRasterShape final {
     return !(has_negative && has_positive);
 }
 
-[[nodiscard]] AnnotationRaster
-Rasterize_triangle_shape(TriangleRasterShape const &triangle) {
-    AnnotationRaster raster{};
+struct ArrowGeometry final {
+    LineRasterFrame shaft_frame = {};
+    bool has_shaft = false;
+    TriangleShape head = {};
+    PointF head_base_center = {};
+    float head_length = 0.0F;
+};
 
-    float min_x = triangle.vertices[0].x;
-    float min_y = triangle.vertices[0].y;
-    float max_x = triangle.vertices[0].x;
-    float max_y = triangle.vertices[0].y;
-    for (PointF const vertex : triangle.vertices) {
-        min_x = std::min(min_x, vertex.x);
-        min_y = std::min(min_y, vertex.y);
-        max_x = std::max(max_x, vertex.x);
-        max_y = std::max(max_y, vertex.y);
-    }
-
-    raster.bounds = RectPx::From_ltrb(static_cast<int32_t>(std::floor(min_x)) - 1,
-                                      static_cast<int32_t>(std::floor(min_y)) - 1,
-                                      static_cast<int32_t>(std::ceil(max_x)) + 2,
-                                      static_cast<int32_t>(std::ceil(max_y)) + 2);
-    if (raster.bounds.Is_empty()) {
-        return raster;
-    }
-
-    size_t const width = static_cast<size_t>(raster.Width());
-    size_t const height = static_cast<size_t>(raster.Height());
-    raster.coverage.assign(width * height, 0);
-
-    int constexpr samples_per_pixel =
-        kLineRasterSamplesPerAxis * kLineRasterSamplesPerAxis;
-    float constexpr step = 1.0F / static_cast<float>(kLineRasterSamplesPerAxis);
-    for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
-        for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
-            int covered_samples = 0;
-            for (int sy = 0; sy < kLineRasterSamplesPerAxis; ++sy) {
-                float const sample_y =
-                    static_cast<float>(y) + (static_cast<float>(sy) + kHalf) * step;
-                for (int sx = 0; sx < kLineRasterSamplesPerAxis; ++sx) {
-                    float const sample_x =
-                        static_cast<float>(x) + (static_cast<float>(sx) + kHalf) * step;
-                    if (Point_inside_triangle(sample_x, sample_y, triangle)) {
-                        ++covered_samples;
-                    }
-                }
-            }
-
-            if (covered_samples == 0) {
-                continue;
-            }
-
-            uint8_t const coverage =
-                static_cast<uint8_t>((covered_samples * static_cast<int>(kFullOpacity) +
-                                      (samples_per_pixel / 2)) /
-                                     samples_per_pixel);
-            raster.coverage[Coverage_index(raster, {x, y})] = coverage;
-        }
-    }
-
-    return raster;
-}
-
-[[nodiscard]] AnnotationRaster Combine_rasters(AnnotationRaster const &first,
-                                               AnnotationRaster const &second) {
-    if (first.Is_empty()) {
-        return second;
-    }
-    if (second.Is_empty()) {
-        return first;
-    }
-
-    AnnotationRaster combined{};
-    combined.bounds =
-        RectPx::From_ltrb(std::min(first.bounds.left, second.bounds.left),
-                          std::min(first.bounds.top, second.bounds.top),
-                          std::max(first.bounds.right, second.bounds.right),
-                          std::max(first.bounds.bottom, second.bounds.bottom));
-    if (combined.bounds.Is_empty()) {
-        return combined;
-    }
-
-    size_t const width = static_cast<size_t>(combined.Width());
-    size_t const height = static_cast<size_t>(combined.Height());
-    combined.coverage.assign(width * height, 0);
-
-    auto merge_coverage = [&](AnnotationRaster const &source) noexcept {
-        for (int32_t y = source.bounds.top; y < source.bounds.bottom; ++y) {
-            for (int32_t x = source.bounds.left; x < source.bounds.right; ++x) {
-                size_t const source_index = Coverage_index(source, {x, y});
-                if (source_index >= source.coverage.size()) {
-                    continue;
-                }
-                size_t const combined_index = Coverage_index(combined, {x, y});
-                combined.coverage[combined_index] = std::max(
-                    combined.coverage[combined_index], source.coverage[source_index]);
-            }
-        }
-    };
-
-    merge_coverage(first);
-    merge_coverage(second);
-    return combined;
-}
-
-[[nodiscard]] AnnotationRaster Rasterize_arrow_segment(PointPx start, PointPx end,
-                                                       StrokeStyle style) {
-    PointF const start_f = To_point_f(start);
-    PointF const end_f = To_point_f(end);
-    float const dx = end_f.x - start_f.x;
-    float const dy = end_f.y - start_f.y;
+[[nodiscard]] ArrowGeometry Build_arrow_geometry(PointF start, PointF end,
+                                                 StrokeStyle style) noexcept {
+    ArrowGeometry geom{};
+    float const dx = end.x - start.x;
+    float const dy = end.y - start.y;
     float const line_length = std::sqrt(dx * dx + dy * dy);
+
     if (line_length <= 0.0F) {
-        return Rasterize_line_frame(Build_line_raster_frame(start_f, end_f, style));
+        geom.shaft_frame = Build_line_raster_frame(start, end, style);
+        geom.has_shaft = true;
+        return geom;
     }
 
     float const stroke_width = std::max(1.0F, static_cast<float>(style.width_px));
@@ -366,127 +208,131 @@ Rasterize_triangle_shape(TriangleRasterShape const &triangle) {
         kArrowHeadBaseWidthPx + (stroke_width * kArrowHeadWidthPerStrokePx);
     float const raw_head_length =
         kArrowHeadBaseLengthPx + (stroke_width * kArrowHeadLengthPerStrokePx);
-    float const head_length = std::min(
+    geom.head_length = std::min(
         line_length,
         std::max(stroke_width,
                  raw_head_length - (stroke_width * kArrowHeadShaftOverlapPerStrokePx)));
 
     PointF const axis_u{dx / line_length, dy / line_length};
     PointF const axis_v{-axis_u.y, axis_u.x};
-    PointF const head_tip{end_f.x + axis_u.x * kHalf, end_f.y + axis_u.y * kHalf};
-    PointF const head_base_center{end_f.x - axis_u.x * head_length,
-                                  end_f.y - axis_u.y * head_length};
+    PointF const head_tip{end.x + axis_u.x * kHalf, end.y + axis_u.y * kHalf};
+    geom.head_base_center = {end.x - axis_u.x * geom.head_length,
+                             end.y - axis_u.y * geom.head_length};
     float const half_head_base_width = head_base_width * kHalf;
-    TriangleRasterShape const head_triangle{std::array<PointF, 3>{
+    geom.head = TriangleShape{std::array<PointF, 3>{
         head_tip,
-        PointF{head_base_center.x + axis_v.x * half_head_base_width,
-               head_base_center.y + axis_v.y * half_head_base_width},
-        PointF{head_base_center.x - axis_v.x * half_head_base_width,
-               head_base_center.y - axis_v.y * half_head_base_width},
+        PointF{geom.head_base_center.x + axis_v.x * half_head_base_width,
+               geom.head_base_center.y + axis_v.y * half_head_base_width},
+        PointF{geom.head_base_center.x - axis_v.x * half_head_base_width,
+               geom.head_base_center.y - axis_v.y * half_head_base_width},
     }};
 
-    AnnotationRaster shaft_raster{};
-    if (head_length < line_length) {
-        shaft_raster = Rasterize_line_frame(
-            Build_line_raster_frame(start_f, head_base_center, style));
+    if (geom.head_length < line_length) {
+        geom.shaft_frame = Build_line_raster_frame(start, geom.head_base_center, style);
+        geom.has_shaft = true;
     }
-    AnnotationRaster const head_raster = Rasterize_triangle_shape(head_triangle);
-    return Combine_rasters(shaft_raster, head_raster);
+    return geom;
+}
+
+// Test if (px, py) is covered by the given arrow geometry using 4x4 supersampling
+// at the specific sample point. Used for hit testing at integer pixel positions.
+[[nodiscard]] bool Sample_covered_by_arrow(float px, float py,
+                                           ArrowGeometry const &geom) noexcept {
+    if (Point_inside_triangle(px, py, geom.head)) {
+        return true;
+    }
+    if (geom.has_shaft && Point_inside_line_shape(px, py, geom.shaft_frame)) {
+        return true;
+    }
+    return false;
+}
+
+// Returns the bounding box for a LineRasterFrame (padded to match raster convention).
+[[nodiscard]] RectPx Line_frame_bounds_px(LineRasterFrame const &frame) noexcept {
+    float min_x = frame.corners[0].x;
+    float min_y = frame.corners[0].y;
+    float max_x = frame.corners[0].x;
+    float max_y = frame.corners[0].y;
+    for (PointF const corner : frame.corners) {
+        min_x = std::min(min_x, corner.x);
+        min_y = std::min(min_y, corner.y);
+        max_x = std::max(max_x, corner.x);
+        max_y = std::max(max_y, corner.y);
+    }
+    return RectPx::From_ltrb(static_cast<int32_t>(std::floor(min_x)) - 1,
+                             static_cast<int32_t>(std::floor(min_y)) - 1,
+                             static_cast<int32_t>(std::ceil(max_x)) + 2,
+                             static_cast<int32_t>(std::ceil(max_y)) + 2);
+}
+
+[[nodiscard]] RectPx Triangle_bounds_px(TriangleShape const &tri) noexcept {
+    float min_x = tri.vertices[0].x;
+    float min_y = tri.vertices[0].y;
+    float max_x = tri.vertices[0].x;
+    float max_y = tri.vertices[0].y;
+    for (PointF const vertex : tri.vertices) {
+        min_x = std::min(min_x, vertex.x);
+        min_y = std::min(min_y, vertex.y);
+        max_x = std::max(max_x, vertex.x);
+        max_y = std::max(max_y, vertex.y);
+    }
+    return RectPx::From_ltrb(static_cast<int32_t>(std::floor(min_x)) - 1,
+                             static_cast<int32_t>(std::floor(min_y)) - 1,
+                             static_cast<int32_t>(std::ceil(max_x)) + 2,
+                             static_cast<int32_t>(std::ceil(max_y)) + 2);
+}
+
+[[nodiscard]] RectPx Combine_bounds(RectPx a, RectPx b) noexcept {
+    if (a.Is_empty()) {
+        return b;
+    }
+    if (b.Is_empty()) {
+        return a;
+    }
+    return RectPx::From_ltrb(std::min(a.left, b.left), std::min(a.top, b.top),
+                             std::max(a.right, b.right), std::max(a.bottom, b.bottom));
 }
 
 } // namespace
 
-AnnotationRaster Rasterize_freehand_stroke(std::span<const PointPx> points,
-                                           StrokeStyle style) {
-    AnnotationRaster raster{};
-    if (points.empty()) {
-        return raster;
-    }
-
-    int32_t min_x = points.front().x;
-    int32_t min_y = points.front().y;
-    int32_t max_x = points.front().x;
-    int32_t max_y = points.front().y;
-    for (PointPx const point : points) {
-        min_x = std::min(min_x, point.x);
-        min_y = std::min(min_y, point.y);
-        max_x = std::max(max_x, point.x);
-        max_y = std::max(max_y, point.y);
-    }
-
-    float const radius = std::max(1.0F, static_cast<float>(style.width_px)) / 2.0F;
-    int32_t const outset = static_cast<int32_t>(std::ceil(radius));
-    raster.bounds = RectPx::From_ltrb(min_x - outset, min_y - outset,
-                                      max_x + outset + 1, max_y + outset + 1);
-    if (raster.bounds.Is_empty()) {
-        return raster;
-    }
-
-    size_t const width = static_cast<size_t>(raster.Width());
-    size_t const height = static_cast<size_t>(raster.Height());
-    raster.coverage.assign(width * height, 0);
-
-    float const radius_sq = radius * radius;
-    for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
-        for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
-            float const center_x = static_cast<float>(x) + kHalf;
-            float const center_y = static_cast<float>(y) + kHalf;
-            if (!Pixel_covered_by_polyline(center_x, center_y, points, radius_sq)) {
-                continue;
-            }
-            raster.coverage[Coverage_index(raster, {x, y})] = kFullOpacity;
-        }
-    }
-
-    return raster;
-}
-
-AnnotationRaster Rasterize_line_segment(PointPx start, PointPx end, StrokeStyle style,
-                                        bool arrow_head) {
-    if (arrow_head) {
-        return Rasterize_arrow_segment(start, end, style);
-    }
-    return Rasterize_line_frame(
-        Build_line_raster_frame(To_point_f(start), To_point_f(end), style));
-}
-
-AnnotationRaster Rasterize_rectangle(RectPx outer_bounds, StrokeStyle style,
-                                     bool filled) noexcept {
-    AnnotationRaster raster{};
-    raster.bounds = outer_bounds.Normalized();
-    if (raster.bounds.Is_empty()) {
-        return raster;
-    }
-
-    size_t const width = static_cast<size_t>(raster.Width());
-    size_t const height = static_cast<size_t>(raster.Height());
-    raster.coverage.assign(width * height, 0);
-
-    int32_t const inset = std::max<int32_t>(StrokeStyle::kMinWidthPx, style.width_px);
-    RectPx const inner =
-        RectPx::From_ltrb(raster.bounds.left + inset, raster.bounds.top + inset,
-                          raster.bounds.right - inset, raster.bounds.bottom - inset);
-
-    for (int32_t y = raster.bounds.top; y < raster.bounds.bottom; ++y) {
-        for (int32_t x = raster.bounds.left; x < raster.bounds.right; ++x) {
-            bool const covered = filled || inner.Is_empty() || x < inner.left ||
-                                 x >= inner.right || y < inner.top || y >= inner.bottom;
-            if (!covered) {
-                continue;
-            }
-            raster.coverage[Coverage_index(raster, {x, y})] = kFullOpacity;
-        }
-    }
-
-    return raster;
-}
-
 RectPx Annotation_bounds(Annotation const &annotation) noexcept {
     switch (annotation.kind) {
-    case AnnotationKind::Freehand:
-        return annotation.freehand.raster.bounds;
-    case AnnotationKind::Line:
-        return annotation.line.raster.bounds;
+    case AnnotationKind::Freehand: {
+        auto const &pts = annotation.freehand.points;
+        if (pts.empty()) {
+            return {};
+        }
+        int32_t min_x = pts.front().x;
+        int32_t min_y = pts.front().y;
+        int32_t max_x = pts.front().x;
+        int32_t max_y = pts.front().y;
+        for (PointPx const &p : pts) {
+            min_x = std::min(min_x, p.x);
+            min_y = std::min(min_y, p.y);
+            max_x = std::max(max_x, p.x);
+            max_y = std::max(max_y, p.y);
+        }
+        float const radius =
+            std::max(1.0F, static_cast<float>(annotation.freehand.style.width_px)) /
+            2.0F;
+        int32_t const outset = static_cast<int32_t>(std::ceil(radius));
+        return RectPx::From_ltrb(min_x - outset, min_y - outset, max_x + outset + 1,
+                                 max_y + outset + 1);
+    }
+    case AnnotationKind::Line: {
+        PointF const start_f = To_point_f(annotation.line.start);
+        PointF const end_f = To_point_f(annotation.line.end);
+        if (annotation.line.arrow_head) {
+            ArrowGeometry const geom =
+                Build_arrow_geometry(start_f, end_f, annotation.line.style);
+            RectPx const head_bounds = Triangle_bounds_px(geom.head);
+            RectPx const shaft_bounds =
+                geom.has_shaft ? Line_frame_bounds_px(geom.shaft_frame) : RectPx{};
+            return Combine_bounds(shaft_bounds, head_bounds);
+        }
+        return Line_frame_bounds_px(
+            Build_line_raster_frame(start_f, end_f, annotation.line.style));
+    }
     case AnnotationKind::Rectangle:
         return annotation.rectangle.outer_bounds.Normalized();
     }
@@ -494,24 +340,76 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
 }
 
 bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept {
-    AnnotationRaster const *raster = nullptr;
     switch (annotation.kind) {
-    case AnnotationKind::Freehand:
-        raster = &annotation.freehand.raster;
-        break;
-    case AnnotationKind::Line:
-        raster = &annotation.line.raster;
-        break;
-    case AnnotationKind::Rectangle:
-        raster = &annotation.rectangle.raster;
-        break;
+    case AnnotationKind::Freehand: {
+        auto const &pts = annotation.freehand.points;
+        if (pts.empty()) {
+            return false;
+        }
+        float const radius =
+            std::max(1.0F, static_cast<float>(annotation.freehand.style.width_px)) /
+            2.0F;
+        float const radius_sq = radius * radius;
+        float const cx = static_cast<float>(point.x) + kHalf;
+        float const cy = static_cast<float>(point.y) + kHalf;
+        return Pixel_covered_by_polyline(cx, cy, pts, radius_sq);
     }
-    if (raster == nullptr || !raster->bounds.Contains(point) ||
-        raster->coverage.empty()) {
+    case AnnotationKind::Line: {
+        // Use 4x4 supersampling at the queried pixel to match original raster behavior.
+        constexpr int samples = kLineRasterSamplesPerAxis;
+        constexpr float step = 1.0F / static_cast<float>(samples);
+
+        PointF const start_f = To_point_f(annotation.line.start);
+        PointF const end_f = To_point_f(annotation.line.end);
+
+        if (annotation.line.arrow_head) {
+            ArrowGeometry const geom =
+                Build_arrow_geometry(start_f, end_f, annotation.line.style);
+            for (int sy = 0; sy < samples; ++sy) {
+                float const sample_y = static_cast<float>(point.y) +
+                                       (static_cast<float>(sy) + kHalf) * step;
+                for (int sx = 0; sx < samples; ++sx) {
+                    float const sample_x = static_cast<float>(point.x) +
+                                           (static_cast<float>(sx) + kHalf) * step;
+                    if (Sample_covered_by_arrow(sample_x, sample_y, geom)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        LineRasterFrame const frame =
+            Build_line_raster_frame(start_f, end_f, annotation.line.style);
+        for (int sy = 0; sy < samples; ++sy) {
+            float const sample_y =
+                static_cast<float>(point.y) + (static_cast<float>(sy) + kHalf) * step;
+            for (int sx = 0; sx < samples; ++sx) {
+                float const sample_x = static_cast<float>(point.x) +
+                                       (static_cast<float>(sx) + kHalf) * step;
+                if (Point_inside_line_shape(sample_x, sample_y, frame)) {
+                    return true;
+                }
+            }
+        }
         return false;
     }
-    size_t const index = Coverage_index(*raster, point);
-    return index < raster->coverage.size() && raster->coverage[index] != 0;
+    case AnnotationKind::Rectangle: {
+        RectPx const r = annotation.rectangle.outer_bounds.Normalized();
+        if (!r.Contains(point)) {
+            return false;
+        }
+        if (annotation.rectangle.filled) {
+            return true;
+        }
+        int32_t const inset = std::max<int32_t>(StrokeStyle::kMinWidthPx,
+                                                annotation.rectangle.style.width_px);
+        RectPx const inner = RectPx::From_ltrb(r.left + inset, r.top + inset,
+                                               r.right - inset, r.bottom - inset);
+        return inner.Is_empty() || !inner.Contains(point);
+    }
+    }
+    return false;
 }
 
 std::optional<size_t>
@@ -712,22 +610,12 @@ Annotation Translate_annotation(Annotation annotation, PointPx delta) noexcept {
             point.x += delta.x;
             point.y += delta.y;
         }
-        annotation.freehand.raster.bounds =
-            RectPx::From_ltrb(annotation.freehand.raster.bounds.left + delta.x,
-                              annotation.freehand.raster.bounds.top + delta.y,
-                              annotation.freehand.raster.bounds.right + delta.x,
-                              annotation.freehand.raster.bounds.bottom + delta.y);
         break;
     case AnnotationKind::Line:
         annotation.line.start.x += delta.x;
         annotation.line.start.y += delta.y;
         annotation.line.end.x += delta.x;
         annotation.line.end.y += delta.y;
-        annotation.line.raster.bounds =
-            RectPx::From_ltrb(annotation.line.raster.bounds.left + delta.x,
-                              annotation.line.raster.bounds.top + delta.y,
-                              annotation.line.raster.bounds.right + delta.x,
-                              annotation.line.raster.bounds.bottom + delta.y);
         break;
     case AnnotationKind::Rectangle:
         annotation.rectangle.outer_bounds =
@@ -735,11 +623,6 @@ Annotation Translate_annotation(Annotation annotation, PointPx delta) noexcept {
                               annotation.rectangle.outer_bounds.top + delta.y,
                               annotation.rectangle.outer_bounds.right + delta.x,
                               annotation.rectangle.outer_bounds.bottom + delta.y);
-        annotation.rectangle.raster.bounds =
-            RectPx::From_ltrb(annotation.rectangle.raster.bounds.left + delta.x,
-                              annotation.rectangle.raster.bounds.top + delta.y,
-                              annotation.rectangle.raster.bounds.right + delta.x,
-                              annotation.rectangle.raster.bounds.bottom + delta.y);
         break;
     }
     return annotation;
@@ -752,7 +635,6 @@ void Blend_annotations_onto_pixels(std::span<uint8_t> pixels, int width, int hei
     if (width <= 0 || height <= 0 || row_bytes <= 0) {
         return;
     }
-
     for (Annotation const &annotation : annotations) {
         Blend_annotation_onto_pixels(pixels, width, height, row_bytes, annotation,
                                      target_bounds);
@@ -766,47 +648,107 @@ void Blend_annotation_onto_pixels(std::span<uint8_t> pixels, int width, int heig
         return;
     }
 
-    AnnotationRaster const *raster = nullptr;
+    RectPx const bounds = Annotation_bounds(annotation);
+    std::optional<RectPx> const clipped = RectPx::Intersect(bounds, target_bounds);
+    if (!clipped.has_value()) {
+        return;
+    }
+
     StrokeStyle style{};
     switch (annotation.kind) {
     case AnnotationKind::Freehand:
-        raster = &annotation.freehand.raster;
         style = annotation.freehand.style;
         break;
     case AnnotationKind::Line:
-        raster = &annotation.line.raster;
         style = annotation.line.style;
         break;
     case AnnotationKind::Rectangle:
-        raster = &annotation.rectangle.raster;
         style = annotation.rectangle.style;
         break;
-    }
-    if (raster == nullptr || raster->Is_empty()) {
-        return;
-    }
-    std::optional<RectPx> const clipped =
-        RectPx::Intersect(raster->bounds, target_bounds);
-    if (!clipped.has_value()) {
-        return;
     }
 
     uint8_t const red = Colorref_red(style.color);
     uint8_t const green = Colorref_green(style.color);
     uint8_t const blue = Colorref_blue(style.color);
 
+    // Pre-compute geometry for line/arrow to avoid rebuilding per pixel.
+    LineRasterFrame line_frame{};
+    ArrowGeometry arrow_geom{};
+    bool is_arrow = false;
+
+    if (annotation.kind == AnnotationKind::Line) {
+        PointF const start_f = To_point_f(annotation.line.start);
+        PointF const end_f = To_point_f(annotation.line.end);
+        if (annotation.line.arrow_head) {
+            arrow_geom = Build_arrow_geometry(start_f, end_f, annotation.line.style);
+            is_arrow = true;
+        } else {
+            line_frame = Build_line_raster_frame(start_f, end_f, annotation.line.style);
+        }
+    }
+
+    float const freehand_radius =
+        annotation.kind == AnnotationKind::Freehand
+            ? std::max(1.0F, static_cast<float>(annotation.freehand.style.width_px)) /
+                  2.0F
+            : 0.0F;
+    float const freehand_radius_sq = freehand_radius * freehand_radius;
+
+    // Rectangle pre-computation.
+    RectPx rect_inner{};
+    bool rect_has_inner = false;
+    if (annotation.kind == AnnotationKind::Rectangle) {
+        RectPx const r = annotation.rectangle.outer_bounds.Normalized();
+        int32_t const inset = std::max<int32_t>(StrokeStyle::kMinWidthPx,
+                                                annotation.rectangle.style.width_px);
+        rect_inner = RectPx::From_ltrb(r.left + inset, r.top + inset, r.right - inset,
+                                       r.bottom - inset);
+        rect_has_inner = !rect_inner.Is_empty() && !annotation.rectangle.filled;
+    }
+
     for (int32_t y = clipped->top; y < clipped->bottom; ++y) {
         int32_t const target_y = y - target_bounds.top;
         size_t const row_offset =
             static_cast<size_t>(target_y) * static_cast<size_t>(row_bytes);
+
         for (int32_t x = clipped->left; x < clipped->right; ++x) {
-            size_t const coverage_index = Coverage_index(*raster, {x, y});
-            if (coverage_index >= raster->coverage.size()) {
-                continue;
+            bool covered = false;
+
+            switch (annotation.kind) {
+            case AnnotationKind::Freehand: {
+                float const cx = static_cast<float>(x) + kHalf;
+                float const cy = static_cast<float>(y) + kHalf;
+                covered = Pixel_covered_by_polyline(cx, cy, annotation.freehand.points,
+                                                    freehand_radius_sq);
+                break;
+            }
+            case AnnotationKind::Line: {
+                if (is_arrow) {
+                    covered = Sample_covered_by_arrow(static_cast<float>(x) + kHalf,
+                                                      static_cast<float>(y) + kHalf,
+                                                      arrow_geom);
+                } else {
+                    covered = Point_inside_line_shape(static_cast<float>(x) + kHalf,
+                                                      static_cast<float>(y) + kHalf,
+                                                      line_frame);
+                }
+                break;
+            }
+            case AnnotationKind::Rectangle: {
+                PointPx const pt{x, y};
+                RectPx const r = annotation.rectangle.outer_bounds.Normalized();
+                if (!r.Contains(pt)) {
+                    covered = false;
+                } else if (annotation.rectangle.filled) {
+                    covered = true;
+                } else {
+                    covered = !rect_has_inner || !rect_inner.Contains(pt);
+                }
+                break;
+            }
             }
 
-            uint8_t const coverage = raster->coverage[coverage_index];
-            if (coverage == 0) {
+            if (!covered) {
                 continue;
             }
 
@@ -816,19 +758,9 @@ void Blend_annotation_onto_pixels(std::span<uint8_t> pixels, int width, int heig
                 continue;
             }
 
-            uint32_t const inverse = static_cast<uint32_t>(kFullOpacity) - coverage;
-            pixels[pixel_offset] = static_cast<uint8_t>(
-                (static_cast<uint32_t>(pixels[pixel_offset]) * inverse +
-                 static_cast<uint32_t>(blue) * coverage + (kFullOpacity / 2)) /
-                kFullOpacity);
-            pixels[pixel_offset + 1] = static_cast<uint8_t>(
-                (static_cast<uint32_t>(pixels[pixel_offset + 1]) * inverse +
-                 static_cast<uint32_t>(green) * coverage + (kFullOpacity / 2)) /
-                kFullOpacity);
-            pixels[pixel_offset + 2] = static_cast<uint8_t>(
-                (static_cast<uint32_t>(pixels[pixel_offset + 2]) * inverse +
-                 static_cast<uint32_t>(red) * coverage + (kFullOpacity / 2)) /
-                kFullOpacity);
+            pixels[pixel_offset] = blue;
+            pixels[pixel_offset + 1] = green;
+            pixels[pixel_offset + 2] = red;
             pixels[pixel_offset + 3] = kFullOpacity;
         }
     }

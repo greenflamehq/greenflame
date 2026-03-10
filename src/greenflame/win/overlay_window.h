@@ -13,6 +13,7 @@ struct AppConfig;
 }
 class IWindowQuery;
 struct GdiCaptureResult;
+struct D2DOverlayResources;
 
 class IOverlayEvents {
   public:
@@ -83,6 +84,7 @@ class OverlayWindow final {
     [[nodiscard]] bool Handle_brush_width_delta(int32_t delta_steps);
     void Show_brush_size_overlay(int32_t width_px);
     void Clear_brush_size_overlay(bool repaint);
+    void Handle_device_loss();
     [[nodiscard]] bool Can_show_color_wheel() const noexcept;
     [[nodiscard]] std::span<const COLORREF> Current_annotation_palette() const noexcept;
     [[nodiscard]] size_t Current_annotation_color_index() const noexcept;
@@ -130,6 +132,7 @@ class OverlayWindow final {
     HINSTANCE hinstance_ = nullptr;
     core::OverlayController controller_;
     std::unique_ptr<OverlayResources> resources_;
+    std::unique_ptr<D2DOverlayResources> d2d_resources_;
     std::optional<core::SelectionHandle> last_hover_handle_;
     OverlayHelpOverlay hotkey_help_overlay_ = {};
     bool testing_toolbar_ = false;

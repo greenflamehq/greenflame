@@ -9,7 +9,7 @@ class OverlayHelpOverlay final {
   public:
     OverlayHelpOverlay() = default;
     explicit OverlayHelpOverlay(core::OverlayHelpContent const *content);
-    ~OverlayHelpOverlay();
+    ~OverlayHelpOverlay() = default;
 
     OverlayHelpOverlay(OverlayHelpOverlay const &) = delete;
     OverlayHelpOverlay &operator=(OverlayHelpOverlay const &) = delete;
@@ -25,20 +25,20 @@ class OverlayHelpOverlay final {
     void Toggle_at_cursor(core::PointPx cursor_screen,
                           std::span<const core::MonitorWithBounds> monitors,
                           core::RectPx overlay_rect_screen);
-    [[nodiscard]] bool Paint(HDC hdc, RECT const &client_rect,
-                             std::span<uint8_t> pixels) noexcept;
+    [[nodiscard]] bool Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite,
+                                 ID2D1SolidColorBrush *brush) noexcept;
 
   private:
-    [[nodiscard]] bool Ensure_fonts() noexcept;
-    void Reset_fonts() noexcept;
+    [[nodiscard]] bool Ensure_dwrite_formats(IDWriteFactory *dwrite) noexcept;
 
     core::OverlayHelpContent const *content_ = nullptr;
     bool visible_ = false;
     std::optional<core::RectPx> monitor_rect_client_ = std::nullopt;
-    HFONT font_title_ = nullptr;
-    HFONT font_body_ = nullptr;
-    HFONT font_key_ = nullptr;
-    HFONT font_section_ = nullptr;
+    // DWrite text formats are created lazily and reused across overlay frames.
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> dwrite_title_;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> dwrite_body_;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> dwrite_key_;
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> dwrite_section_;
 };
 
 } // namespace greenflame

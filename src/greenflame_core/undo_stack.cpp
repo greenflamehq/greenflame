@@ -1,7 +1,5 @@
 #include "greenflame_core/undo_stack.h"
 
-#include <algorithm>
-
 namespace greenflame::core {
 
 void UndoStack::Push(std::unique_ptr<ICommand> cmd) {

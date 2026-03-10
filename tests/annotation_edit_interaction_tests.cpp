@@ -10,8 +10,6 @@ Annotation Make_stroke(uint64_t id, std::initializer_list<PointPx> points) {
     annotation.kind = AnnotationKind::Freehand;
     annotation.freehand.style = {};
     annotation.freehand.points.assign(points.begin(), points.end());
-    annotation.freehand.raster = Rasterize_freehand_stroke(annotation.freehand.points,
-                                                           annotation.freehand.style);
     return annotation;
 }
 
@@ -25,9 +23,6 @@ Annotation Make_line(uint64_t id, PointPx start, PointPx end,
     annotation.line.end = end;
     annotation.line.style.width_px = width_px;
     annotation.line.arrow_head = arrow_head;
-    annotation.line.raster =
-        Rasterize_line_segment(annotation.line.start, annotation.line.end,
-                               annotation.line.style, annotation.line.arrow_head);
     return annotation;
 }
 
@@ -39,9 +34,6 @@ Annotation Make_rectangle(uint64_t id, RectPx outer_bounds, int32_t width_px,
     annotation.rectangle.outer_bounds = outer_bounds;
     annotation.rectangle.style.width_px = width_px;
     annotation.rectangle.filled = filled;
-    annotation.rectangle.raster =
-        Rasterize_rectangle(annotation.rectangle.outer_bounds,
-                            annotation.rectangle.style, annotation.rectangle.filled);
     return annotation;
 }
 
@@ -165,10 +157,6 @@ TEST(annotation_edit_interaction,
     EXPECT_TRUE(interaction->Update(host, {120, 70}));
     EXPECT_TRUE(host.annotations[0].line.arrow_head);
     EXPECT_EQ(host.annotations[0].line.end, (PointPx{120, 70}));
-    EXPECT_EQ(host.annotations[0].line.raster,
-              Rasterize_line_segment(host.annotations[0].line.start,
-                                     host.annotations[0].line.end,
-                                     host.annotations[0].line.style, true));
 }
 
 TEST(annotation_edit_interaction,

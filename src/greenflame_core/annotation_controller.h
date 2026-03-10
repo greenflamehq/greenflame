@@ -1,7 +1,6 @@
 #pragma once
 
 #include "greenflame_core/annotation_edit_interaction.h"
-#include "greenflame_core/annotation_raster.h"
 #include "greenflame_core/annotation_tool_registry.h"
 
 namespace greenflame::core {

@@ -95,6 +95,8 @@ void CALLBACK Foreground_changed_hook(HWINEVENTHOOK, DWORD, HWND hwnd, LONG id_o
 }
 
 bool Ensure_gdiplus() {
+    // Tray toasts intentionally remain on GDI/GDI+; the D2D migration applies to
+    // the fullscreen overlay renderer, not this small Win32 popup path.
     static ULONG_PTR token = 0;
     static bool ok = false;
     if (!ok) {

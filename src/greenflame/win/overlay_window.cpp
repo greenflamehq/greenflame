@@ -12,9 +12,10 @@
 #include "greenflame_core/snap_to_edges.h"
 #include "greenflame_core/toolbar_placement.h"
 #include "greenflame_core/window_query.h"
+#include "win/d2d_overlay_resources.h"
+#include "win/d2d_paint.h"
 #include "win/display_queries.h"
 #include "win/gdi_capture.h"
-#include "win/overlay_paint.h"
 #include "win/save_image.h"
 #include "win/ui_palette.h"
 
@@ -22,9 +23,6 @@ namespace {
 
 constexpr wchar_t kOverlayWindowClass[] = L"GreenflameOverlay";
 constexpr int32_t kSnapThresholdPx = 10;
-constexpr int kDimensionFontHeight = 14;
-constexpr int kCenterFontHeight = 36;
-constexpr int kHelpHintFontHeight = 16;
 constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
 constexpr int kAnnotationToolCursorResourceId = 102;
@@ -385,8 +383,6 @@ namespace greenflame {
 
 struct OverlayWindow::OverlayResources {
     GdiCaptureResult capture = {};
-    std::vector<uint8_t> paint_buffer = {};
-    PaintResources paint = {};
     std::shared_ptr<OverlayButtonGlyph const> brush_tool_glyph = {};
     std::shared_ptr<OverlayButtonGlyph const> line_tool_glyph = {};
     std::shared_ptr<OverlayButtonGlyph const> arrow_tool_glyph = {};
@@ -403,30 +399,6 @@ struct OverlayWindow::OverlayResources {
         if (!capture.Is_valid()) {
             return false;
         }
-        int const paint_row_bytes = Row_bytes32(capture.width);
-        size_t const paint_buf_size =
-            static_cast<size_t>(paint_row_bytes) * static_cast<size_t>(capture.height);
-        try {
-            paint_buffer.resize(paint_buf_size);
-        } catch (...) {
-            return false;
-        }
-
-        paint.font_dim =
-            CreateFontW(kDimensionFontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
-        paint.font_center =
-            CreateFontW(kCenterFontHeight, 0, 0, 0, FW_BLACK, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
-        paint.font_help_hint =
-            CreateFontW(kHelpHintFontHeight, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                        DEFAULT_QUALITY, FF_DONTCARE, L"Segoe UI");
-        paint.crosshair_pen = CreatePen(PS_SOLID, 1, kOverlayCrosshair);
-        paint.border_pen = CreatePen(PS_SOLID, 1, kBorderColor);
-        paint.handle_pen = CreatePen(PS_SOLID, 1, kOverlayHandle);
         brush_tool_glyph =
             Load_png_resource_alpha_mask(hinstance, kBrushToolGlyphResourceId);
         line_tool_glyph =
@@ -442,36 +414,11 @@ struct OverlayWindow::OverlayResources {
 
     void Reset() noexcept {
         capture.Free();
-        paint_buffer.clear();
         brush_tool_glyph.reset();
         line_tool_glyph.reset();
         arrow_tool_glyph.reset();
         rectangle_tool_glyph.reset();
         filled_rectangle_tool_glyph.reset();
-        if (paint.font_dim) {
-            DeleteObject(paint.font_dim);
-            paint.font_dim = nullptr;
-        }
-        if (paint.font_center) {
-            DeleteObject(paint.font_center);
-            paint.font_center = nullptr;
-        }
-        if (paint.font_help_hint) {
-            DeleteObject(paint.font_help_hint);
-            paint.font_help_hint = nullptr;
-        }
-        if (paint.crosshair_pen) {
-            DeleteObject(paint.crosshair_pen);
-            paint.crosshair_pen = nullptr;
-        }
-        if (paint.border_pen) {
-            DeleteObject(paint.border_pen);
-            paint.border_pen = nullptr;
-        }
-        if (paint.handle_pen) {
-            DeleteObject(paint.handle_pen);
-            paint.handle_pen = nullptr;
-        }
     }
 };
 
@@ -579,7 +526,7 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
 bool OverlayWindow::Register_window_class(HINSTANCE hinstance) {
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
-    window_class.style = CS_HREDRAW | CS_VREDRAW;
+    window_class.style = 0; // CS_HREDRAW/CS_VREDRAW cause DWM flicker with D2D
     window_class.lpfnWndProc = &OverlayWindow::Static_wnd_proc;
     window_class.hInstance = hinstance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_CROSS);
@@ -615,6 +562,23 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         !resources_->Initialize_for_capture(hinstance_)) {
         DestroyWindow(hwnd);
         return false;
+    }
+
+    // Initialize D2D render pipeline.
+    d2d_resources_ = std::make_unique<D2DOverlayResources>();
+    if (!d2d_resources_->Initialize_factory() ||
+        !d2d_resources_->Create_hwnd_rt(hwnd, resources_->capture.width,
+                                        resources_->capture.height) ||
+        !d2d_resources_->Upload_screenshot(resources_->capture) ||
+        !d2d_resources_->Create_shared_resources() ||
+        !d2d_resources_->Create_cache_targets(resources_->capture.width,
+                                              resources_->capture.height)) {
+        d2d_resources_.reset();
+    } else {
+        (void)d2d_resources_->Upload_glyph_bitmaps(
+            resources_->brush_tool_glyph.get(), resources_->line_tool_glyph.get(),
+            resources_->arrow_tool_glyph.get(), resources_->rectangle_tool_glyph.get(),
+            resources_->filled_rectangle_tool_glyph.get());
     }
 
     controller_.Reset_for_session(Get_monitors_with_bounds());
@@ -874,6 +838,12 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
     case core::OverlayAction::Repaint:
         InvalidateRect(hwnd_, nullptr, TRUE);
         break;
+    case core::OverlayAction::InvalidateFrozenCache:
+        if (d2d_resources_) {
+            d2d_resources_->Invalidate_annotations();
+        }
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        break;
     case core::OverlayAction::Close:
         Destroy();
         break;
@@ -948,10 +918,13 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         } else {
             controller_.Undo();
         }
+        if (d2d_resources_) {
+            d2d_resources_->Invalidate_annotations();
+        }
         Rebuild_toolbar_buttons();
         (void)Refresh_hover_handle();
         Refresh_cursor();
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
     if (eff_ctrl && wparam == L'S') {
@@ -1728,18 +1701,108 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
     Destroy();
 }
 
+// ---------------------------------------------------------------------------
+// Shared paint-input state gathering for the Direct2D overlay renderer.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+void Gather_monitor_client_rects(HWND hwnd,
+                                 std::vector<core::MonitorWithBounds> const &monitors,
+                                 std::vector<core::RectPx> &out) {
+    out.clear();
+    out.reserve(monitors.size());
+    RECT overlay_rect{};
+    if (GetWindowRect(hwnd, &overlay_rect) == 0) {
+        return;
+    }
+    for (auto const &monitor : monitors) {
+        out.push_back(core::RectPx::From_ltrb(
+            monitor.bounds.left - static_cast<int32_t>(overlay_rect.left),
+            monitor.bounds.top - static_cast<int32_t>(overlay_rect.top),
+            monitor.bounds.right - static_cast<int32_t>(overlay_rect.left),
+            monitor.bounds.bottom - static_cast<int32_t>(overlay_rect.top)));
+    }
+}
+
+} // namespace
+
 LRESULT OverlayWindow::On_paint() {
     PAINTSTRUCT paint{};
     HDC const hdc = BeginPaint(hwnd_, &paint);
-    if (hdc) {
-        RECT rect{};
-        GetClientRect(hwnd_, &rect);
-        auto const &s = controller_.State();
-        PaintOverlayInput input{};
-        input.capture = &resources_->capture;
+    if (!hdc) {
+        return 0;
+    }
+
+    RECT rect{};
+    GetClientRect(hwnd_, &rect);
+    auto const &s = controller_.State();
+
+    hotkey_help_overlay_.Hide_if_selection_unstable(Is_selection_stable_for_help());
+
+    std::vector<core::RectPx> monitor_client_rects;
+    Gather_monitor_client_rects(hwnd_, s.cached_monitors, monitor_client_rects);
+
+    core::PointPx cursor = Get_client_cursor_pos_px(hwnd_);
+    bool const snap_enabled = (GetKeyState(VK_MENU) & 0x8000) == 0;
+    bool const crosshair_mode = s.final_selection.Is_empty() && !s.dragging &&
+                                !s.handle_dragging && !s.modifier_preview;
+    if (crosshair_mode && snap_enabled) {
+        cursor = core::Snap_point_to_edges(cursor, s.vertical_edges, s.horizontal_edges,
+                                           kSnapThresholdPx);
+        if (cursor.x >= rect.right) cursor.x = rect.right - 1;
+        if (cursor.y >= rect.bottom) cursor.y = rect.bottom - 1;
+    }
+
+    std::vector<IOverlayButton *> btn_ptrs;
+    btn_ptrs.reserve(toolbar_buttons_.size());
+    for (auto const &u : toolbar_buttons_) {
+        btn_ptrs.push_back(u.button.get());
+    }
+
+    // Build per-button D2D glyph pointers (parallel to btn_ptrs).
+    std::vector<ID2D1Bitmap *> btn_glyphs;
+    if (d2d_resources_) {
+        btn_glyphs.reserve(toolbar_buttons_.size());
+        for (auto const &u : toolbar_buttons_) {
+            ID2D1Bitmap *glyph = nullptr;
+            switch (u.tool_id) {
+            case core::AnnotationToolId::Freehand:
+                glyph = d2d_resources_->glyph_brush.Get();
+                break;
+            case core::AnnotationToolId::Line:
+                glyph = d2d_resources_->glyph_line.Get();
+                break;
+            case core::AnnotationToolId::Arrow:
+                glyph = d2d_resources_->glyph_arrow.Get();
+                break;
+            case core::AnnotationToolId::Rectangle:
+                glyph = d2d_resources_->glyph_rect.Get();
+                break;
+            case core::AnnotationToolId::FilledRectangle:
+                glyph = d2d_resources_->glyph_filled_rect.Get();
+                break;
+            }
+            btn_glyphs.push_back(glyph);
+        }
+    }
+
+    // --- D2D render path ---
+    if (d2d_resources_) {
+        if (!d2d_resources_->annotations_valid) {
+            Rebuild_annotations_bitmap(*d2d_resources_, controller_.Annotations());
+        }
+        if (!d2d_resources_->frozen_valid) {
+            Rebuild_frozen_bitmap(*d2d_resources_, s.final_selection,
+                                  resources_->capture.width,
+                                  resources_->capture.height);
+        }
+
+        D2DPaintInput input{};
         input.dragging = s.dragging;
         input.handle_dragging = s.handle_dragging;
         input.move_dragging = s.move_dragging;
+        input.annotation_editing = controller_.Has_active_annotation_gesture();
         input.modifier_preview = s.modifier_preview;
         if (config_ != nullptr) {
             input.show_selection_size_side_labels =
@@ -1749,42 +1812,12 @@ LRESULT OverlayWindow::On_paint() {
         }
         input.live_rect = s.live_rect;
         input.final_selection = s.final_selection;
-        hotkey_help_overlay_.Hide_if_selection_unstable(Is_selection_stable_for_help());
-        std::vector<core::RectPx> monitor_client_rects = {};
-        monitor_client_rects.reserve(s.cached_monitors.size());
-        RECT overlay_rect{};
-        if (GetWindowRect(hwnd_, &overlay_rect) != 0) {
-            for (auto const &monitor : s.cached_monitors) {
-                monitor_client_rects.push_back(core::RectPx::From_ltrb(
-                    monitor.bounds.left - static_cast<int32_t>(overlay_rect.left),
-                    monitor.bounds.top - static_cast<int32_t>(overlay_rect.top),
-                    monitor.bounds.right - static_cast<int32_t>(overlay_rect.left),
-                    monitor.bounds.bottom - static_cast<int32_t>(overlay_rect.top)));
-            }
-        }
         input.monitor_rects_client =
             std::span<const core::RectPx>(monitor_client_rects);
-        core::PointPx cursor = Get_client_cursor_pos_px(hwnd_);
-        bool const snap_enabled = (GetKeyState(VK_MENU) & 0x8000) == 0;
-        bool const crosshair_mode = s.final_selection.Is_empty() && !s.dragging &&
-                                    !s.handle_dragging && !s.modifier_preview;
-        if (crosshair_mode && snap_enabled) {
-            cursor = core::Snap_point_to_edges(cursor, s.vertical_edges,
-                                               s.horizontal_edges, kSnapThresholdPx);
-            // Monitor right/bottom snap edges are exclusive boundaries
-            // (e.g. x == width) but pixel indices are zero-based, so clamp
-            // to the last valid pixel to keep crosshair/magnifier visible.
-            if (cursor.x >= rect.right) cursor.x = rect.right - 1;
-            if (cursor.y >= rect.bottom) cursor.y = rect.bottom - 1;
-        }
         input.cursor_client_px = cursor;
-        input.paint_buffer = std::span<uint8_t>(resources_->paint_buffer);
-        input.resources = &resources_->paint;
         input.annotations = controller_.Annotations();
         input.draft_freehand_points = controller_.Draft_freehand_points();
         input.draft_freehand_style = controller_.Draft_freehand_style();
-        // Freehand preview draws directly from points/style; avoid building the
-        // full rasterized draft annotation unless a non-freehand tool needs it.
         if (!input.draft_freehand_style.has_value()) {
             input.draft_annotation = controller_.Draft_annotation();
         }
@@ -1813,17 +1846,49 @@ LRESULT OverlayWindow::On_paint() {
             input.line_cursor_preview_angle_radians =
                 Current_line_cursor_preview_angle_radians();
         }
-        std::vector<IOverlayButton *> btn_ptrs;
-        btn_ptrs.reserve(toolbar_buttons_.size());
-        for (auto const &u : toolbar_buttons_) {
-            btn_ptrs.push_back(u.button.get());
-        }
         input.toolbar_buttons = std::span<IOverlayButton *const>(btn_ptrs);
-        Paint_overlay(hdc, hwnd_, rect, input);
-        (void)hotkey_help_overlay_.Paint(hdc, rect, input.paint_buffer);
+        input.toolbar_button_glyphs = std::span<ID2D1Bitmap *const>(btn_glyphs);
+
+        bool const ok =
+            Paint_d2d_frame(*d2d_resources_, input, resources_->capture.width,
+                            resources_->capture.height, &hotkey_help_overlay_);
+        if (!ok) {
+            Handle_device_loss();
+        }
+
         EndPaint(hwnd_, &paint);
+        return 0;
     }
+
+    // D2D resources unavailable; ensure paint cycle completes.
+    EndPaint(hwnd_, &paint);
     return 0;
+}
+
+void OverlayWindow::Handle_device_loss() {
+    if (!d2d_resources_ || !resources_->capture.Is_valid()) {
+        return;
+    }
+    RECT rect{};
+    GetClientRect(hwnd_, &rect);
+    int const w = resources_->capture.width;
+    int const h = resources_->capture.height;
+
+    d2d_resources_->Release_device_resources();
+    if (!d2d_resources_->Create_hwnd_rt(hwnd_, w, h) ||
+        !d2d_resources_->Upload_screenshot(resources_->capture) ||
+        !d2d_resources_->Create_shared_resources() ||
+        !d2d_resources_->Create_cache_targets(w, h)) {
+        d2d_resources_.reset();
+        InvalidateRect(hwnd_, nullptr, TRUE);
+        return;
+    }
+    (void)d2d_resources_->Upload_glyph_bitmaps(
+        resources_->brush_tool_glyph.get(), resources_->line_tool_glyph.get(),
+        resources_->arrow_tool_glyph.get(), resources_->rectangle_tool_glyph.get(),
+        resources_->filled_rectangle_tool_glyph.get());
+    d2d_resources_->Invalidate_annotations();
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 LRESULT OverlayWindow::On_destroy() {
@@ -1832,6 +1897,10 @@ LRESULT OverlayWindow::On_destroy() {
     suppress_next_lbutton_up_ = false;
     color_wheel_ = {};
     toolbar_buttons_.clear();
+    if (d2d_resources_) {
+        d2d_resources_->Release_all();
+        d2d_resources_.reset();
+    }
     resources_->Reset();
     controller_.Reset_for_session({});
     if (events_) {
