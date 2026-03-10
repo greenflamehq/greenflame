@@ -138,5 +138,8 @@ The hook requires `clang-format` to be on `PATH`; if it is not found the hook sk
 
 ## Completeness and correctness
 
+- Documentation-only changes do not require rebuilds. This exception applies only
+  when the task changes documentation files and does not change code, tests, build
+  files, resources, or other runtime inputs.
 - Code iteration can be done on the MSVC debug build only.
 - However, all builds (debug and release) must be run on all compilers (MSVC and Clang) and must pass before any task is considered complete. This is a hard requirement.
