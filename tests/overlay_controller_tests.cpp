@@ -64,9 +64,8 @@ OverlayAction Press(OverlayController &c, PointPx pt,
 }
 
 OverlayAction Move(OverlayController &c, PointPx pt,
-                   OverlayModifierState mods = No_mods(), uint64_t now_ms = 100) {
-    return c.On_pointer_move(mods, pt, pt, std::nullopt, {}, std::nullopt, 0, 0,
-                             now_ms);
+                   OverlayModifierState mods = No_mods()) {
+    return c.On_pointer_move(mods, pt, pt, std::nullopt, {}, std::nullopt, 0, 0);
 }
 
 OverlayAction Release(OverlayController &c, PointPx pt,
@@ -425,7 +424,7 @@ TEST(overlay_controller, F_MoveDoc_MovesRect) {
         c.On_primary_press(No_mods(), {200, 200}, {200, 200}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
 
-    Move(c, {250, 250}, No_mods(), 100);
+    Move(c, {250, 250});
     auto const &s = c.State();
     EXPECT_FALSE(s.live_rect.Is_empty());
     // grab offset = (200-100, 200-100) = (100,100); new cursor 250,250 → rect at
@@ -441,7 +440,7 @@ TEST(overlay_controller, F_MoveRelease_CommitsFinalSelection) {
     std::ignore =
         c.On_primary_press(No_mods(), {200, 200}, {200, 200}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
-    Move(c, {250, 250}, No_mods(), 100);
+    Move(c, {250, 250});
     OverlayAction action = Release(c, {250, 250});
     EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_FALSE(c.State().move_dragging);
@@ -457,7 +456,7 @@ TEST(overlay_controller, F_CancelMoveDrag_RestoresMoveAnchor) {
     std::ignore =
         c.On_primary_press(No_mods(), {200, 200}, {200, 200}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
-    Move(c, {400, 400}, No_mods(), 100);
+    Move(c, {400, 400});
 
     OverlayAction action = c.On_cancel();
     EXPECT_EQ(action, OverlayAction::Repaint);
@@ -491,7 +490,7 @@ TEST(overlay_controller,
         c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
     std::ignore = c.On_pointer_move(No_mods(), {140, 140}, {140, 140}, std::nullopt, {},
-                                    std::nullopt, 0, 0, 100u);
+                                    std::nullopt, 0, 0);
     std::ignore = c.On_primary_release(No_mods(), {140, 140});
     ASSERT_EQ(c.Annotations().size(), 1u);
     EXPECT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
@@ -571,7 +570,7 @@ TEST(overlay_controller, G_Cancel_FinalSelectionAlsoClearsAnnotations) {
         c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
     std::ignore = c.On_pointer_move(No_mods(), {140, 140}, {140, 140}, std::nullopt, {},
-                                    std::nullopt, 0, 0, 100u);
+                                    std::nullopt, 0, 0);
     std::ignore = c.On_primary_release(No_mods(), {140, 140});
     ASSERT_EQ(c.Annotations().size(), 1u);
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
@@ -636,7 +635,7 @@ TEST(overlay_controller, G_Cancel_SelectedAnnotation_DeselectsWithoutClearingReg
                                  0),
               OverlayAction::Repaint);
     std::ignore = c.On_pointer_move(No_mods(), {200, 150}, {200, 150}, std::nullopt, {},
-                                    std::nullopt, 0, 0, 100u);
+                                    std::nullopt, 0, 0);
     ASSERT_EQ(c.On_primary_release(No_mods(), {200, 150}),
               OverlayAction::InvalidateFrozenCache);
     ASSERT_EQ(c.Annotations().size(), 1u);
@@ -782,33 +781,6 @@ TEST(overlay_controller, I_DragDoesNotSnapToSegmentOutsideVisibleSpan) {
     Move(c, {207, 300});
     Release(c, {207, 300});
     EXPECT_EQ(c.State().final_selection.right, 207);
-}
-
-// ===========================================================================
-// Group J — Throttle
-// ===========================================================================
-
-TEST(overlay_controller, J_TwoMovesWithin16ms_SecondReturnsNone) {
-    auto c = Make_controller();
-    Press(c, {100, 100});
-    // First move at t=100
-    OverlayAction first = c.On_pointer_move(No_mods(), {200, 200}, {}, std::nullopt, {},
-                                            std::nullopt, 0, 0, 100u);
-    EXPECT_EQ(first, OverlayAction::Repaint);
-    // Second move same tick
-    OverlayAction second = c.On_pointer_move(No_mods(), {210, 210}, {}, std::nullopt,
-                                             {}, std::nullopt, 0, 0, 100u);
-    EXPECT_EQ(second, OverlayAction::None);
-}
-
-TEST(overlay_controller, J_MoveAfter16ms_ReturnsRepaint) {
-    auto c = Make_controller();
-    Press(c, {100, 100});
-    std::ignore = c.On_pointer_move(No_mods(), {200, 200}, {}, std::nullopt, {},
-                                    std::nullopt, 0, 0, 100u);
-    OverlayAction action = c.On_pointer_move(No_mods(), {210, 210}, {}, std::nullopt,
-                                             {}, std::nullopt, 0, 0, 116u);
-    EXPECT_EQ(action, OverlayAction::Repaint);
 }
 
 // ===========================================================================
@@ -1022,7 +994,7 @@ TEST(overlay_controller,
                                  0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_pointer_move(No_mods(), {220, 180}, {220, 180}, std::nullopt, {},
-                                std::nullopt, 0, 0, 100u),
+                                std::nullopt, 0, 0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}),
               OverlayAction::InvalidateFrozenCache);
@@ -1068,7 +1040,7 @@ TEST(overlay_controller, SelectedLineHandleDragTakesPriorityOverAnnotationMove) 
                                  0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_pointer_move(No_mods(), {200, 180}, {200, 180}, std::nullopt, {},
-                                std::nullopt, 0, 0, 100u),
+                                std::nullopt, 0, 0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_primary_release(No_mods(), {200, 180}),
               OverlayAction::InvalidateFrozenCache);
@@ -1108,7 +1080,7 @@ TEST(overlay_controller, ActiveAnnotationTool_DiscardsSelectedAnnotation) {
                                  0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_pointer_move(No_mods(), {220, 180}, {220, 180}, std::nullopt, {},
-                                std::nullopt, 0, 0, 100u),
+                                std::nullopt, 0, 0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}),
               OverlayAction::InvalidateFrozenCache);
@@ -1138,7 +1110,7 @@ TEST(overlay_controller,
                                  0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_pointer_move(No_mods(), {220, 180}, {220, 180}, std::nullopt, {},
-                                std::nullopt, 0, 0, 100u),
+                                std::nullopt, 0, 0),
               OverlayAction::Repaint);
     ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}),
               OverlayAction::InvalidateFrozenCache);
@@ -1163,7 +1135,7 @@ TEST(overlay_controller,
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
     EXPECT_EQ(c.On_pointer_move(No_mods(), {120, 130}, {120, 130}, std::nullopt, {},
-                                std::nullopt, 0, 0, 116u),
+                                std::nullopt, 0, 0),
               OverlayAction::Repaint);
     EXPECT_EQ(c.On_primary_release(No_mods(), {120, 130}),
               OverlayAction::InvalidateFrozenCache);

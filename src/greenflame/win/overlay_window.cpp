@@ -1176,8 +1176,7 @@ LRESULT OverlayWindow::On_mouse_move() {
                 : std::nullopt;
     }
     core::OverlayAction const action = controller_.On_pointer_move(
-        mods, cursor_client, cursor_screen, win_rect, vdesk, monitor_idx, ox, oy,
-        static_cast<uint64_t>(GetTickCount64()));
+        mods, cursor_client, cursor_screen, win_rect, vdesk, monitor_idx, ox, oy);
     Apply_action(action);
 
     if (Refresh_hover_handle()) {
@@ -1207,7 +1206,8 @@ LRESULT OverlayWindow::On_mouse_move() {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
-    if (Should_show_brush_cursor_preview() || Should_show_line_cursor_preview()) {
+    if (!controller_.Has_active_annotation_gesture() &&
+        (Should_show_brush_cursor_preview() || Should_show_line_cursor_preview())) {
         RedrawWindow(hwnd_, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
@@ -1824,7 +1824,7 @@ LRESULT OverlayWindow::On_paint() {
         input.dragging = s.dragging;
         input.handle_dragging = s.handle_dragging;
         input.move_dragging = s.move_dragging;
-        input.annotation_editing = controller_.Has_active_annotation_gesture();
+        input.annotation_editing = controller_.Has_active_annotation_edit();
         input.modifier_preview = s.modifier_preview;
         if (config_ != nullptr) {
             input.show_selection_size_side_labels =

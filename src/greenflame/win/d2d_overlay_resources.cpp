@@ -259,8 +259,22 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
         }
     }
 
+    // draft_stroke_rt: transparent BGRA premultiplied (freehand draft, incremental).
+    {
+        D2D1_PIXEL_FORMAT pf{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED};
+        D2D1_SIZE_F const size_f =
+            D2D1::SizeF(static_cast<float>(width), static_cast<float>(height));
+        HRESULT const hr = hwnd_rt->CreateCompatibleRenderTarget(
+            &size_f, nullptr, &pf, D2D1_COMPATIBLE_RENDER_TARGET_OPTIONS_NONE,
+            draft_stroke_rt.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) {
+            return false;
+        }
+    }
+
     annotations_valid = false;
     frozen_valid = false;
+    draft_stroke_point_count = 0;
     return true;
 }
 
@@ -290,8 +304,11 @@ void D2DOverlayResources::Release_device_resources() {
     screenshot.Reset();
     annotations_rt.Reset();
     frozen_rt.Reset();
+    draft_stroke_rt.Reset();
     annotations_bitmap.Reset();
     frozen_bitmap.Reset();
+    draft_stroke_bitmap.Reset();
+    draft_stroke_point_count = 0;
     solid_brush.Reset();
     round_cap_style.Reset();
     flat_cap_style.Reset();

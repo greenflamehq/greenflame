@@ -28,7 +28,6 @@ void OverlaySessionData::Reset_for_session() {
     selection_source = SaveSelectionSource::Region;
     selection_window = std::nullopt;
     selection_monitor_index = std::nullopt;
-    last_invalidate_tick = 0;
     vertical_edges.clear();
     horizontal_edges.clear();
     cached_monitors.clear();
@@ -428,7 +427,7 @@ OverlayAction OverlayController::On_pointer_move(
     OverlayModifierState mods, PointPx cursor_client, PointPx cursor_screen,
     std::optional<RectPx> window_rect_screen, RectPx virtual_desktop_bounds,
     std::optional<size_t> monitor_index_under_cursor, int32_t origin_x,
-    int32_t origin_y, uint64_t now_ms) {
+    int32_t origin_y) {
 
     bool const snap_enabled = !mods.alt;
 
@@ -473,11 +472,7 @@ OverlayAction OverlayController::On_pointer_move(
                                origin_x, origin_y);
     }
 
-    if (now_ms - state_.last_invalidate_tick >= 16) {
-        state_.last_invalidate_tick = now_ms;
-        return OverlayAction::Repaint;
-    }
-    return OverlayAction::None;
+    return OverlayAction::Repaint;
 }
 
 OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,

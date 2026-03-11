@@ -36,7 +36,6 @@ struct OverlaySessionData {
     PointPx start_px = {};
     RectPx live_rect = {};
     RectPx final_selection = {};
-    uint64_t last_invalidate_tick = 0;
     std::vector<SnapEdgeSegmentPx> vertical_edges = {};
     std::vector<SnapEdgeSegmentPx> horizontal_edges = {};
     std::vector<MonitorWithBounds> cached_monitors = {};
@@ -70,8 +69,7 @@ class OverlayController final {
                      PointPx cursor_screen, std::optional<HWND> window_under_cursor,
                      std::optional<size_t> monitor_index_under_cursor,
                      std::optional<RectPx> window_rect_screen,
-                     RectPx virtual_desktop_bounds,
-                     SnapEdges const &visible_snap_edges,
+                     RectPx virtual_desktop_bounds, SnapEdges const &visible_snap_edges,
                      int32_t origin_x, int32_t origin_y);
 
     // WM_MOUSEMOVE
@@ -80,7 +78,7 @@ class OverlayController final {
                     PointPx cursor_screen, std::optional<RectPx> window_rect_screen,
                     RectPx virtual_desktop_bounds,
                     std::optional<size_t> monitor_index_under_cursor, int32_t origin_x,
-                    int32_t origin_y, uint64_t now_ms);
+                    int32_t origin_y);
 
     // WM_LBUTTONUP
     [[nodiscard]] OverlayAction On_primary_release(OverlayModifierState mods,

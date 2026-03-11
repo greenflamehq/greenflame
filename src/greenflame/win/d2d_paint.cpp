@@ -1096,6 +1096,61 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 }
 
 // ---------------------------------------------------------------------------
+// Draft stroke bitmap (incremental freehand accumulator)
+// ---------------------------------------------------------------------------
+
+// Appends any new freehand segments to draft_stroke_rt since the last call.
+// When points is empty, resets the point count so the next gesture starts clean.
+// Must be called BEFORE hwnd_rt->BeginDraw.
+void Update_draft_stroke_bitmap(D2DOverlayResources &res,
+                                std::span<const core::PointPx> points,
+                                std::optional<core::StrokeStyle> const &style) {
+    if (points.empty() || !style.has_value()) {
+        res.draft_stroke_point_count = 0;
+        return;
+    }
+    if (!res.draft_stroke_rt) {
+        return;
+    }
+    // Nothing new to draw.
+    if (points.size() <= res.draft_stroke_point_count) {
+        return;
+    }
+    // Need at least 2 points to form a segment.
+    if (points.size() < 2) {
+        res.draft_stroke_point_count = points.size();
+        return;
+    }
+
+    float const stroke_w = static_cast<float>(style->width_px);
+
+    res.draft_stroke_rt->BeginDraw();
+
+    if (res.draft_stroke_point_count == 0) {
+        // New gesture: clear the surface before drawing.
+        res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+    }
+
+    res.solid_brush->SetColor(Colorref_to_d2d(style->color));
+
+    // Draw only the segments that are new since the last update.
+    size_t const from =
+        res.draft_stroke_point_count > 0 ? res.draft_stroke_point_count - 1 : 0;
+    for (size_t i = from; i + 1 < points.size(); ++i) {
+        res.draft_stroke_rt->DrawLine(Pt(points[i]), Pt(points[i + 1]),
+                                      res.solid_brush.Get(), stroke_w,
+                                      res.round_cap_style.Get());
+    }
+
+    HRESULT const hr = res.draft_stroke_rt->EndDraw();
+    if (SUCCEEDED(hr)) {
+        res.draft_stroke_point_count = points.size();
+        (void)res.draft_stroke_rt->GetBitmap(
+            res.draft_stroke_bitmap.ReleaseAndGetAddressOf());
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Live layer (drawn every frame)
 // ---------------------------------------------------------------------------
 
@@ -1106,12 +1161,9 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         Draw_annotation(rt, res, *input.draft_annotation);
     } else if (!input.draft_freehand_points.empty() &&
                input.draft_freehand_style.has_value()) {
-        core::Annotation draft{};
-        draft.kind = core::AnnotationKind::Freehand;
-        draft.freehand.points.assign(input.draft_freehand_points.begin(),
-                                     input.draft_freehand_points.end());
-        draft.freehand.style = *input.draft_freehand_style;
-        Draw_freehand(rt, res, draft.freehand);
+        if (res.draft_stroke_bitmap) {
+            rt->DrawBitmap(res.draft_stroke_bitmap.Get());
+        }
     }
 
     // Selection border: live_rect while dragging; final_selection otherwise.
@@ -1261,6 +1313,9 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     if (!res.hwnd_rt) {
         return true;
     }
+
+    Update_draft_stroke_bitmap(res, input.draft_freehand_points,
+                               input.draft_freehand_style);
 
     bool const is_steady_state = res.frozen_valid && !input.dragging &&
                                  !input.handle_dragging && !input.move_dragging &&

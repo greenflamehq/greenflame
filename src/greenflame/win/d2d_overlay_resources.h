@@ -8,11 +8,12 @@ namespace greenflame {
 // Holds all Direct2D and DirectWrite resources for the overlay render pipeline.
 // Lifetime: created once per overlay session; released when the overlay closes.
 //
-// Layer model (Phase 2 wiring):
-//   screenshot  — uploaded once at capture time, never redrawn
-//   annotations — rebuilt on annotation commit/undo/redo/delete
-//   frozen      — rebuilt when selection or annotations change
-//   live layer  — drawn every frame (draft, selection border, handles, UI)
+// Layer model:
+//   screenshot    — uploaded once at capture time, never redrawn
+//   annotations   — rebuilt on annotation commit/undo/redo/delete
+//   frozen        — rebuilt when selection or annotations change
+//   draft_stroke  — incrementally updated during freehand gesture (O(1) per frame)
+//   live layer    — drawn every frame (draft blit, selection border, handles, UI)
 struct D2DOverlayResources final {
     Microsoft::WRL::ComPtr<ID2D1Factory> factory;
     Microsoft::WRL::ComPtr<IDWriteFactory> dwrite_factory;
@@ -22,8 +23,11 @@ struct D2DOverlayResources final {
     Microsoft::WRL::ComPtr<ID2D1Bitmap> screenshot;
     Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> annotations_rt;
     Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> frozen_rt;
+    Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> draft_stroke_rt;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> annotations_bitmap;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> frozen_bitmap;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> draft_stroke_bitmap;
+    size_t draft_stroke_point_count = 0; // points rendered into draft_stroke_rt
 
     // Reusable shared resources (recreated on device loss)
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solid_brush;
