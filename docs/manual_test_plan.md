@@ -349,7 +349,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - A circular size preview follows the cursor while the tool is active.
   - The committed stroke renders cleanly.
-  - Selecting the stroke shows bounding-box corner markers.
+  - Selecting the stroke shows L-bracket corner markers hugging the tight bounding box of the stroke geometry.
   - The stroke can be moved in default mode.
 
 ### GF-MAN-ANN-003 - Line And Arrow Editing
@@ -363,7 +363,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Drag each endpoint handle.
 - Expected:
   - Line and arrow drawing show a direction-aligned square size preview.
-  - Selected line and arrow annotations show endpoint handles.
+  - Selected line and arrow annotations show endpoint handles and L-bracket corner markers around the tight bounding box of the drawn geometry (not including the endpoint handles themselves).
   - Dragging the body moves the whole annotation.
   - Dragging an endpoint reshapes the annotation.
 
@@ -377,7 +377,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   3. Resize the outlined rectangle from a corner and then a side handle.
 - Expected:
   - Neither rectangle mode shows a cursor size preview.
-  - Selected rectangles show resize handles when space permits.
+  - Selected rectangles show resize handles when space permits but no L-bracket corner markers.
   - Filled rectangles render as filled shapes and remain movable.
   - Resizing follows the dragged handle correctly.
 

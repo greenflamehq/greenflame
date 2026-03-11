@@ -786,6 +786,7 @@ void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     if (!ann) {
         return;
     }
+    // Type-specific interactive handles.
     if (ann->kind == core::AnnotationKind::Line) {
         Draw_endpoint_handle(rt, res, ann->line.start);
         Draw_endpoint_handle(rt, res, ann->line.end);
@@ -800,8 +801,11 @@ void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                          static_cast<core::SelectionHandle>(i)));
             }
         }
-    } else if (ann_bounds.has_value() && !ann_bounds->Is_empty()) {
-        // Freehand / other: draw 4-corner L-bracket selection frame.
+    }
+    // L-bracket selection frame. ann_bounds is the tight axis-aligned bounding
+    // box of the annotation's drawn geometry, not including interactive handles.
+    if (core::Annotation_shows_corner_brackets(ann->kind) && ann_bounds.has_value() &&
+        !ann_bounds->Is_empty()) {
         core::RectPx const r = ann_bounds->Normalized();
         int const cw = std::min(core::kMaxCornerSizePx, r.Width() / 2);
         int const ch = std::min(core::kMaxCornerSizePx, r.Height() / 2);

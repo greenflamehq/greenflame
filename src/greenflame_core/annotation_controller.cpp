@@ -36,6 +36,7 @@ bool AnnotationController::Toggle_tool(AnnotationToolId id) {
         active_tool_.reset();
     } else {
         active_tool_ = id;
+        document_.selected_annotation_id = std::nullopt;
     }
     return true;
 }
@@ -124,7 +125,7 @@ AnnotationController::Selected_annotation_bounds() const noexcept {
     if (selected == nullptr) {
         return std::nullopt;
     }
-    return Annotation_bounds(*selected);
+    return Annotation_visual_bounds(*selected);
 }
 
 std::optional<AnnotationEditTarget>
@@ -251,6 +252,9 @@ AnnotationController::Annotation_id_at(PointPx cursor) const noexcept {
 
 bool AnnotationController::Set_selected_annotation(
     std::optional<uint64_t> selected_annotation_id) noexcept {
+    if (active_tool_.has_value()) {
+        selected_annotation_id = std::nullopt;
+    }
     if (document_.selected_annotation_id == selected_annotation_id) {
         return false;
     }
@@ -317,6 +321,9 @@ bool AnnotationController::Begin_annotation_edit(AnnotationEditTarget target,
 void AnnotationController::Update_annotation_at(
     size_t index, Annotation annotation,
     std::optional<uint64_t> selected_annotation_id) {
+    if (active_tool_.has_value()) {
+        selected_annotation_id = std::nullopt;
+    }
     if (index >= document_.annotations.size()) {
         document_.selected_annotation_id = selected_annotation_id;
         return;
@@ -330,6 +337,9 @@ void AnnotationController::Update_annotation_at(
 void AnnotationController::Insert_annotation_at(
     size_t index, Annotation annotation,
     std::optional<uint64_t> selected_annotation_id) {
+    if (active_tool_.has_value()) {
+        selected_annotation_id = std::nullopt;
+    }
     if (index > document_.annotations.size()) {
         index = document_.annotations.size();
     }
@@ -345,6 +355,9 @@ void AnnotationController::Insert_annotation_at(
 
 void AnnotationController::Erase_annotation_at(
     size_t index, std::optional<uint64_t> selected_annotation_id) {
+    if (active_tool_.has_value()) {
+        selected_annotation_id = std::nullopt;
+    }
     if (index >= document_.annotations.size()) {
         document_.selected_annotation_id = selected_annotation_id;
         return;

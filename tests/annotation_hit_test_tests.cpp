@@ -150,3 +150,58 @@ TEST(annotation_hit_test, TranslateAnnotation_RectangleMovesBounds) {
 
     EXPECT_EQ(moved.rectangle.outer_bounds, (RectPx::From_ltrb(15, 7, 26, 18)));
 }
+
+TEST(annotation_hit_test, AnnotationShowsCornerBrackets_FreehandReturnsTrue) {
+    EXPECT_TRUE(Annotation_shows_corner_brackets(AnnotationKind::Freehand));
+}
+
+TEST(annotation_hit_test, AnnotationShowsCornerBrackets_LineReturnsTrue) {
+    EXPECT_TRUE(Annotation_shows_corner_brackets(AnnotationKind::Line));
+}
+
+TEST(annotation_hit_test, AnnotationShowsCornerBrackets_RectangleReturnsFalse) {
+    EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Rectangle));
+}
+
+TEST(annotation_hit_test, AnnotationVisualBounds_FreehandMatchesHitTestBounds) {
+    Annotation ann{};
+    ann.id = 1;
+    ann.kind = AnnotationKind::Freehand;
+    ann.freehand.style.width_px = 4;
+    ann.freehand.points = {PointPx{10, 20}, PointPx{30, 40}, PointPx{50, 20}};
+
+    EXPECT_EQ(Annotation_visual_bounds(ann), Annotation_bounds(ann));
+}
+
+TEST(annotation_hit_test, AnnotationVisualBounds_RectangleMatchesHitTestBounds) {
+    Annotation const rect = Make_rectangle(1, RectPx::From_ltrb(10, 20, 50, 60), 4);
+
+    EXPECT_EQ(Annotation_visual_bounds(rect), Annotation_bounds(rect));
+}
+
+TEST(annotation_hit_test, AnnotationVisualBounds_HorizontalLineExcludesCapAndPadding) {
+    // 2px wide line from (10,100) to (200,100).
+    // Tight rectangle corners: (10,99), (10,101), (200,99), (200,101).
+    // -> From_ltrb(10, 99, 201, 102)
+    // Hit-test bounds are larger due to cap extension and floor-1/ceil+2 padding.
+    Annotation const line = Make_line(1, {10, 100}, {200, 100}, 2);
+
+    RectPx const visual = Annotation_visual_bounds(line);
+    RectPx const hit = Annotation_bounds(line);
+
+    EXPECT_EQ(visual, (RectPx::From_ltrb(10, 99, 201, 102)));
+    EXPECT_GT(visual.left, hit.left);
+    EXPECT_GT(visual.top, hit.top);
+    EXPECT_LT(visual.right, hit.right);
+    EXPECT_LT(visual.bottom, hit.bottom);
+}
+
+TEST(annotation_hit_test, AnnotationVisualBounds_VerticalLineExcludesCapExtension) {
+    // 4px wide vertical line from (50,10) to (50,90).
+    // axis_v = (-1,0), half_w = 2.
+    // Corners: (48,10), (52,10), (48,90), (52,90).
+    // -> From_ltrb(48, 10, 53, 91)
+    Annotation const line = Make_line(1, {50, 10}, {50, 90}, 4);
+
+    EXPECT_EQ(Annotation_visual_bounds(line), (RectPx::From_ltrb(48, 10, 53, 91)));
+}

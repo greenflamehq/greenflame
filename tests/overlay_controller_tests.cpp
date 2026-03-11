@@ -629,6 +629,42 @@ TEST(overlay_controller, G_Cancel_ActiveToolGesture_ClearsDraftAndDeselectsTool)
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
+TEST(overlay_controller, G_Cancel_SelectedAnnotation_DeselectsWithoutClearingRegion) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    // Draw a freehand stroke inside the selection.
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_press(No_mods(), {150, 150}, {150, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    std::ignore = c.On_pointer_move(No_mods(), {200, 150}, {200, 150}, std::nullopt, {},
+                                    std::nullopt, 0, 0, 100u);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {200, 150}),
+              OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.Annotations().size(), 1u);
+    // Deactivate the tool and click the stroke to select it.
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+    ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
+    ASSERT_EQ(c.On_primary_press(No_mods(), {175, 150}, {175, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    std::ignore = c.On_primary_release(No_mods(), {175, 150});
+    ASSERT_NE(c.Selected_annotation(), nullptr);
+    ASSERT_FALSE(c.Has_active_annotation_gesture());
+
+    // First ESC: deselects annotation, region stays.
+    EXPECT_EQ(c.On_cancel(), OverlayAction::Repaint);
+    EXPECT_EQ(c.Selected_annotation(), nullptr);
+    EXPECT_FALSE(c.State().final_selection.Is_empty());
+
+    // Second ESC: clears the region.
+    EXPECT_EQ(c.On_cancel(), OverlayAction::InvalidateFrozenCache);
+    EXPECT_TRUE(c.State().final_selection.Is_empty());
+}
+
 TEST(overlay_controller, G_Cancel_AllClear_ReturnsClose) {
     auto c = Make_controller();
     OverlayAction action = c.On_cancel();
@@ -992,6 +1028,20 @@ TEST(overlay_controller,
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
 }
 
+TEST(overlay_controller, ActiveAnnotationTool_BorderPressStillStartsResize) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
+
+    EXPECT_EQ(c.On_primary_press(No_mods(), {100, 100}, {100, 100}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    EXPECT_TRUE(c.State().handle_dragging);
+    EXPECT_FALSE(c.Has_active_annotation_gesture());
+}
+
 TEST(overlay_controller, SelectedLineHandleDragTakesPriorityOverAnnotationMove) {
     auto c = Make_controller();
     Press(c, {100, 100});
@@ -1030,6 +1080,36 @@ TEST(overlay_controller, SelectedLineHandleDragTakesPriorityOverAnnotationMove) 
         c.Active_annotation_edit_handle(),
         std::optional<AnnotationEditHandleKind>{AnnotationEditHandleKind::LineStart});
     EXPECT_FALSE(c.Is_annotation_dragging());
+}
+
+TEST(overlay_controller, ActiveAnnotationTool_DiscardsSelectedAnnotation) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_press(No_mods(), {140, 140}, {140, 140}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_pointer_move(No_mods(), {220, 180}, {220, 180}, std::nullopt, {},
+                                std::nullopt, 0, 0, 100u),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {220, 180}),
+              OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {180, 160}, {180, 160}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_vis_rects(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {180, 160}), OverlayAction::None);
+    ASSERT_NE(c.Selected_annotation(), nullptr);
+    EXPECT_TRUE(c.Should_show_selected_annotation_handles());
+
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Selected_annotation(), nullptr);
+    EXPECT_FALSE(c.Should_show_selected_annotation_handles());
 }
 
 TEST(overlay_controller,

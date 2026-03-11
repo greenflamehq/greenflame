@@ -77,6 +77,7 @@ struct AnnotationDocument final {
     constexpr bool operator==(AnnotationDocument const &) const noexcept = default;
 };
 
+[[nodiscard]] bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept;
 void Blend_annotation_onto_pixels(std::span<uint8_t> pixels, int width, int height,
                                   int row_bytes, Annotation const &annotation,
                                   RectPx target_bounds) noexcept;

@@ -951,6 +951,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
             controller_.On_annotation_tool_hotkey(static_cast<wchar_t>(wparam));
         if (action != core::OverlayAction::None) {
             Apply_action(action);
+            (void)Refresh_hover_handle();
             Refresh_cursor();
             return 0;
         }
@@ -1246,7 +1247,11 @@ LRESULT OverlayWindow::On_l_button_up() {
                 core::OverlayAction const action =
                     controller_.On_select_annotation_tool(btn.tool_id);
                 Apply_action(action);
+                bool const hover_changed = Refresh_hover_handle();
                 if (action == core::OverlayAction::None) {
+                    InvalidateRect(hwnd_, nullptr, FALSE);
+                }
+                if (hover_changed && action == core::OverlayAction::None) {
                     InvalidateRect(hwnd_, nullptr, FALSE);
                 }
                 Refresh_cursor();
@@ -1821,8 +1826,10 @@ LRESULT OverlayWindow::On_paint() {
         if (!input.draft_freehand_style.has_value()) {
             input.draft_annotation = controller_.Draft_annotation();
         }
-        input.selected_annotation = controller_.Selected_annotation();
-        input.selected_annotation_bounds = controller_.Selected_annotation_bounds();
+        if (controller_.Should_show_selected_annotation_handles()) {
+            input.selected_annotation = controller_.Selected_annotation();
+            input.selected_annotation_bounds = controller_.Selected_annotation_bounds();
+        }
         input.transient_center_label_text = brush_size_overlay_text_;
         input.toolbar_tooltip_text = Hovered_toolbar_tooltip_text();
         input.hovered_toolbar_bounds = Hovered_toolbar_button_bounds();
@@ -1961,23 +1968,19 @@ void OverlayWindow::Refresh_cursor() {
             SetCursor(Cursor_for_handle(*hit));
             return;
         }
-        if (!controller_.Active_annotation_tool().has_value()) {
-            if (std::optional<core::AnnotationEditTarget> const edit_target =
-                    controller_.Annotation_edit_target_at(cursor);
-                edit_target.has_value()) {
-                if (std::optional<core::SelectionHandle> const selection_handle =
-                        Selection_handle_for_annotation_edit_target(edit_target->kind);
-                    selection_handle.has_value()) {
-                    SetCursor(Cursor_for_handle(*selection_handle));
-                    return;
-                }
-                if (edit_target->kind ==
-                        core::AnnotationEditTargetKind::LineStartHandle ||
-                    edit_target->kind ==
-                        core::AnnotationEditTargetKind::LineEndHandle) {
-                    SetCursor(Load_annotation_tool_cursor(hinstance_));
-                    return;
-                }
+        if (std::optional<core::AnnotationEditTarget> const edit_target =
+                controller_.Annotation_edit_target_at(cursor);
+            edit_target.has_value()) {
+            if (std::optional<core::SelectionHandle> const selection_handle =
+                    Selection_handle_for_annotation_edit_target(edit_target->kind);
+                selection_handle.has_value()) {
+                SetCursor(Cursor_for_handle(*selection_handle));
+                return;
+            }
+            if (edit_target->kind == core::AnnotationEditTargetKind::LineStartHandle ||
+                edit_target->kind == core::AnnotationEditTargetKind::LineEndHandle) {
+                SetCursor(Load_annotation_tool_cursor(hinstance_));
+                return;
             }
         }
         std::optional<core::AnnotationToolId> const active_tool =

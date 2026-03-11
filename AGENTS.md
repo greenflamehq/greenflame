@@ -108,6 +108,8 @@ Breaking these rules is a correctness bug.
 - Do not introduce third-party libraries without explicit justification.
 - Do not bypass or simplify DPI logic.
 - Do not move testable orchestration/policy logic into the GUI executable.
+- Any new functionality or feature MUST either add automated test coverage or add explicit coverage to the documented testing plan under `docs/`, following `docs/testing.md`, if the behavior cannot reasonably be covered automatically.
+- Any bug fix MUST either add automated regression coverage for the faulty behavior or add explicit regression coverage to the documented testing plan under `docs/`, following `docs/testing.md`, if the behavior cannot reasonably be covered automatically.
 - Prefer failing loudly over silently doing the wrong thing.
 - When unsure, preserve correctness over convenience.
 - Keep process/CLI exit codes in a single enum with globally unique numeric values. If codes change, update the README exit-code table.

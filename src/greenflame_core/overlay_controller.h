@@ -135,6 +135,7 @@ class OverlayController final {
     [[nodiscard]] std::optional<int32_t> Adjust_brush_width(int32_t delta_steps);
     [[nodiscard]] bool Should_show_annotation_toolbar() const noexcept;
     [[nodiscard]] bool Can_interact_with_annotation_toolbar() const noexcept;
+    [[nodiscard]] bool Should_show_selected_annotation_handles() const noexcept;
     [[nodiscard]] bool Has_active_annotation_gesture() const noexcept;
     [[nodiscard]] bool Is_annotation_dragging() const noexcept;
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;

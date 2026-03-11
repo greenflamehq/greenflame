@@ -247,6 +247,49 @@ struct ArrowGeometry final {
     return false;
 }
 
+// Tight pixel AABB from float extents. Pixel i covers [i, i+1) so right/bottom
+// are exclusive: right = floor(max_x) + 1.
+[[nodiscard]] RectPx Tight_float_aabb_px(float min_x, float min_y, float max_x,
+                                         float max_y) noexcept {
+    return RectPx::From_ltrb(static_cast<int32_t>(std::floor(min_x)),
+                             static_cast<int32_t>(std::floor(min_y)),
+                             static_cast<int32_t>(std::floor(max_x)) + 1,
+                             static_cast<int32_t>(std::floor(max_y)) + 1);
+}
+
+// Tight visual bounds of a line segment drawn with flat end caps.
+// No cap extension beyond the endpoints (unlike Line_frame_bounds_px).
+[[nodiscard]] RectPx Line_tight_visual_bounds_px(PointF start, PointF end,
+                                                 StrokeStyle style) noexcept {
+    float const dx = end.x - start.x;
+    float const dy = end.y - start.y;
+    float const len = std::sqrt(dx * dx + dy * dy);
+    float const half_w = std::max(1.0F, static_cast<float>(style.width_px)) * kHalf;
+    if (len <= 0.0F) {
+        return Tight_float_aabb_px(start.x - half_w, start.y - half_w, start.x + half_w,
+                                   start.y + half_w);
+    }
+    float const ux = dx / len;
+    float const uy = dy / len;
+    float const vx = -uy;
+    float const vy = ux;
+    float const c0x = start.x + vx * half_w, c0y = start.y + vy * half_w;
+    float const c1x = start.x - vx * half_w, c1y = start.y - vy * half_w;
+    float const c2x = end.x + vx * half_w, c2y = end.y + vy * half_w;
+    float const c3x = end.x - vx * half_w, c3y = end.y - vy * half_w;
+    return Tight_float_aabb_px(
+        std::min({c0x, c1x, c2x, c3x}), std::min({c0y, c1y, c2y, c3y}),
+        std::max({c0x, c1x, c2x, c3x}), std::max({c0y, c1y, c2y, c3y}));
+}
+
+[[nodiscard]] RectPx Triangle_tight_bounds_px(TriangleShape const &tri) noexcept {
+    return Tight_float_aabb_px(
+        std::min({tri.vertices[0].x, tri.vertices[1].x, tri.vertices[2].x}),
+        std::min({tri.vertices[0].y, tri.vertices[1].y, tri.vertices[2].y}),
+        std::max({tri.vertices[0].x, tri.vertices[1].x, tri.vertices[2].x}),
+        std::max({tri.vertices[0].y, tri.vertices[1].y, tri.vertices[2].y}));
+}
+
 // Returns the bounding box for a LineRasterFrame (padded to match raster convention).
 [[nodiscard]] RectPx Line_frame_bounds_px(LineRasterFrame const &frame) noexcept {
     float min_x = frame.corners[0].x;
@@ -335,6 +378,42 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
     }
     case AnnotationKind::Rectangle:
         return annotation.rectangle.outer_bounds.Normalized();
+    }
+    return {};
+}
+
+bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept {
+    switch (kind) {
+    case AnnotationKind::Freehand:
+    case AnnotationKind::Line:
+        return true;
+    case AnnotationKind::Rectangle:
+        return false;
+    }
+    return true;
+}
+
+RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept {
+    switch (annotation.kind) {
+    case AnnotationKind::Freehand:
+    case AnnotationKind::Rectangle:
+        return Annotation_bounds(annotation);
+    case AnnotationKind::Line: {
+        PointF const start_f = To_point_f(annotation.line.start);
+        PointF const end_f = To_point_f(annotation.line.end);
+        if (annotation.line.arrow_head) {
+            ArrowGeometry const geom =
+                Build_arrow_geometry(start_f, end_f, annotation.line.style);
+            RectPx const head_bounds = Triangle_tight_bounds_px(geom.head);
+            RectPx const shaft_bounds =
+                geom.has_shaft
+                    ? Line_tight_visual_bounds_px(start_f, geom.head_base_center,
+                                                  annotation.line.style)
+                    : RectPx{};
+            return Combine_bounds(shaft_bounds, head_bounds);
+        }
+        return Line_tight_visual_bounds_px(start_f, end_f, annotation.line.style);
+    }
     }
     return {};
 }

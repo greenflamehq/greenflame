@@ -181,27 +181,28 @@ TEST(annotation_controller, FreehandRelease_AddsAnnotationAndKeepsSelectionEmpty
     EXPECT_EQ(controller.Annotations()[0].freehand.points[2], (PointPx{14, 12}));
 }
 
-TEST(annotation_controller, FreehandAddPreservesSelectionThroughUndoRedo) {
+TEST(annotation_controller, FreehandToolSelectionClearsSelectedAnnotation) {
     AnnotationController controller;
     UndoStack undo_stack;
     controller.Insert_annotation_at(0, Make_stroke(1, {{20, 20}, {30, 20}}),
                                     std::optional<uint64_t>{1});
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 
     EXPECT_TRUE(controller.On_primary_press({100, 100}));
     EXPECT_TRUE(controller.On_pointer_move({110, 110}));
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
 
     ASSERT_EQ(controller.Annotations().size(), 2u);
-    EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 
     undo_stack.Undo();
     ASSERT_EQ(controller.Annotations().size(), 1u);
-    EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 
     undo_stack.Redo();
     ASSERT_EQ(controller.Annotations().size(), 2u);
-    EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 }
 
 TEST(annotation_controller, LineRelease_AddsAnnotationAndKeepsSelectionEmpty) {
@@ -242,27 +243,28 @@ TEST(annotation_controller, ArrowRelease_AddsAnnotationAndKeepsSelectionEmpty) {
     EXPECT_EQ(controller.Annotations()[0].line.end, (PointPx{45, 55}));
 }
 
-TEST(annotation_controller, LineAddPreservesSelectionThroughUndoRedo) {
+TEST(annotation_controller, LineToolSelectionClearsSelectedAnnotation) {
     AnnotationController controller;
     UndoStack undo_stack;
     controller.Insert_annotation_at(0, Make_stroke(1, {{20, 20}, {30, 20}}),
                                     std::optional<uint64_t>{1});
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Line));
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 
     EXPECT_TRUE(controller.On_primary_press({100, 100}));
     EXPECT_TRUE(controller.On_pointer_move({140, 130}));
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
 
     ASSERT_EQ(controller.Annotations().size(), 2u);
-    EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 
     undo_stack.Undo();
     ASSERT_EQ(controller.Annotations().size(), 1u);
-    EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 
     undo_stack.Redo();
     ASSERT_EQ(controller.Annotations().size(), 2u);
-    EXPECT_EQ(controller.Selected_annotation_id(), std::optional<uint64_t>{1});
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 }
 
 TEST(annotation_controller, RectangleRelease_AddsAnnotationAndKeepsSelectionEmpty) {
@@ -626,7 +628,7 @@ TEST(annotation_controller, AnnotationDragRelease_MovesAnnotationAndIsUndoable) 
     AnnotationController controller;
     UndoStack undo_stack;
     Annotation const original = Make_stroke(1, {{40, 40}, {60, 40}});
-    RectPx const orig_bounds = Annotation_bounds(original);
+    RectPx const orig_bounds = Annotation_visual_bounds(original);
     RectPx const expected_bounds =
         RectPx::From_ltrb(orig_bounds.left + 20, orig_bounds.top + 20,
                           orig_bounds.right + 20, orig_bounds.bottom + 20);
@@ -826,12 +828,24 @@ TEST(annotation_controller, DeleteSelectedAnnotation_IsUndoableAndRedoable) {
     EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
 }
 
-TEST(annotation_controller, SelectedAnnotationBounds_FollowSelectedAnnotation) {
+TEST(annotation_controller, SelectedAnnotationBounds_FreehandUsesVisualBounds) {
     AnnotationController controller;
     Annotation const stroke = Make_stroke(1, {{40, 40}, {60, 40}});
-    RectPx const expected = Annotation_bounds(stroke);
     controller.Insert_annotation_at(0, stroke, std::nullopt);
     ASSERT_TRUE(controller.Set_selected_annotation(std::optional<uint64_t>{1}));
 
-    EXPECT_EQ(controller.Selected_annotation_bounds(), std::optional<RectPx>{expected});
+    EXPECT_EQ(controller.Selected_annotation_bounds(),
+              std::optional<RectPx>{Annotation_visual_bounds(stroke)});
+}
+
+TEST(annotation_controller, SelectedAnnotationBounds_LineUsesVisualNotHitTestBounds) {
+    AnnotationController controller;
+    Annotation const line = Make_line(1, {10, 100}, {200, 100}, 2);
+    controller.Insert_annotation_at(0, line, std::optional<uint64_t>{1});
+
+    std::optional<RectPx> const bounds = controller.Selected_annotation_bounds();
+
+    ASSERT_TRUE(bounds.has_value());
+    EXPECT_EQ(*bounds, Annotation_visual_bounds(line));
+    EXPECT_NE(*bounds, Annotation_bounds(line));
 }

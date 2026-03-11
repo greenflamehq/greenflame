@@ -186,6 +186,10 @@ bool OverlayController::Can_interact_with_annotation_toolbar() const noexcept {
            !annotation_controller_.Has_active_gesture();
 }
 
+bool OverlayController::Should_show_selected_annotation_handles() const noexcept {
+    return annotation_controller_.Selected_annotation() != nullptr;
+}
+
 bool OverlayController::Has_active_annotation_gesture() const noexcept {
     return annotation_controller_.Has_active_gesture();
 }
@@ -294,6 +298,9 @@ OverlayAction OverlayController::On_cancel() {
     if (annotation_controller_.On_cancel()) {
         return OverlayAction::Repaint;
     }
+    if (annotation_controller_.Set_selected_annotation(std::nullopt)) {
+        return OverlayAction::Repaint;
+    }
     if (!state_.final_selection.Is_empty()) {
         Set_final_selection({});
         state_.live_rect = {};
@@ -354,7 +361,7 @@ OverlayAction OverlayController::On_primary_press(
     // ---- When a committed selection exists, resolve resize / tool / move ----
     if (!state_.final_selection.Is_empty() && !state_.dragging &&
         !state_.handle_dragging && !state_.move_dragging) {
-        std::optional<SelectionHandle> hit =
+        std::optional<SelectionHandle> const hit =
             Hit_test_border_zone(state_.final_selection, cursor_client);
         if (hit.has_value()) {
             state_.handle_dragging = true;
@@ -365,7 +372,9 @@ OverlayAction OverlayController::On_primary_press(
             return OverlayAction::Repaint;
         }
 
-        if (annotation_controller_.Has_active_tool()) {
+        std::optional<AnnotationToolId> const active_tool =
+            annotation_controller_.Active_tool();
+        if (active_tool.has_value()) {
             return annotation_controller_.On_primary_press(cursor_client)
                        ? OverlayAction::Repaint
                        : OverlayAction::None;

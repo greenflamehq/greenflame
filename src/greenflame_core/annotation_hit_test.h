@@ -5,6 +5,7 @@
 namespace greenflame::core {
 
 [[nodiscard]] RectPx Annotation_bounds(Annotation const &annotation) noexcept;
+[[nodiscard]] RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept;
 [[nodiscard]] bool Annotation_hits_point(Annotation const &annotation,
                                          PointPx point) noexcept;
 [[nodiscard]] std::optional<size_t>

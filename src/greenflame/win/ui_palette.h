@@ -4,10 +4,10 @@ namespace greenflame {
 
 [[nodiscard]] constexpr D2D1_COLOR_F
 Make_d2d_color(uint8_t red, uint8_t green, uint8_t blue, float alpha = 1.f) noexcept {
-    constexpr float kD2dColorScale = 1.f / 255.f;
-    return {static_cast<float>(red) * kD2dColorScale,
-            static_cast<float>(green) * kD2dColorScale,
-            static_cast<float>(blue) * kD2dColorScale, alpha};
+    constexpr float d2d_color_scale = 1.f / 255.f;
+    return {static_cast<float>(red) * d2d_color_scale,
+            static_cast<float>(green) * d2d_color_scale,
+            static_cast<float>(blue) * d2d_color_scale, alpha};
 }
 
 // Shared Direct2D overlay palette.
