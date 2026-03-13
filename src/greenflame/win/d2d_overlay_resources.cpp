@@ -18,6 +18,7 @@ constexpr float kHintTextFormatSizePt = 12.f;
 [[nodiscard]] bool Upload_glyph(ID2D1RenderTarget *rt, OverlayButtonGlyph const *glyph,
                                 Microsoft::WRL::ComPtr<ID2D1Bitmap> &out_bitmap) {
     if (!glyph || !glyph->Is_valid()) {
+        out_bitmap.Reset();
         return true; // skip silently — caller may not provide all glyphs
     }
 
@@ -278,21 +279,30 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
     return true;
 }
 
-bool D2DOverlayResources::Upload_glyph_bitmaps(OverlayButtonGlyph const *brush,
-                                               OverlayButtonGlyph const *highlighter,
-                                               OverlayButtonGlyph const *line,
-                                               OverlayButtonGlyph const *arrow,
-                                               OverlayButtonGlyph const *rect,
-                                               OverlayButtonGlyph const *filled_rect) {
+bool D2DOverlayResources::Upload_glyph_bitmaps(
+    std::span<OverlayButtonGlyph const *const> glyphs) {
     if (!hwnd_rt) {
         return false;
     }
-    return Upload_glyph(hwnd_rt.Get(), brush, glyph_brush) &&
-           Upload_glyph(hwnd_rt.Get(), highlighter, glyph_highlighter) &&
-           Upload_glyph(hwnd_rt.Get(), line, glyph_line) &&
-           Upload_glyph(hwnd_rt.Get(), arrow, glyph_arrow) &&
-           Upload_glyph(hwnd_rt.Get(), rect, glyph_rect) &&
-           Upload_glyph(hwnd_rt.Get(), filled_rect, glyph_filled_rect);
+    size_t const count = std::min(toolbar_glyphs.size(), glyphs.size());
+    for (size_t i = 0; i < count; ++i) {
+        if (!Upload_glyph(hwnd_rt.Get(), glyphs[i], toolbar_glyphs[i])) {
+            return false;
+        }
+    }
+    for (size_t i = count; i < toolbar_glyphs.size(); ++i) {
+        toolbar_glyphs[i].Reset();
+    }
+    return true;
+}
+
+ID2D1Bitmap *
+D2DOverlayResources::Toolbar_glyph_bitmap(OverlayToolbarGlyphId glyph) const noexcept {
+    size_t const index = Overlay_toolbar_glyph_index(glyph);
+    if (index >= toolbar_glyphs.size()) {
+        return nullptr;
+    }
+    return toolbar_glyphs[index].Get();
 }
 
 void D2DOverlayResources::Invalidate_annotations() noexcept {
@@ -319,12 +329,9 @@ void D2DOverlayResources::Release_device_resources() {
     text_dim.Reset();
     text_center.Reset();
     text_hint.Reset();
-    glyph_brush.Reset();
-    glyph_highlighter.Reset();
-    glyph_line.Reset();
-    glyph_arrow.Reset();
-    glyph_rect.Reset();
-    glyph_filled_rect.Reset();
+    for (auto &glyph : toolbar_glyphs) {
+        glyph.Reset();
+    }
     hwnd_rt.Reset();
     annotations_valid = false;
     frozen_valid = false;

@@ -40,13 +40,11 @@ struct D2DOverlayResources final {
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_center; // 36pt Segoe UI Black
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_hint;   // 16pt Segoe UI
 
-    // Toolbar glyph bitmaps (BGRA premultiplied, from OverlayButtonGlyph alpha masks)
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> glyph_brush;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> glyph_highlighter;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> glyph_line;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> glyph_arrow;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> glyph_rect;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> glyph_filled_rect;
+    // Toolbar glyph bitmaps (BGRA premultiplied, from OverlayButtonGlyph alpha
+    // masks), indexed by OverlayToolbarGlyphId.
+    std::array<Microsoft::WRL::ComPtr<ID2D1Bitmap>,
+               static_cast<size_t>(OverlayToolbarGlyphId::Count)>
+        toolbar_glyphs = {};
 
     bool annotations_valid = false;
     bool frozen_valid = false;
@@ -66,15 +64,12 @@ struct D2DOverlayResources final {
     // Create the annotations and frozen off-screen bitmap render targets.
     [[nodiscard]] bool Create_cache_targets(int width, int height);
 
-    // Upload the six annotation tool glyph alpha masks as D2D bitmaps.
-    // Order: brush, highlighter, line, arrow, rect, filled_rect. Null pointers are
-    // skipped.
-    [[nodiscard]] bool Upload_glyph_bitmaps(OverlayButtonGlyph const *brush,
-                                            OverlayButtonGlyph const *highlighter,
-                                            OverlayButtonGlyph const *line,
-                                            OverlayButtonGlyph const *arrow,
-                                            OverlayButtonGlyph const *rect,
-                                            OverlayButtonGlyph const *filled_rect);
+    // Upload toolbar glyph alpha masks as D2D bitmaps, indexed by
+    // OverlayToolbarGlyphId. Null entries are skipped.
+    [[nodiscard]] bool
+    Upload_glyph_bitmaps(std::span<OverlayButtonGlyph const *const> glyphs);
+    [[nodiscard]] ID2D1Bitmap *
+    Toolbar_glyph_bitmap(OverlayToolbarGlyphId glyph) const noexcept;
 
     // Mark annotations cache (and frozen cache) dirty.
     void Invalidate_annotations() noexcept;

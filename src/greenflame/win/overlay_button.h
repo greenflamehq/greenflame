@@ -23,6 +23,23 @@ struct OverlayButtonGlyph final {
     }
 };
 
+enum class OverlayToolbarGlyphId : uint8_t {
+    None = 0,
+    Brush,
+    Highlighter,
+    Line,
+    Arrow,
+    Rectangle,
+    FilledRectangle,
+    Help,
+    Count,
+};
+
+[[nodiscard]] constexpr size_t
+Overlay_toolbar_glyph_index(OverlayToolbarGlyphId glyph) noexcept {
+    return static_cast<size_t>(glyph);
+}
+
 // Abstract toolbar button: draws itself and responds to mouse events.
 class IOverlayButton {
   public:

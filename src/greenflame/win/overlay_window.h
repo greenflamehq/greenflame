@@ -46,7 +46,31 @@ class OverlayWindow final {
     [[nodiscard]] bool Is_open() const;
 
   private:
+    enum class ToolbarButtonAction : uint8_t {
+        SelectAnnotationTool,
+        ShowHelp,
+    };
+
+    enum class ToolbarLayoutItemKind : uint8_t {
+        Button,
+        Spacer,
+    };
+
     struct OverlayResources;
+
+    struct ToolbarButtonModel final {
+        ToolbarButtonAction action = ToolbarButtonAction::SelectAnnotationTool;
+        std::optional<core::AnnotationToolId> tool_id = std::nullopt;
+        OverlayToolbarGlyphId glyph = OverlayToolbarGlyphId::None;
+        std::wstring tooltip = {};
+        std::wstring label = {};
+        bool active = false;
+    };
+
+    struct ToolbarLayoutItem final {
+        ToolbarLayoutItemKind kind = ToolbarLayoutItemKind::Spacer;
+        std::optional<ToolbarButtonModel> button = std::nullopt;
+    };
 
     static LRESULT CALLBACK Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam,
                                             LPARAM lparam);
@@ -94,15 +118,18 @@ class OverlayWindow final {
     [[nodiscard]] bool Update_color_wheel_hover(core::PointPx cursor);
     void Select_color_wheel_segment(size_t index);
     [[nodiscard]] bool Clear_toolbar_hover_states();
+    [[nodiscard]] bool Update_toolbar_hover_states(core::PointPx cursor);
     [[nodiscard]] bool Should_show_brush_cursor_preview() const;
     [[nodiscard]] bool Should_show_square_cursor_preview() const;
     [[nodiscard]] std::optional<double>
     Current_square_cursor_preview_angle_radians() const;
     [[nodiscard]] bool Is_selection_stable_for_help() const;
+    void Show_help_overlay_at_cursor();
+    void Hide_help_overlay(bool suppress_next_lbutton_up);
     [[nodiscard]] std::wstring_view Hovered_toolbar_tooltip_text() const noexcept;
     [[nodiscard]] std::optional<core::RectPx> Hovered_toolbar_button_bounds() const;
     [[nodiscard]] OverlayButtonGlyph const *
-    Resolve_toolbar_button_glyph(core::AnnotationToolbarGlyph glyph) const noexcept;
+    Resolve_toolbar_button_glyph(OverlayToolbarGlyphId glyph) const noexcept;
     [[nodiscard]] core::SnapEdges Collect_visible_snap_edges() const;
 
     void Rebuild_toolbar_buttons();
@@ -110,7 +137,9 @@ class OverlayWindow final {
     Compute_toolbar_positions(int button_count) const;
 
     struct ToolbarButtonEntry final {
-        core::AnnotationToolId tool_id = core::AnnotationToolId::Freehand;
+        ToolbarButtonAction action = ToolbarButtonAction::SelectAnnotationTool;
+        std::optional<core::AnnotationToolId> tool_id = std::nullopt;
+        OverlayToolbarGlyphId glyph = OverlayToolbarGlyphId::None;
         std::wstring tooltip = {};
         std::unique_ptr<IOverlayButton> button = {};
 

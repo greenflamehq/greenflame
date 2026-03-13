@@ -22,6 +22,9 @@ class OverlayHelpOverlay final {
     void Hide() noexcept;
     void Hide_if_selection_unstable(bool selection_stable) noexcept;
 
+    void Show_at_cursor(core::PointPx cursor_screen,
+                        std::span<const core::MonitorWithBounds> monitors,
+                        core::RectPx overlay_rect_screen);
     void Toggle_at_cursor(core::PointPx cursor_screen,
                           std::span<const core::MonitorWithBounds> monitors,
                           core::RectPx overlay_rect_screen);

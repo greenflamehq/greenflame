@@ -302,13 +302,20 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Steps:
   1. Create a stable selection.
   2. Press `Ctrl + H`.
-  3. Try clicking, dragging, typing tool hotkeys, and using the mouse wheel.
-  4. Close the help overlay with `Ctrl + H`, then reopen and close with `Esc`.
+  3. Close the help overlay with `Ctrl + H`, then reopen it with the toolbar `Help`
+     button.
+  4. Try clicking, dragging, typing tool hotkeys, and using the mouse wheel.
+  5. Close the help overlay with `Esc`, reopen it with the toolbar button again, then
+     dismiss it with a left-click.
 - Expected:
   - A help overlay opens near the cursor.
   - It shows the current shortcut reference.
+  - The toolbar `Help` button opens help on button release and does not toggle an
+    annotation tool.
   - While visible, other overlay interactions are blocked.
-  - Both close paths work.
+  - Keyboard, `Esc`, and left-click dismissal all work.
+  - After dismissing help with `Esc` or a left-click, the toolbar button under the
+    cursor becomes hovered and clickable again without requiring mouse movement.
 
 ### GF-MAN-UI-002 - Toolbar Placement And Tooltips
 
@@ -320,6 +327,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   3. Toggle a few tools on and off.
 - Expected:
   - The toolbar stays attached to the selection and remains visible on-screen.
+  - The `Help` button stays last on the right and is visually separated from the
+    annotation tools by one reserved button slot of space.
   - Hovering shows the full tool name.
   - Button state tracks the active tool correctly.
 

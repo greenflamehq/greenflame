@@ -32,10 +32,27 @@ constexpr int kLineToolGlyphResourceId = 105;
 constexpr int kArrowToolGlyphResourceId = 106;
 constexpr int kRectangleToolGlyphResourceId = 107;
 constexpr int kFilledRectangleToolGlyphResourceId = 108;
+constexpr int kHelpToolGlyphResourceId = 109;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
+
+struct ToolbarGlyphResourceSpec final {
+    greenflame::OverlayToolbarGlyphId glyph = greenflame::OverlayToolbarGlyphId::None;
+    int resource_id = 0;
+};
+
+constexpr std::array<ToolbarGlyphResourceSpec, 7> kToolbarGlyphResourceSpecs = {{
+    {greenflame::OverlayToolbarGlyphId::Brush, kBrushToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Highlighter, kHighlighterToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Line, kLineToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Arrow, kArrowToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Rectangle, kRectangleToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::FilledRectangle,
+     kFilledRectangleToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Help, kHelpToolGlyphResourceId},
+}};
 
 [[nodiscard]] HBITMAP
 Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
@@ -384,12 +401,9 @@ namespace greenflame {
 
 struct OverlayWindow::OverlayResources {
     GdiCaptureResult capture = {};
-    std::shared_ptr<OverlayButtonGlyph const> brush_tool_glyph = {};
-    std::shared_ptr<OverlayButtonGlyph const> highlighter_tool_glyph = {};
-    std::shared_ptr<OverlayButtonGlyph const> line_tool_glyph = {};
-    std::shared_ptr<OverlayButtonGlyph const> arrow_tool_glyph = {};
-    std::shared_ptr<OverlayButtonGlyph const> rectangle_tool_glyph = {};
-    std::shared_ptr<OverlayButtonGlyph const> filled_rectangle_tool_glyph = {};
+    std::array<std::shared_ptr<OverlayButtonGlyph const>,
+               static_cast<size_t>(OverlayToolbarGlyphId::Count)>
+        toolbar_glyphs = {};
 
     OverlayResources() = default;
     ~OverlayResources() { Reset(); }
@@ -401,29 +415,30 @@ struct OverlayWindow::OverlayResources {
         if (!capture.Is_valid()) {
             return false;
         }
-        brush_tool_glyph =
-            Load_png_resource_alpha_mask(hinstance, kBrushToolGlyphResourceId);
-        highlighter_tool_glyph =
-            Load_png_resource_alpha_mask(hinstance, kHighlighterToolGlyphResourceId);
-        line_tool_glyph =
-            Load_png_resource_alpha_mask(hinstance, kLineToolGlyphResourceId);
-        arrow_tool_glyph =
-            Load_png_resource_alpha_mask(hinstance, kArrowToolGlyphResourceId);
-        rectangle_tool_glyph =
-            Load_png_resource_alpha_mask(hinstance, kRectangleToolGlyphResourceId);
-        filled_rectangle_tool_glyph = Load_png_resource_alpha_mask(
-            hinstance, kFilledRectangleToolGlyphResourceId);
+        for (ToolbarGlyphResourceSpec const &spec : kToolbarGlyphResourceSpecs) {
+            toolbar_glyphs[Overlay_toolbar_glyph_index(spec.glyph)] =
+                Load_png_resource_alpha_mask(hinstance, spec.resource_id);
+        }
         return true;
+    }
+
+    [[nodiscard]] std::array<OverlayButtonGlyph const *,
+                             static_cast<size_t>(OverlayToolbarGlyphId::Count)>
+    Glyph_pointers() const noexcept {
+        std::array<OverlayButtonGlyph const *,
+                   static_cast<size_t>(OverlayToolbarGlyphId::Count)>
+            glyphs{};
+        for (size_t i = 0; i < toolbar_glyphs.size(); ++i) {
+            glyphs[i] = toolbar_glyphs[i].get();
+        }
+        return glyphs;
     }
 
     void Reset() noexcept {
         capture.Free();
-        brush_tool_glyph.reset();
-        highlighter_tool_glyph.reset();
-        line_tool_glyph.reset();
-        arrow_tool_glyph.reset();
-        rectangle_tool_glyph.reset();
-        filled_rectangle_tool_glyph.reset();
+        for (auto &glyph : toolbar_glyphs) {
+            glyph.reset();
+        }
     }
 };
 
@@ -441,6 +456,42 @@ void OverlayWindow::Set_hotkey_help_content(
 
 void OverlayWindow::Set_testing_toolbar(bool enable) noexcept {
     testing_toolbar_ = enable;
+}
+
+void OverlayWindow::Show_help_overlay_at_cursor() {
+    if (!Is_selection_stable_for_help()) {
+        return;
+    }
+
+    RECT overlay_rect{};
+    if (GetWindowRect(hwnd_, &overlay_rect) == 0) {
+        return;
+    }
+
+    core::RectPx const overlay_screen_rect = core::RectPx::From_ltrb(
+        static_cast<int32_t>(overlay_rect.left), static_cast<int32_t>(overlay_rect.top),
+        static_cast<int32_t>(overlay_rect.right),
+        static_cast<int32_t>(overlay_rect.bottom));
+    hotkey_help_overlay_.Show_at_cursor(
+        Get_cursor_pos_px(), controller_.State().cached_monitors, overlay_screen_rect);
+    (void)Clear_toolbar_hover_states();
+    Refresh_cursor();
+    InvalidateRect(hwnd_, nullptr, TRUE);
+}
+
+void OverlayWindow::Hide_help_overlay(bool suppress_next_lbutton_up) {
+    if (!hotkey_help_overlay_.Is_visible()) {
+        return;
+    }
+
+    hotkey_help_overlay_.Hide();
+    if (suppress_next_lbutton_up) {
+        suppress_next_lbutton_up_ = true;
+    }
+    (void)Refresh_hover_handle();
+    (void)Update_toolbar_hover_states(Get_client_cursor_pos_px(hwnd_));
+    Refresh_cursor();
+    InvalidateRect(hwnd_, nullptr, TRUE);
 }
 
 std::vector<core::PointPx>
@@ -474,27 +525,16 @@ OverlayWindow::Compute_toolbar_positions(int button_count) const {
 }
 
 OverlayButtonGlyph const *OverlayWindow::Resolve_toolbar_button_glyph(
-    core::AnnotationToolbarGlyph glyph) const noexcept {
+    OverlayToolbarGlyphId glyph) const noexcept {
     if (resources_ == nullptr) {
         return nullptr;
     }
-    switch (glyph) {
-    case core::AnnotationToolbarGlyph::Brush:
-        return resources_->brush_tool_glyph.get();
-    case core::AnnotationToolbarGlyph::Highlighter:
-        return resources_->highlighter_tool_glyph.get();
-    case core::AnnotationToolbarGlyph::Line:
-        return resources_->line_tool_glyph.get();
-    case core::AnnotationToolbarGlyph::Arrow:
-        return resources_->arrow_tool_glyph.get();
-    case core::AnnotationToolbarGlyph::Rectangle:
-        return resources_->rectangle_tool_glyph.get();
-    case core::AnnotationToolbarGlyph::FilledRectangle:
-        return resources_->filled_rectangle_tool_glyph.get();
-    case core::AnnotationToolbarGlyph::None:
+    size_t const index = Overlay_toolbar_glyph_index(glyph);
+    if (index >= resources_->toolbar_glyphs.size() ||
+        glyph == OverlayToolbarGlyphId::None) {
         return nullptr;
     }
-    return nullptr;
+    return resources_->toolbar_glyphs[index].get();
 }
 
 void OverlayWindow::Rebuild_toolbar_buttons() {
@@ -506,25 +546,80 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
 
     std::vector<core::AnnotationToolbarButtonView> const views =
         controller_.Build_annotation_toolbar_button_views();
+    auto const map_annotation_glyph = [](core::AnnotationToolbarGlyph glyph) noexcept {
+        switch (glyph) {
+        case core::AnnotationToolbarGlyph::Brush:
+            return OverlayToolbarGlyphId::Brush;
+        case core::AnnotationToolbarGlyph::Highlighter:
+            return OverlayToolbarGlyphId::Highlighter;
+        case core::AnnotationToolbarGlyph::Line:
+            return OverlayToolbarGlyphId::Line;
+        case core::AnnotationToolbarGlyph::Arrow:
+            return OverlayToolbarGlyphId::Arrow;
+        case core::AnnotationToolbarGlyph::Rectangle:
+            return OverlayToolbarGlyphId::Rectangle;
+        case core::AnnotationToolbarGlyph::FilledRectangle:
+            return OverlayToolbarGlyphId::FilledRectangle;
+        case core::AnnotationToolbarGlyph::None:
+            return OverlayToolbarGlyphId::None;
+        }
+        return OverlayToolbarGlyphId::None;
+    };
+
+    size_t const spacer_count = views.empty() ? 0u : 1u;
+    size_t const trailing_button_count = 1u; // Help button.
+    std::vector<ToolbarLayoutItem> layout_items;
+    layout_items.reserve(views.size() + spacer_count + trailing_button_count);
+    for (auto const &view : views) {
+        ToolbarButtonModel model{};
+        model.action = ToolbarButtonAction::SelectAnnotationTool;
+        model.tool_id = view.id;
+        model.glyph = map_annotation_glyph(view.glyph);
+        model.tooltip = view.tooltip;
+        model.label = view.label;
+        model.active = view.active;
+        layout_items.push_back(
+            ToolbarLayoutItem{ToolbarLayoutItemKind::Button, std::move(model)});
+    }
+    if (!views.empty()) {
+        layout_items.push_back(ToolbarLayoutItem{ToolbarLayoutItemKind::Spacer});
+    }
+    {
+        ToolbarButtonModel help_model{};
+        help_model.action = ToolbarButtonAction::ShowHelp;
+        help_model.glyph = OverlayToolbarGlyphId::Help;
+        help_model.tooltip = L"Help";
+        help_model.label = L"?";
+        layout_items.push_back(
+            ToolbarLayoutItem{ToolbarLayoutItemKind::Button, std::move(help_model)});
+    }
+
     std::vector<core::PointPx> const positions =
-        Compute_toolbar_positions(static_cast<int>(views.size()));
-    size_t const count = std::min(views.size(), positions.size());
+        Compute_toolbar_positions(static_cast<int>(layout_items.size()));
 
     toolbar_buttons_.clear();
-    toolbar_buttons_.reserve(count);
-    for (size_t i = 0; i < count; ++i) {
+    toolbar_buttons_.reserve(positions.size());
+    size_t const item_count = std::min(layout_items.size(), positions.size());
+    for (size_t i = 0; i < item_count; ++i) {
+        ToolbarLayoutItem const &layout_item = layout_items[i];
+        if (layout_item.kind != ToolbarLayoutItemKind::Button ||
+            !layout_item.button.has_value()) {
+            continue;
+        }
+        ToolbarButtonModel const &model = *layout_item.button;
         ToolbarButtonEntry entry{};
-        entry.tool_id = views[i].id;
-        entry.tooltip = views[i].tooltip;
+        entry.action = model.action;
+        entry.tool_id = model.tool_id;
+        entry.glyph = model.glyph;
+        entry.tooltip = model.tooltip;
         OverlayButtonGlyph const *const glyph =
-            Resolve_toolbar_button_glyph(views[i].glyph);
+            Resolve_toolbar_button_glyph(entry.glyph);
         if (glyph != nullptr) {
             entry.button = std::make_unique<OverlayButton>(
-                positions[i], kToolbarButtonSizePx, glyph, false, views[i].active);
+                positions[i], kToolbarButtonSizePx, glyph, false, model.active);
         } else {
-            entry.button =
-                std::make_unique<OverlayButton>(positions[i], kToolbarButtonSizePx,
-                                                views[i].label, false, views[i].active);
+            entry.button = std::make_unique<OverlayButton>(
+                positions[i], kToolbarButtonSizePx, model.label, false, model.active);
         }
         toolbar_buttons_.push_back(std::move(entry));
     }
@@ -582,11 +677,9 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
                                               resources_->capture.height)) {
         d2d_resources_.reset();
     } else {
+        auto const glyphs = resources_->Glyph_pointers();
         (void)d2d_resources_->Upload_glyph_bitmaps(
-            resources_->brush_tool_glyph.get(),
-            resources_->highlighter_tool_glyph.get(), resources_->line_tool_glyph.get(),
-            resources_->arrow_tool_glyph.get(), resources_->rectangle_tool_glyph.get(),
-            resources_->filled_rectangle_tool_glyph.get());
+            std::span<OverlayButtonGlyph const *const>(glyphs));
     }
 
     controller_.Reset_for_session(Get_monitors_with_bounds());
@@ -802,6 +895,32 @@ bool OverlayWindow::Clear_toolbar_hover_states() {
     return changed;
 }
 
+bool OverlayWindow::Update_toolbar_hover_states(core::PointPx cursor) {
+    if (!controller_.Can_interact_with_annotation_toolbar() ||
+        toolbar_buttons_.empty()) {
+        return Clear_toolbar_hover_states();
+    }
+
+    bool changed = false;
+    for (auto const &entry : toolbar_buttons_) {
+        if (entry.button == nullptr) {
+            continue;
+        }
+        bool const was_hovered = entry.button->Is_hovered();
+        bool const is_hovered = entry.button->Hit_test(cursor);
+        if (was_hovered == is_hovered) {
+            continue;
+        }
+        if (is_hovered) {
+            entry.button->On_mouse_enter();
+        } else {
+            entry.button->On_mouse_leave();
+        }
+        changed = true;
+    }
+    return changed;
+}
+
 bool OverlayWindow::Should_show_brush_cursor_preview() const {
     if (color_wheel_.visible) {
         return false;
@@ -849,6 +968,9 @@ std::wstring_view OverlayWindow::Hovered_toolbar_tooltip_text() const noexcept {
     if (color_wheel_.visible) {
         return {};
     }
+    if (hotkey_help_overlay_.Is_visible()) {
+        return {};
+    }
     if (!controller_.Can_interact_with_annotation_toolbar()) {
         return {};
     }
@@ -862,6 +984,9 @@ std::wstring_view OverlayWindow::Hovered_toolbar_tooltip_text() const noexcept {
 
 std::optional<core::RectPx> OverlayWindow::Hovered_toolbar_button_bounds() const {
     if (color_wheel_.visible) {
+        return std::nullopt;
+    }
+    if (hotkey_help_overlay_.Is_visible()) {
         return std::nullopt;
     }
     if (!controller_.Can_interact_with_annotation_toolbar()) {
@@ -956,8 +1081,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
             return 0;
         }
         if (hotkey_help_overlay_.Is_visible()) {
-            hotkey_help_overlay_.Hide();
-            InvalidateRect(hwnd_, nullptr, TRUE);
+            Hide_help_overlay(false);
             return 0;
         }
         Apply_action(controller_.On_cancel());
@@ -967,19 +1091,12 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     if (eff_ctrl && wparam == L'H') {
-        if (!is_repeat && Is_selection_stable_for_help()) {
-            RECT overlay_rect{};
-            if (GetWindowRect(hwnd_, &overlay_rect) != 0) {
-                core::RectPx const overlay_screen_rect =
-                    core::RectPx::From_ltrb(static_cast<int32_t>(overlay_rect.left),
-                                            static_cast<int32_t>(overlay_rect.top),
-                                            static_cast<int32_t>(overlay_rect.right),
-                                            static_cast<int32_t>(overlay_rect.bottom));
-                hotkey_help_overlay_.Toggle_at_cursor(
-                    Get_cursor_pos_px(), controller_.State().cached_monitors,
-                    overlay_screen_rect);
+        if (!is_repeat) {
+            if (hotkey_help_overlay_.Is_visible()) {
+                Hide_help_overlay(false);
+            } else {
+                Show_help_overlay_at_cursor();
             }
-            InvalidateRect(hwnd_, nullptr, TRUE);
         }
         return 0;
     }
@@ -1110,16 +1227,17 @@ LRESULT OverlayWindow::On_l_button_down() {
         return 0;
     }
     if (hotkey_help_overlay_.Is_visible()) {
-        hotkey_help_overlay_.Hide();
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        Hide_help_overlay(true);
         return 0;
     }
-    // Route click to any hovered toolbar button (consume — do not start dragging).
+    // Route click to any toolbar button under the cursor (consume — do not start
+    // dragging).
     if (controller_.Can_interact_with_annotation_toolbar() &&
         !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        (void)Update_toolbar_hover_states(cur);
         for (auto const &btn : toolbar_buttons_) {
-            if (btn.button && btn.button->Is_hovered()) {
+            if (btn.button && btn.button->Hit_test(cur)) {
                 btn.button->On_mouse_down(cur);
                 InvalidateRect(hwnd_, nullptr, FALSE);
                 return 0;
@@ -1235,26 +1353,7 @@ LRESULT OverlayWindow::On_mouse_move() {
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
-    // Update toolbar button hover state.
-    if (controller_.Can_interact_with_annotation_toolbar() &&
-        !toolbar_buttons_.empty()) {
-        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
-        bool any_changed = false;
-        for (auto const &btn : toolbar_buttons_) {
-            bool const was = btn.button && btn.button->Is_hovered();
-            bool const now = btn.button && btn.button->Hit_test(cur);
-            if (!was && now) {
-                btn.button->On_mouse_enter();
-                any_changed = true;
-            } else if (was && !now) {
-                btn.button->On_mouse_leave();
-                any_changed = true;
-            }
-        }
-        if (any_changed) {
-            InvalidateRect(hwnd_, nullptr, FALSE);
-        }
-    } else if (Clear_toolbar_hover_states()) {
+    if (Update_toolbar_hover_states(cursor_client)) {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
@@ -1307,16 +1406,25 @@ LRESULT OverlayWindow::On_l_button_up() {
         suppress_next_lbutton_up_ = false;
         return 0;
     }
-    // Route release to any hovered toolbar button.
+    if (hotkey_help_overlay_.Is_visible()) {
+        return 0;
+    }
+    // Route release to any toolbar button under the cursor.
     if (controller_.Can_interact_with_annotation_toolbar() &&
         !toolbar_buttons_.empty()) {
         core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        bool const toolbar_hover_changed = Update_toolbar_hover_states(cur);
         for (auto const &btn : toolbar_buttons_) {
-            if (btn.button && btn.button->Is_hovered()) {
+            if (btn.button && btn.button->Hit_test(cur)) {
                 btn.button->On_mouse_up(cur);
-                core::OverlayAction const action =
-                    controller_.On_select_annotation_tool(btn.tool_id);
-                Apply_action(action);
+                core::OverlayAction action = core::OverlayAction::None;
+                if (btn.action == ToolbarButtonAction::SelectAnnotationTool &&
+                    btn.tool_id.has_value()) {
+                    action = controller_.On_select_annotation_tool(*btn.tool_id);
+                    Apply_action(action);
+                } else if (btn.action == ToolbarButtonAction::ShowHelp) {
+                    Show_help_overlay_at_cursor();
+                }
                 bool const hover_changed = Refresh_hover_handle();
                 if (action == core::OverlayAction::None) {
                     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -1327,6 +1435,9 @@ LRESULT OverlayWindow::On_l_button_up() {
                 Refresh_cursor();
                 return 0;
             }
+        }
+        if (toolbar_hover_changed) {
+            InvalidateRect(hwnd_, nullptr, FALSE);
         }
     }
     auto const &s = controller_.State();
@@ -1840,28 +1951,7 @@ LRESULT OverlayWindow::On_paint() {
     if (d2d_resources_) {
         btn_glyphs.reserve(toolbar_buttons_.size());
         for (auto const &u : toolbar_buttons_) {
-            ID2D1Bitmap *glyph = nullptr;
-            switch (u.tool_id) {
-            case core::AnnotationToolId::Freehand:
-                glyph = d2d_resources_->glyph_brush.Get();
-                break;
-            case core::AnnotationToolId::Highlighter:
-                glyph = d2d_resources_->glyph_highlighter.Get();
-                break;
-            case core::AnnotationToolId::Line:
-                glyph = d2d_resources_->glyph_line.Get();
-                break;
-            case core::AnnotationToolId::Arrow:
-                glyph = d2d_resources_->glyph_arrow.Get();
-                break;
-            case core::AnnotationToolId::Rectangle:
-                glyph = d2d_resources_->glyph_rect.Get();
-                break;
-            case core::AnnotationToolId::FilledRectangle:
-                glyph = d2d_resources_->glyph_filled_rect.Get();
-                break;
-            }
-            btn_glyphs.push_back(glyph);
+            btn_glyphs.push_back(d2d_resources_->Toolbar_glyph_bitmap(u.glyph));
         }
     }
 
@@ -1977,11 +2067,9 @@ void OverlayWindow::Handle_device_loss() {
         InvalidateRect(hwnd_, nullptr, TRUE);
         return;
     }
+    auto const glyphs = resources_->Glyph_pointers();
     (void)d2d_resources_->Upload_glyph_bitmaps(
-        resources_->brush_tool_glyph.get(), resources_->highlighter_tool_glyph.get(),
-        resources_->line_tool_glyph.get(), resources_->arrow_tool_glyph.get(),
-        resources_->rectangle_tool_glyph.get(),
-        resources_->filled_rectangle_tool_glyph.get());
+        std::span<OverlayButtonGlyph const *const>(glyphs));
     d2d_resources_->Invalidate_annotations();
     InvalidateRect(hwnd_, nullptr, FALSE);
 }

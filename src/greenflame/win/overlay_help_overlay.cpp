@@ -92,14 +92,10 @@ void OverlayHelpOverlay::Hide_if_selection_unstable(bool selection_stable) noexc
     }
 }
 
-void OverlayHelpOverlay::Toggle_at_cursor(
+void OverlayHelpOverlay::Show_at_cursor(
     core::PointPx cursor_screen, std::span<const core::MonitorWithBounds> monitors,
     core::RectPx overlay_rect_screen) {
     if (!Has_content()) {
-        Hide();
-        return;
-    }
-    if (visible_) {
         Hide();
         return;
     }
@@ -116,6 +112,16 @@ void OverlayHelpOverlay::Toggle_at_cursor(
                                     monitor_bounds.bottom - overlay_rect_screen.top);
     }
     visible_ = true;
+}
+
+void OverlayHelpOverlay::Toggle_at_cursor(
+    core::PointPx cursor_screen, std::span<const core::MonitorWithBounds> monitors,
+    core::RectPx overlay_rect_screen) {
+    if (visible_) {
+        Hide();
+        return;
+    }
+    Show_at_cursor(cursor_screen, monitors, overlay_rect_screen);
 }
 
 bool OverlayHelpOverlay::Ensure_dwrite_formats(IDWriteFactory *dwrite) noexcept {
