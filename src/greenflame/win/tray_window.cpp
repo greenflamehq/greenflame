@@ -897,7 +897,6 @@ bool TrayWindow::Create(HINSTANCE hinstance, bool enable_testing_hotkeys,
     {
         static constexpr std::wstring_view kTip(L"Greenflame");
         std::copy_n(kTip.data(), kTip.size(), notify_data.szTip);
-        notify_data.szTip[kTip.size()] = L'\0';
     }
     if (!Shell_NotifyIconW(NIM_ADD, &notify_data)) {
         DestroyWindow(hwnd);
