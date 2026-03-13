@@ -1532,7 +1532,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
 
     bool const is_steady_state = res.frozen_valid && !input.dragging &&
                                  !input.handle_dragging && !input.move_dragging &&
-                                 !input.annotation_editing;
+                                 !input.annotation_editing && !input.modifier_preview;
 
     res.hwnd_rt->BeginDraw();
 

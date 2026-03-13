@@ -260,10 +260,11 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Run on: `ENV-A`, `ENV-B`
 - Steps:
   1. Start interactive capture with no selection yet.
-  2. `Ctrl`-click a window.
-  3. Start again and `Shift`-click a monitor.
-  4. Start again and `Ctrl + Shift`-click anywhere.
+  2. Hold `Ctrl` over a window before clicking, then `Ctrl`-click it.
+  3. Start again, hold `Shift` over a monitor before clicking, then `Shift`-click it.
+  4. Start again, hold `Ctrl + Shift` before clicking, then click anywhere.
 - Expected:
+  - While the modifier is held before click, the pending window, monitor, or desktop target is shown as a clear undimmed preview region inside the gray overlay.
   - `Ctrl`-click selects the window under the cursor.
   - `Shift`-click selects the monitor under the cursor.
   - `Ctrl + Shift` selects the full virtual desktop.
