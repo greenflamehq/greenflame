@@ -52,25 +52,10 @@ inline D2D1_COLOR_F Colorref_to_d2d(COLORREF c, float alpha = 1.f) {
     return {color.r, color.g, color.b, alpha};
 }
 
-[[nodiscard]] constexpr size_t
-Text_font_choice_index(core::TextFontChoice choice) noexcept {
-    switch (choice) {
-    case core::TextFontChoice::Sans:
-        return 0;
-    case core::TextFontChoice::Serif:
-        return 1;
-    case core::TextFontChoice::Mono:
-        return 2;
-    case core::TextFontChoice::Art:
-        return 3;
-    }
-    return 0;
-}
-
 [[nodiscard]] std::wstring_view
 Resolve_text_font_family(core::TextFontChoice choice,
                          std::array<std::wstring_view, 4> const &families) noexcept {
-    size_t const index = Text_font_choice_index(choice);
+    size_t const index = core::Text_font_choice_index(choice);
     if (families[index].empty()) {
         return core::kDefaultTextFontFamilies[index];
     }
@@ -1340,24 +1325,24 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         return;
     }
 
-    size_t const color_segment_count =
-        input.color_wheel_is_text_style
-            ? std::min<size_t>(input.color_wheel_segment_count,
-                               input.color_wheel_colors.size())
-            : input.color_wheel_segment_count;
-    if (color_segment_count == 0 ||
-        (!input.color_wheel_is_text_style &&
-         input.color_wheel_colors.size() < input.color_wheel_segment_count)) {
+    bool const has_hub = input.color_wheel_has_text_hub;
+    bool const font_ring =
+        has_hub && input.text_wheel_active_mode == core::TextWheelMode::Font;
+
+    // Validate: non-hub wheels need a color array matching the segment count.
+    if (!has_hub && input.color_wheel_colors.size() < input.color_wheel_segment_count) {
         return;
     }
 
-    float const outer_radius =
-        static_cast<float>(core::kColorWheelOuterDiameterPx) / 2.f;
-    float const inner_radius = outer_radius - core::kColorWheelWidthPx;
+    float const outer_r = static_cast<float>(core::kColorWheelOuterDiameterPx) / 2.f;
+    float const inner_r = outer_r - core::kColorWheelWidthPx;
+    float const hub_r = inner_r - core::kTextWheelHubRingGapPx;
+    float const half_gap = core::kTextWheelHubHalfGapPx;
     float const cx = static_cast<float>(input.color_wheel_center_px.x);
     float const cy = static_cast<float>(input.color_wheel_center_px.y);
 
     constexpr double deg_to_rad = 3.14159265358979323846 / 180.0;
+    constexpr double rad_to_deg = 180.0 / 3.14159265358979323846;
 
     auto arc_pt = [&](float r, float angle_deg) -> D2D1_POINT_2F {
         float const rad =
@@ -1365,21 +1350,45 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         return D2D1::Point2F(cx + r * std::cosf(rad), cy + r * std::sinf(rad));
     };
 
+    // Per-radius chord gap angles: asin(half_gap / r) gives the angular offset
+    // at each radius such that the gap edge is a chord at distance half_gap_px
+    // from the slot boundary — producing parallel segment edges.
+    float const half_seg_gap_px = core::kColorWheelSegmentGapPx / 2.0f;
+    float const outer_gap_deg = static_cast<float>(
+        std::asin(static_cast<double>(half_seg_gap_px) / static_cast<double>(outer_r)) *
+        rad_to_deg);
+    float const inner_gap_deg = static_cast<float>(
+        std::asin(static_cast<double>(half_seg_gap_px) / static_cast<double>(inner_r)) *
+        rad_to_deg);
+    float const half_slot_deg =
+        (input.color_wheel_segment_count > 0)
+            ? 180.f / static_cast<float>(input.color_wheel_segment_count)
+            : 0.f;
+
+    // --- Ring segments ---
     for (size_t seg = 0; seg < input.color_wheel_segment_count; ++seg) {
         core::ColorWheelSegmentGeometry const geo =
             core::Get_color_wheel_segment_geometry(seg,
                                                    input.color_wheel_segment_count);
-        float const sa = geo.start_angle_degrees;
-        float const ea = sa + geo.sweep_angle_degrees;
+        float const b_before = geo.center_angle_degrees - half_slot_deg;
+        float const b_after = geo.center_angle_degrees + half_slot_deg;
+        float const outer_sa = b_before + outer_gap_deg;
+        float const outer_ea = b_after - outer_gap_deg;
+        float const inner_sa = b_before + inner_gap_deg;
+        float const inner_ea = b_after - inner_gap_deg;
 
-        D2D1_POINT_2F const outer_start = arc_pt(outer_radius, sa);
-        D2D1_POINT_2F const outer_end = arc_pt(outer_radius, ea);
-        D2D1_POINT_2F const inner_end = arc_pt(inner_radius, ea);
-        D2D1_POINT_2F const inner_start = arc_pt(inner_radius, sa);
+        float const outer_sweep = outer_ea - outer_sa;
+        float const inner_sweep = inner_ea - inner_sa;
 
-        D2D1_ARC_SIZE const arc_size = (geo.sweep_angle_degrees >= 180.f)
-                                           ? D2D1_ARC_SIZE_LARGE
-                                           : D2D1_ARC_SIZE_SMALL;
+        D2D1_POINT_2F const outer_start = arc_pt(outer_r, outer_sa);
+        D2D1_POINT_2F const outer_end = arc_pt(outer_r, outer_ea);
+        D2D1_POINT_2F const inner_end = arc_pt(inner_r, inner_ea);
+        D2D1_POINT_2F const inner_start = arc_pt(inner_r, inner_sa);
+
+        D2D1_ARC_SIZE const outer_arc_sz =
+            (outer_sweep >= 180.f) ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL;
+        D2D1_ARC_SIZE const inner_arc_sz =
+            (inner_sweep >= 180.f) ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL;
 
         Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
         if (FAILED(res.factory->CreatePathGeometry(path.GetAddressOf()))) {
@@ -1389,21 +1398,18 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         if (FAILED(path->Open(sink.GetAddressOf()))) {
             continue;
         }
-
         sink->BeginFigure(outer_start, D2D1_FIGURE_BEGIN_FILLED);
-        sink->AddArc(D2D1::ArcSegment(outer_end,
-                                      D2D1::SizeF(outer_radius, outer_radius), 0.f,
-                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, arc_size));
+        sink->AddArc(D2D1::ArcSegment(outer_end, D2D1::SizeF(outer_r, outer_r), 0.f,
+                                      D2D1_SWEEP_DIRECTION_CLOCKWISE, outer_arc_sz));
         sink->AddLine(inner_end);
-        sink->AddArc(
-            D2D1::ArcSegment(inner_start, D2D1::SizeF(inner_radius, inner_radius), 0.f,
-                             D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE, arc_size));
+        sink->AddArc(D2D1::ArcSegment(inner_start, D2D1::SizeF(inner_r, inner_r), 0.f,
+                                      D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+                                      inner_arc_sz));
         sink->EndFigure(D2D1_FIGURE_END_CLOSED);
         sink->Close();
 
-        bool const is_font_segment =
-            input.color_wheel_is_text_style && seg >= color_segment_count;
-        if (is_font_segment) {
+        bool const is_font_seg = font_ring;
+        if (is_font_seg) {
             res.solid_brush->SetColor(kOverlayButtonFillColor);
         } else if (seg < input.color_wheel_colors.size()) {
             res.solid_brush->SetColor(Colorref_to_d2d(input.color_wheel_colors[seg]));
@@ -1418,8 +1424,8 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                          core::kColorWheelSegmentBorderWidthPx,
                          res.round_cap_style.Get());
 
-        if (is_font_segment && res.dwrite_factory != nullptr) {
-            size_t const font_index = seg - color_segment_count;
+        if (is_font_seg && res.dwrite_factory != nullptr) {
+            size_t const font_index = seg;
             if (font_index < input.color_wheel_font_families.size()) {
                 std::wstring_view const family =
                     input.color_wheel_font_families[font_index].empty()
@@ -1429,7 +1435,7 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     Create_text_format(res.dwrite_factory.Get(), family,
                                        kColorWheelFontPreviewPointSize);
                 if (preview_format) {
-                    constexpr std::wstring_view preview_glyph = L"m";
+                    constexpr std::wstring_view preview_glyph = L"A";
                     float text_w = 0.f;
                     float text_h = 0.f;
                     if (Measure_text(res, preview_format.Get(), preview_glyph, text_w,
@@ -1441,10 +1447,9 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                 text_w + kColorWheelFontPreviewLayoutPaddingPx,
                                 text_h + kColorWheelFontPreviewLayoutPaddingPx);
                         if (preview_layout) {
-                            float const mid_radius =
-                                (outer_radius + inner_radius) / 2.f;
+                            float const mid_r = (outer_r + inner_r) / 2.f;
                             D2D1_POINT_2F const label_center =
-                                arc_pt(mid_radius, geo.center_angle_degrees);
+                                arc_pt(mid_r, geo.center_angle_degrees);
                             res.solid_brush->SetColor(kOverlayButtonOutlineColor);
                             rt->DrawTextLayout(
                                 D2D1::Point2F(label_center.x - text_w / 2.f,
@@ -1457,7 +1462,7 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         }
     }
 
-    // Halo for selected/hovered segment: arc strokes outside the wheel.
+    // --- Halos for selected/hovered ring segments ---
     auto draw_halo = [&](size_t seg, float inner_w, float outer_w) {
         if (seg >= input.color_wheel_segment_count) {
             return;
@@ -1465,17 +1470,17 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         core::ColorWheelSegmentGeometry const geo =
             core::Get_color_wheel_segment_geometry(seg,
                                                    input.color_wheel_segment_count);
-        float const sa = geo.start_angle_degrees;
-        float const ea = sa + geo.sweep_angle_degrees;
+        float const sa = geo.center_angle_degrees - half_slot_deg + outer_gap_deg;
+        float const ea = geo.center_angle_degrees + half_slot_deg - outer_gap_deg;
 
-        float const inner_halo_r = outer_radius +
+        float const inner_halo_r = outer_r +
                                    core::kColorWheelSegmentBorderWidthPx / 2.f +
                                    core::kColorWheelSelectionHaloGapPx + inner_w / 2.f;
         float const outer_halo_r = inner_halo_r + inner_w / 2.f + outer_w / 2.f;
 
-        D2D1_ARC_SIZE const arc_sz = (geo.sweep_angle_degrees >= 180.f)
-                                         ? D2D1_ARC_SIZE_LARGE
-                                         : D2D1_ARC_SIZE_SMALL;
+        float const halo_sweep = ea - sa;
+        D2D1_ARC_SIZE const arc_sz =
+            (halo_sweep >= 180.f) ? D2D1_ARC_SIZE_LARGE : D2D1_ARC_SIZE_SMALL;
 
         // Black inner ring.
         {
@@ -1485,15 +1490,16 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
             if (FAILED(res.factory->CreatePathGeometry(arc_path.GetAddressOf()))) {
                 return;
             }
-            Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(arc_path->Open(sink.GetAddressOf()))) {
+            Microsoft::WRL::ComPtr<ID2D1GeometrySink> arc_sink;
+            if (FAILED(arc_path->Open(arc_sink.GetAddressOf()))) {
                 return;
             }
-            sink->BeginFigure(p0, D2D1_FIGURE_BEGIN_HOLLOW);
-            sink->AddArc(D2D1::ArcSegment(p1, D2D1::SizeF(inner_halo_r, inner_halo_r),
-                                          0.f, D2D1_SWEEP_DIRECTION_CLOCKWISE, arc_sz));
-            sink->EndFigure(D2D1_FIGURE_END_OPEN);
-            sink->Close();
+            arc_sink->BeginFigure(p0, D2D1_FIGURE_BEGIN_HOLLOW);
+            arc_sink->AddArc(
+                D2D1::ArcSegment(p1, D2D1::SizeF(inner_halo_r, inner_halo_r), 0.f,
+                                 D2D1_SWEEP_DIRECTION_CLOCKWISE, arc_sz));
+            arc_sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            arc_sink->Close();
             res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f));
             rt->DrawGeometry(arc_path.Get(), res.solid_brush.Get(), inner_w,
                              res.round_cap_style.Get());
@@ -1506,15 +1512,16 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
             if (FAILED(res.factory->CreatePathGeometry(arc_path.GetAddressOf()))) {
                 return;
             }
-            Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
-            if (FAILED(arc_path->Open(sink.GetAddressOf()))) {
+            Microsoft::WRL::ComPtr<ID2D1GeometrySink> arc_sink;
+            if (FAILED(arc_path->Open(arc_sink.GetAddressOf()))) {
                 return;
             }
-            sink->BeginFigure(p0, D2D1_FIGURE_BEGIN_HOLLOW);
-            sink->AddArc(D2D1::ArcSegment(p1, D2D1::SizeF(outer_halo_r, outer_halo_r),
-                                          0.f, D2D1_SWEEP_DIRECTION_CLOCKWISE, arc_sz));
-            sink->EndFigure(D2D1_FIGURE_END_OPEN);
-            sink->Close();
+            arc_sink->BeginFigure(p0, D2D1_FIGURE_BEGIN_HOLLOW);
+            arc_sink->AddArc(
+                D2D1::ArcSegment(p1, D2D1::SizeF(outer_halo_r, outer_halo_r), 0.f,
+                                 D2D1_SWEEP_DIRECTION_CLOCKWISE, arc_sz));
+            arc_sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            arc_sink->Close();
             res.solid_brush->SetColor(kBorderColor);
             rt->DrawGeometry(arc_path.Get(), res.solid_brush.Get(), outer_w,
                              res.round_cap_style.Get());
@@ -1526,16 +1533,175 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                   core::kColorWheelSelectionHaloInnerWidthPx,
                   core::kColorWheelSelectionHaloOuterWidthPx);
     }
-    if (input.color_wheel_is_text_style) {
-        draw_halo(color_segment_count +
-                      Text_font_choice_index(input.color_wheel_text_selected_font),
-                  core::kColorWheelSelectionHaloInnerWidthPx,
-                  core::kColorWheelSelectionHaloOuterWidthPx);
-    }
     if (input.color_wheel_hovered_segment.has_value()) {
         draw_halo(*input.color_wheel_hovered_segment,
                   core::kColorWheelHoverHaloInnerWidthPx,
                   core::kColorWheelHoverHaloOuterWidthPx);
+    }
+
+    // --- Hub (text tool only) ---
+    if (!has_hub) {
+        return;
+    }
+
+    float const chord_h = std::sqrtf(hub_r * hub_r - half_gap * half_gap);
+
+    // Build left (color) and right (font) hub path geometries.
+    auto make_hub_path =
+        [&](bool is_left) -> Microsoft::WRL::ComPtr<ID2D1PathGeometry> {
+        Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
+        if (FAILED(res.factory->CreatePathGeometry(path.GetAddressOf()))) {
+            return nullptr;
+        }
+        Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+        if (FAILED(path->Open(sink.GetAddressOf()))) {
+            return nullptr;
+        }
+        if (is_left) {
+            // Left button: chord on right side, arc sweeps CCW through left side.
+            D2D1_POINT_2F const p_top = D2D1::Point2F(cx - half_gap, cy - chord_h);
+            D2D1_POINT_2F const p_bot = D2D1::Point2F(cx - half_gap, cy + chord_h);
+            sink->BeginFigure(p_top, D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddArc(D2D1::ArcSegment(p_bot, D2D1::SizeF(hub_r, hub_r), 0.f,
+                                          D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE,
+                                          D2D1_ARC_SIZE_SMALL));
+            sink->AddLine(p_top);
+        } else {
+            // Right button: chord on left side, arc sweeps CW through right side.
+            D2D1_POINT_2F const p_top = D2D1::Point2F(cx + half_gap, cy - chord_h);
+            D2D1_POINT_2F const p_bot = D2D1::Point2F(cx + half_gap, cy + chord_h);
+            sink->BeginFigure(p_top, D2D1_FIGURE_BEGIN_FILLED);
+            sink->AddArc(D2D1::ArcSegment(p_bot, D2D1::SizeF(hub_r, hub_r), 0.f,
+                                          D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                          D2D1_ARC_SIZE_SMALL));
+            sink->AddLine(p_top);
+        }
+        sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        sink->Close();
+        return path;
+    };
+
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> left_path = make_hub_path(true);
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> right_path = make_hub_path(false);
+
+    bool const left_active =
+        (input.text_wheel_active_mode == core::TextWheelMode::Color);
+    bool const right_active = !left_active;
+
+    // Fill hub buttons.
+    if (left_path) {
+        res.solid_brush->SetColor(left_active ? kOverlayButtonOutlineColor
+                                              : kOverlayButtonFillColor);
+        rt->FillGeometry(left_path.Get(), res.solid_brush.Get());
+    }
+    if (right_path) {
+        res.solid_brush->SetColor(right_active ? kOverlayButtonOutlineColor
+                                               : kOverlayButtonFillColor);
+        rt->FillGeometry(right_path.Get(), res.solid_brush.Get());
+    }
+
+    // Border: arc edge + chord edge.
+    if (core::kTextWheelHubDrawBorder) {
+        auto draw_hub_border = [&](bool is_left, bool is_active) {
+            float const chord_x = is_left ? cx - half_gap : cx + half_gap;
+            D2D1_COLOR_F const border_col =
+                is_active ? kOverlayButtonFillColor : kOverlayButtonOutlineColor;
+            D2D1_POINT_2F const p_top = D2D1::Point2F(chord_x, cy - chord_h);
+            D2D1_POINT_2F const p_bot = D2D1::Point2F(chord_x, cy + chord_h);
+
+            // Arc portion.
+            Microsoft::WRL::ComPtr<ID2D1PathGeometry> arc_path;
+            if (FAILED(res.factory->CreatePathGeometry(arc_path.GetAddressOf()))) {
+                return;
+            }
+            Microsoft::WRL::ComPtr<ID2D1GeometrySink> arc_sink;
+            if (FAILED(arc_path->Open(arc_sink.GetAddressOf()))) {
+                return;
+            }
+            arc_sink->BeginFigure(p_top, D2D1_FIGURE_BEGIN_HOLLOW);
+            arc_sink->AddArc(
+                D2D1::ArcSegment(p_bot, D2D1::SizeF(hub_r, hub_r), 0.f,
+                                 is_left ? D2D1_SWEEP_DIRECTION_COUNTER_CLOCKWISE
+                                         : D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                 D2D1_ARC_SIZE_SMALL));
+            arc_sink->EndFigure(D2D1_FIGURE_END_OPEN);
+            arc_sink->Close();
+            res.solid_brush->SetColor(border_col);
+            rt->DrawGeometry(arc_path.Get(), res.solid_brush.Get(),
+                             core::kColorWheelSegmentBorderWidthPx,
+                             res.round_cap_style.Get());
+
+            // Chord portion.
+            rt->DrawLine(p_top, p_bot, res.solid_brush.Get(),
+                         core::kColorWheelSegmentBorderWidthPx,
+                         res.flat_cap_style.Get());
+        };
+        draw_hub_border(true, left_active);
+        draw_hub_border(false, right_active);
+    }
+
+    // Left glyph: hue gradient rectangle.
+    if (left_path && res.text_wheel_hue_brush) {
+        float const glyph_cx = cx - (hub_r + half_gap) / 2.f;
+        float const glyph_w = core::kTextWheelHubGlyphRectWidthPx;
+        float const glyph_h = core::kTextWheelHubGlyphRectHeightPx;
+        D2D1_RECT_F const glyph_rect =
+            D2D1::RectF(glyph_cx - glyph_w / 2.f, cy - glyph_h / 2.f,
+                        glyph_cx + glyph_w / 2.f, cy + glyph_h / 2.f);
+        res.text_wheel_hue_brush->SetStartPoint(D2D1::Point2F(glyph_rect.left, cy));
+        res.text_wheel_hue_brush->SetEndPoint(D2D1::Point2F(glyph_rect.right, cy));
+        rt->FillRectangle(glyph_rect, res.text_wheel_hue_brush.Get());
+        res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f));
+        rt->DrawRectangle(glyph_rect, res.solid_brush.Get(), 1.f);
+    }
+
+    // Right glyph: "A" label in current font.
+    if (right_path && res.dwrite_factory && !input.text_wheel_hub_font_family.empty()) {
+        float const glyph_cx = cx + (hub_r + half_gap) / 2.f;
+        Microsoft::WRL::ComPtr<IDWriteTextFormat> fmt = Create_text_format(
+            res.dwrite_factory.Get(), input.text_wheel_hub_font_family,
+            kColorWheelFontPreviewPointSize);
+        if (fmt) {
+            constexpr std::wstring_view label = L"A";
+            float text_w = 0.f;
+            float text_h = 0.f;
+            if (Measure_text(res, fmt.Get(), label, text_w, text_h)) {
+                Microsoft::WRL::ComPtr<IDWriteTextLayout> layout =
+                    Create_text_layout(res.dwrite_factory.Get(), fmt.Get(), label,
+                                       text_w + kColorWheelFontPreviewLayoutPaddingPx,
+                                       text_h + kColorWheelFontPreviewLayoutPaddingPx);
+                if (layout) {
+                    res.solid_brush->SetColor(right_active
+                                                  ? kOverlayButtonFillColor
+                                                  : kOverlayButtonOutlineColor);
+                    rt->DrawTextLayout(
+                        D2D1::Point2F(glyph_cx - text_w / 2.f, cy - text_h / 2.f),
+                        layout.Get(), res.solid_brush.Get());
+                }
+            }
+        }
+    }
+
+    // Hover tint on hovered hub button.
+    if (input.text_wheel_hovered_hub.has_value()) {
+        bool const hovered_left =
+            (*input.text_wheel_hovered_hub == core::TextWheelHubSide::Color);
+        ID2D1PathGeometry *hovered_path =
+            hovered_left ? left_path.Get() : right_path.Get();
+        if (hovered_path) {
+            D2D1_LAYER_PARAMETERS layer_params = D2D1::LayerParameters();
+            layer_params.geometricMask = hovered_path;
+            Microsoft::WRL::ComPtr<ID2D1Layer> layer;
+            if (SUCCEEDED(rt->CreateLayer(nullptr, layer.GetAddressOf()))) {
+                rt->PushLayer(layer_params, layer.Get());
+                float const tint_alpha = 0.20f;
+                res.solid_brush->SetColor(With_alpha(kBorderColor, tint_alpha));
+                D2D1_RECT_F const hub_bounds =
+                    D2D1::RectF(cx - hub_r, cy - hub_r, cx + hub_r, cy + hub_r);
+                rt->FillRectangle(hub_bounds, res.solid_brush.Get());
+                rt->PopLayer();
+            }
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame_core/color_wheel.h"
 #include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/overlay_help_content.h"
 #include "greenflame_core/rect_px.h"
@@ -161,6 +162,8 @@ class OverlayWindow final {
         bool visible = false;
         core::PointPx center = {};
         std::optional<size_t> hovered_segment = std::nullopt;
+        core::TextWheelMode text_mode = core::TextWheelMode::Color;
+        std::optional<core::TextWheelHubSide> hovered_hub = std::nullopt;
     };
 
     IOverlayEvents *events_ = nullptr;

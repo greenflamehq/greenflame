@@ -9,6 +9,9 @@ constexpr float kStrokeMiterLimit = 10.f;
 constexpr float kDimTextFormatSizePt = 10.f;
 constexpr float kCenterTextFormatSizePt = 27.f;
 constexpr float kHintTextFormatSizePt = 12.f;
+constexpr size_t kTextWheelHueStopCount = 7;
+constexpr float kTextWheelHuePositionDivisor =
+    static_cast<float>(kTextWheelHueStopCount - 1);
 
 // Convert an OverlayButtonGlyph alpha mask (single-channel, row-major) into an
 // A8_UNORM D2D bitmap and store it in out_bitmap.
@@ -221,7 +224,43 @@ bool D2DOverlayResources::Create_shared_resources() {
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, kHintTextFormatSizePt, L"",
         text_hint.ReleaseAndGetAddressOf());
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    {
+        std::array<D2D1_COLOR_F, kTextWheelHueStopCount> const stop_colors = {{
+            D2D1::ColorF(1.f, 0.f, 0.f), // Red
+            D2D1::ColorF(1.f, 1.f, 0.f), // Yellow
+            D2D1::ColorF(0.f, 1.f, 0.f), // Green
+            D2D1::ColorF(0.f, 1.f, 1.f), // Cyan
+            D2D1::ColorF(0.f, 0.f, 1.f), // Blue
+            D2D1::ColorF(1.f, 0.f, 1.f), // Magenta
+            D2D1::ColorF(1.f, 0.f, 0.f), // Red (wrap)
+        }};
+        std::array<D2D1_GRADIENT_STOP, kTextWheelHueStopCount> stops{};
+        for (size_t index = 0; index < stop_colors.size(); ++index) {
+            stops[index].position =
+                static_cast<float>(index) / kTextWheelHuePositionDivisor;
+            stops[index].color = stop_colors[index];
+        }
+        Microsoft::WRL::ComPtr<ID2D1GradientStopCollection> stop_coll;
+        hr = hwnd_rt->CreateGradientStopCollection(stops.data(),
+                                                   static_cast<UINT32>(stops.size()),
+                                                   stop_coll.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) {
+            return false;
+        }
+        hr = hwnd_rt->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(D2D1::Point2F(0.f, 0.f),
+                                                D2D1::Point2F(1.f, 0.f)),
+            stop_coll.Get(), text_wheel_hue_brush.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 bool D2DOverlayResources::Create_cache_targets(int width, int height) {
@@ -330,6 +369,7 @@ void D2DOverlayResources::Release_device_resources() {
     text_dim.Reset();
     text_center.Reset();
     text_hint.Reset();
+    text_wheel_hue_brush.Reset();
     for (auto &glyph : toolbar_glyphs) {
         glyph.Reset();
     }

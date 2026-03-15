@@ -102,4 +102,19 @@ std::optional<size_t> Hit_test_color_wheel_segment(PointPx center, PointPx point
     return std::nullopt;
 }
 
+std::optional<TextWheelHubSide> Hit_test_text_wheel_hub(PointPx center,
+                                                        PointPx point) noexcept {
+    float const hub_r = Color_wheel_inner_radius_px() - kTextWheelHubRingGapPx;
+    float const dx = static_cast<float>(point.x - center.x);
+    float const dy = static_cast<float>(point.y - center.y);
+    if (dx * dx + dy * dy > hub_r * hub_r) {
+        return std::nullopt;
+    }
+    if (dx >= -kTextWheelHubHalfGapPx && dx <= kTextWheelHubHalfGapPx) {
+        return std::nullopt;
+    }
+    return (dx < -kTextWheelHubHalfGapPx) ? TextWheelHubSide::Color
+                                          : TextWheelHubSide::Font;
+}
+
 } // namespace greenflame::core

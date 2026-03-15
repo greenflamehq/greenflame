@@ -1,6 +1,7 @@
 #pragma once
 
 #include "greenflame_core/rect_px.h"
+#include "greenflame_core/text_annotation_types.h"
 
 namespace greenflame::core {
 
@@ -11,14 +12,21 @@ using AnnotationColorPalette = std::array<COLORREF, kAnnotationColorSlotCount>;
 using HighlighterColorPalette = std::array<COLORREF, kHighlighterColorSlotCount>;
 
 inline constexpr int32_t kColorWheelOuterDiameterPx = 130;
-inline constexpr float kColorWheelWidthPx = 15.0f;
-inline constexpr float kColorWheelSegmentGapPx = 10.0f;
+inline constexpr float kColorWheelWidthPx = 22.0f;
+inline constexpr float kColorWheelSegmentGapPx = 8.0f;
 inline constexpr float kColorWheelSegmentBorderWidthPx = 2.0f;
 inline constexpr float kColorWheelSelectionHaloGapPx = 2.0f;
 inline constexpr float kColorWheelSelectionHaloInnerWidthPx = 3.0f;
 inline constexpr float kColorWheelSelectionHaloOuterWidthPx = 3.0f;
 inline constexpr float kColorWheelHoverHaloInnerWidthPx = 5.0f;
 inline constexpr float kColorWheelHoverHaloOuterWidthPx = 5.0f;
+
+inline constexpr float kTextWheelHubGapPx = 8.0f;
+inline constexpr float kTextWheelHubHalfGapPx = kTextWheelHubGapPx / 2.0f;
+inline constexpr float kTextWheelHubRingGapPx = 8.0f;
+inline constexpr float kTextWheelHubGlyphRectWidthPx = 20.0f;
+inline constexpr float kTextWheelHubGlyphRectHeightPx = 12.0f;
+inline constexpr bool kTextWheelHubDrawBorder = true;
 
 static_assert(kColorWheelOuterDiameterPx > 0);
 static_assert(kColorWheelWidthPx > 0.0f);
@@ -45,6 +53,23 @@ inline constexpr HighlighterColorPalette kDefaultHighlighterColorPalette = {
 inline constexpr int32_t kDefaultAnnotationColorIndex = 0;
 inline constexpr int32_t kDefaultHighlighterColorIndex = 0;
 inline constexpr int32_t kDefaultHighlighterOpacityPercent = 50;
+
+enum class TextWheelMode : uint8_t { Color, Font };
+enum class TextWheelHubSide : uint8_t { Color, Font };
+
+[[nodiscard]] constexpr size_t Text_font_choice_index(TextFontChoice choice) noexcept {
+    switch (choice) {
+    case TextFontChoice::Sans:
+        return 0;
+    case TextFontChoice::Serif:
+        return 1;
+    case TextFontChoice::Mono:
+        return 2;
+    case TextFontChoice::Art:
+        return 3;
+    }
+    return 0;
+}
 
 struct ColorWheelSegmentGeometry final {
     float center_angle_degrees = 0.0f;
@@ -73,5 +98,7 @@ Get_color_wheel_segment_geometry(size_t index, size_t segment_count) noexcept;
 [[nodiscard]] std::optional<size_t>
 Hit_test_color_wheel_segment(PointPx center, PointPx point,
                              size_t segment_count) noexcept;
+[[nodiscard]] std::optional<TextWheelHubSide>
+Hit_test_text_wheel_hub(PointPx center, PointPx point) noexcept;
 
 } // namespace greenflame::core

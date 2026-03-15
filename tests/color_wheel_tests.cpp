@@ -21,6 +21,11 @@ float Mid_radius_px() {
     return (outer_radius + inner_radius) / 2.0f;
 }
 
+float Hub_r_px() {
+    float const outer = static_cast<float>(kColorWheelOuterDiameterPx) / 2.0f;
+    return outer - kColorWheelWidthPx - kTextWheelHubRingGapPx;
+}
+
 float Degrees_per_segment(size_t segment_count) {
     return 360.0f / static_cast<float>(segment_count);
 }
@@ -188,4 +193,41 @@ TEST(color_wheel, HitTest_TextStyleWheelReturnsNulloptForTwelveSegmentGap) {
                   center, Point_on_wheel(center, Mid_radius_px(), 270.0f),
                   kTextStyleWheelSegmentCount),
               std::nullopt);
+}
+
+TEST(color_wheel, HubHitTest_ReturnsNulloptOutsideHubRadius) {
+    PointPx const center{500, 500};
+    float const hub_r = Hub_r_px();
+    PointPx const outside{center.x + static_cast<int32_t>(hub_r) + 1, center.y};
+    EXPECT_EQ(Hit_test_text_wheel_hub(center, outside), std::nullopt);
+}
+
+TEST(color_wheel, HubHitTest_ReturnsNulloptInVerticalGap) {
+    PointPx const center{500, 500};
+    // Exact center falls in the gap.
+    EXPECT_EQ(Hit_test_text_wheel_hub(center, center), std::nullopt);
+    // Point at left edge of gap.
+    PointPx const left_gap{center.x - static_cast<int32_t>(kTextWheelHubHalfGapPx),
+                           center.y};
+    EXPECT_EQ(Hit_test_text_wheel_hub(center, left_gap), std::nullopt);
+    // Point at right edge of gap.
+    PointPx const right_gap{center.x + static_cast<int32_t>(kTextWheelHubHalfGapPx),
+                            center.y};
+    EXPECT_EQ(Hit_test_text_wheel_hub(center, right_gap), std::nullopt);
+}
+
+TEST(color_wheel, HubHitTest_ReturnsColorForLeftHalf) {
+    PointPx const center{500, 500};
+    float const hub_r = Hub_r_px();
+    PointPx const left{center.x - static_cast<int32_t>(hub_r / 2.f), center.y};
+    EXPECT_EQ(Hit_test_text_wheel_hub(center, left),
+              std::optional<TextWheelHubSide>{TextWheelHubSide::Color});
+}
+
+TEST(color_wheel, HubHitTest_ReturnsFontForRightHalf) {
+    PointPx const center{500, 500};
+    float const hub_r = Hub_r_px();
+    PointPx const right{center.x + static_cast<int32_t>(hub_r / 2.f), center.y};
+    EXPECT_EQ(Hit_test_text_wheel_hub(center, right),
+              std::optional<TextWheelHubSide>{TextWheelHubSide::Font});
 }

@@ -40,12 +40,9 @@ constexpr UINT_PTR kCaretBlinkTimerId = 2;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
-constexpr size_t kTextColorWheelColorSegmentCount = 8;
-constexpr std::array<greenflame::core::TextFontChoice, 4> kTextColorWheelFontChoices = {
+constexpr std::array<greenflame::core::TextFontChoice, 4> kTextWheelFontChoices = {
     {greenflame::core::TextFontChoice::Sans, greenflame::core::TextFontChoice::Serif,
      greenflame::core::TextFontChoice::Mono, greenflame::core::TextFontChoice::Art}};
-constexpr size_t kTextColorWheelSegmentCount =
-    kTextColorWheelColorSegmentCount + kTextColorWheelFontChoices.size();
 
 [[nodiscard]] bool
 Text_annotation_has_text(greenflame::core::TextAnnotation const &annotation) noexcept {
@@ -349,15 +346,6 @@ Text_navigation_action_for_key(WPARAM wparam, bool ctrl) noexcept {
     }
 
     return normalized;
-}
-
-[[nodiscard]] std::optional<greenflame::core::TextFontChoice>
-Text_font_choice_for_wheel_segment(size_t index) noexcept {
-    if (index < kTextColorWheelColorSegmentCount ||
-        index >= kTextColorWheelSegmentCount) {
-        return std::nullopt;
-    }
-    return kTextColorWheelFontChoices[index - kTextColorWheelColorSegmentCount];
 }
 
 template <typename T> struct ComPtr {
@@ -1063,7 +1051,9 @@ size_t OverlayWindow::Current_annotation_color_index() const noexcept {
 
 size_t OverlayWindow::Current_color_wheel_segment_count() const noexcept {
     if (controller_.Active_annotation_tool() == core::AnnotationToolId::Text) {
-        return kTextColorWheelSegmentCount;
+        return (color_wheel_.text_mode == core::TextWheelMode::Color)
+                   ? core::kAnnotationColorSlotCount
+                   : kTextWheelFontChoices.size();
     }
     return Current_tool_color_palette().size();
 }
@@ -1075,6 +1065,7 @@ void OverlayWindow::Show_color_wheel(core::PointPx center) {
     color_wheel_.visible = true;
     color_wheel_.center = center;
     color_wheel_.hovered_segment = std::nullopt;
+    color_wheel_.hovered_hub = std::nullopt;
     last_hover_handle_ = std::nullopt;
     (void)Clear_toolbar_hover_states();
     Refresh_cursor();
@@ -1085,7 +1076,9 @@ void OverlayWindow::Dismiss_color_wheel(bool repaint) {
     if (!color_wheel_.visible) {
         return;
     }
+    core::TextWheelMode const saved_mode = color_wheel_.text_mode;
     color_wheel_ = {};
+    color_wheel_.text_mode = saved_mode;
     if (hwnd_ != nullptr) {
         Refresh_cursor();
     }
@@ -1098,6 +1091,28 @@ bool OverlayWindow::Update_color_wheel_hover(core::PointPx cursor) {
     if (!color_wheel_.visible) {
         return false;
     }
+    bool const is_text =
+        controller_.Active_annotation_tool() == core::AnnotationToolId::Text;
+    if (is_text) {
+        auto hub_hit = core::Hit_test_text_wheel_hub(color_wheel_.center, cursor);
+        if (hub_hit.has_value()) {
+            bool const changed = (hub_hit != color_wheel_.hovered_hub ||
+                                  color_wheel_.hovered_segment.has_value());
+            color_wheel_.hovered_hub = hub_hit;
+            color_wheel_.hovered_segment = std::nullopt;
+            return changed;
+        }
+        bool changed = color_wheel_.hovered_hub.has_value();
+        color_wheel_.hovered_hub = std::nullopt;
+        std::optional<size_t> const ring = core::Hit_test_color_wheel_segment(
+            color_wheel_.center, cursor, Current_color_wheel_segment_count());
+        if (ring != color_wheel_.hovered_segment) {
+            color_wheel_.hovered_segment = ring;
+            changed = true;
+        }
+        return changed;
+    }
+    // Non-text: original behavior.
     std::optional<size_t> const hovered = core::Hit_test_color_wheel_segment(
         color_wheel_.center, cursor, Current_color_wheel_segment_count());
     if (hovered == color_wheel_.hovered_segment) {
@@ -1110,24 +1125,24 @@ bool OverlayWindow::Update_color_wheel_hover(core::PointPx cursor) {
 void OverlayWindow::Select_color_wheel_segment(size_t index) {
     std::span<const COLORREF> const palette = Current_tool_color_palette();
     if (controller_.Active_annotation_tool() == core::AnnotationToolId::Text) {
-        if (index < palette.size()) {
-            controller_.Set_brush_annotation_color(palette[index]);
-            if (config_ != nullptr) {
-                config_->current_annotation_color_index = static_cast<int32_t>(index);
-                config_->Normalize();
-                (void)Save_app_config(*config_);
+        if (color_wheel_.text_mode == core::TextWheelMode::Color) {
+            if (index < palette.size()) {
+                controller_.Set_brush_annotation_color(palette[index]);
+                if (config_ != nullptr) {
+                    config_->current_annotation_color_index =
+                        static_cast<int32_t>(index);
+                    config_->Normalize();
+                    (void)Save_app_config(*config_);
+                }
             }
-            return;
-        }
-
-        if (std::optional<core::TextFontChoice> const font_choice =
-                Text_font_choice_for_wheel_segment(index);
-            font_choice.has_value()) {
-            controller_.Set_text_current_font(*font_choice);
-            if (config_ != nullptr) {
-                config_->text_current_font = *font_choice;
-                config_->Normalize();
-                (void)Save_app_config(*config_);
+        } else {
+            if (index < kTextWheelFontChoices.size()) {
+                controller_.Set_text_current_font(kTextWheelFontChoices[index]);
+                if (config_ != nullptr) {
+                    config_->text_current_font = kTextWheelFontChoices[index];
+                    config_->Normalize();
+                    (void)Save_app_config(*config_);
+                }
             }
         }
         return;
@@ -1642,6 +1657,21 @@ LRESULT OverlayWindow::On_l_button_down() {
     core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
     if (color_wheel_.visible) {
         suppress_next_lbutton_up_ = true;
+        bool const is_text =
+            controller_.Active_annotation_tool() == core::AnnotationToolId::Text;
+        if (is_text) {
+            auto hub_hit = core::Hit_test_text_wheel_hub(color_wheel_.center, cur);
+            if (hub_hit.has_value()) {
+                color_wheel_.text_mode = (*hub_hit == core::TextWheelHubSide::Color)
+                                             ? core::TextWheelMode::Color
+                                             : core::TextWheelMode::Font;
+                color_wheel_.hovered_hub = std::nullopt;
+                color_wheel_.hovered_segment = std::nullopt;
+                Refresh_cursor();
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return 0; // wheel stays open
+            }
+        }
         std::optional<size_t> const segment = core::Hit_test_color_wheel_segment(
             color_wheel_.center, cur, Current_color_wheel_segment_count());
         Dismiss_color_wheel(false);
@@ -2543,13 +2573,32 @@ LRESULT OverlayWindow::On_paint() {
         input.show_color_wheel = color_wheel_.visible;
         input.color_wheel_center_px = color_wheel_.center;
         input.color_wheel_colors = Current_tool_color_palette();
-        input.color_wheel_segment_count = Current_color_wheel_segment_count();
-        input.color_wheel_selected_segment = Current_annotation_color_index();
-        input.color_wheel_hovered_segment = color_wheel_.hovered_segment;
-        input.color_wheel_is_text_style =
+        bool const is_text =
             controller_.Active_annotation_tool() == core::AnnotationToolId::Text;
-        input.color_wheel_text_selected_font = controller_.Text_current_font();
-        input.color_wheel_font_families = Resolve_text_font_families(config_);
+        input.color_wheel_has_text_hub = is_text;
+        if (is_text) {
+            input.text_wheel_active_mode = color_wheel_.text_mode;
+            input.text_wheel_hovered_hub = color_wheel_.hovered_hub;
+            std::array<std::wstring_view, 4> const font_families =
+                Resolve_text_font_families(config_);
+            input.text_wheel_hub_font_family =
+                font_families[core::Text_font_choice_index(
+                    controller_.Text_current_font())];
+            input.color_wheel_font_families = font_families;
+            if (color_wheel_.text_mode == core::TextWheelMode::Color) {
+                input.color_wheel_segment_count = core::kAnnotationColorSlotCount;
+                input.color_wheel_selected_segment = Current_annotation_color_index();
+            } else {
+                input.color_wheel_segment_count = kTextWheelFontChoices.size();
+                input.color_wheel_selected_segment =
+                    core::Text_font_choice_index(controller_.Text_current_font());
+            }
+            input.color_wheel_hovered_segment = color_wheel_.hovered_segment;
+        } else {
+            input.color_wheel_segment_count = Current_color_wheel_segment_count();
+            input.color_wheel_selected_segment = Current_annotation_color_index();
+            input.color_wheel_hovered_segment = color_wheel_.hovered_segment;
+        }
         if (s.handle_dragging && s.resize_handle.has_value()) {
             input.highlight_handle = s.resize_handle;
         } else if (!s.move_dragging && !s.dragging && !s.modifier_preview &&

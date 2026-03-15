@@ -491,16 +491,53 @@ unless a real end-to-end bug escapes into the Win32 shell:
   1. Create a selection and activate the Text tool with `T`.
   2. Move the pointer inside the selection, then left-click to start a text draft.
   3. Cancel the draft, keep the Text tool armed, and right-click inside the selection.
-  4. Hover and pick entries from the left and right halves of the 12-segment text style wheel.
-  5. Use the mouse wheel and `Ctrl + =` / `Ctrl + -` before starting the next draft.
-  6. Start a new draft and inspect the initial font, color, and point size.
+  4. Use the mouse wheel and `Ctrl + =` / `Ctrl + -` before starting the next draft.
+  5. Start a new draft and inspect the initial font, color, and point size.
 - Expected:
   - The armed Text tool shows an `I-beam` cursor.
   - Left-click inside the selection starts a live text draft at the click point.
-  - Right-click while the Text tool is armed opens the 12-segment text style wheel.
-  - The left half updates the default text color and the right half updates the default font for the next draft.
+  - Right-click while the Text tool is armed opens the hub-and-ring text style wheel
+    (see `GF-MAN-ANN-015`).
   - Pre-draft size stepping changes the default text point size for the next draft.
   - The next draft uses the chosen color, font, and point size.
+
+### GF-MAN-ANN-015 - Text Style Wheel Hub-And-Ring
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Create a selection, activate the Text tool, and right-click inside the selection
+     with no draft active.
+  2. Observe the wheel layout.
+  3. Hover over the left hub semi-circle, then the right hub semi-circle.
+  4. Click the left (color) hub semi-circle.
+  5. Hover a color segment in the outer ring and click it.
+  6. Reopen the wheel and click the right (font) hub semi-circle.
+  7. Hover a font segment in the outer ring and click it.
+  8. Reopen the wheel and press `Esc`.
+  9. Reopen the wheel again and note which mode is active.
+  10. Activate a non-Text annotation tool, right-click to open its color wheel, and
+      compare the layout to the text style wheel.
+- Expected:
+  - The wheel shows a center hub with two semi-circles separated by a visible vertical
+    gap.  The left semi-circle contains a small hue-spectrum gradient rectangle; the
+    right semi-circle shows a lowercase `A` in the current font.
+  - Hovering a hub semi-circle shows a green tint on that semi-circle; the outer ring
+    is unchanged.
+  - Color mode (initial): the outer ring shows 8 annotation color segments.  The active
+    hub side (color) has an inverted (darker) fill.
+  - Clicking the left hub when already in color mode is a no-op; the wheel stays open.
+  - After selecting a color segment, the wheel closes and that color is used by the next
+    text draft.
+  - Font mode: the outer ring changes to 4 font segments each labeled with `A` in its
+    font.  The right hub has the inverted fill.
+  - After selecting a font segment, the wheel closes and that font is used by the next
+    text draft.  The right-hub `A` updates when the wheel is reopened.
+  - `Esc` closes the wheel without changing color or font.
+  - Reopening the wheel opens in the mode last used in the session (font mode if font
+    was the last mode selected).
+  - Right-click while a text draft is active does not open the style wheel.
+  - Non-text annotation color wheels show no hub; only a plain color ring.
 
 ### GF-MAN-ANN-012 - Text Draft Editing, Navigation, And Formatting
 
