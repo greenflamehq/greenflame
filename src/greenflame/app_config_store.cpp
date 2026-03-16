@@ -22,7 +22,7 @@ constexpr uint8_t kHexLowNibbleMask = 0x0F;
     std::filesystem::path path(home);
     path /= L".config";
     path /= L"greenflame";
-    path /= L"greenflame.ini";
+    path /= L"greenflame.json";
     return path;
 }
 
@@ -192,6 +192,32 @@ constexpr uint8_t kHexLowNibbleMask = 0x0F;
     return "sans";
 }
 
+[[nodiscard]] bool Read_int_from_json(easyjson::JSON const &j, int32_t &out) {
+    using Class = easyjson::JSON::Class;
+    if (j.JSON_type() == Class::Integral) {
+        int64_t const v = static_cast<int64_t>(j.to_int());
+        if (v >= std::numeric_limits<int32_t>::min() &&
+            v <= std::numeric_limits<int32_t>::max()) {
+            out = static_cast<int32_t>(v);
+            return true;
+        }
+        return false;
+    }
+    if (j.JSON_type() == Class::Floating) {
+        double const v = j.to_float();
+        if (v >= std::numeric_limits<int32_t>::min() &&
+            v <= std::numeric_limits<int32_t>::max()) {
+            out = static_cast<int32_t>(v);
+            return true;
+        }
+        return false;
+    }
+    if (j.JSON_type() == Class::String) {
+        return Try_parse_int32(j.to_string(), out);
+    }
+    return false;
+}
+
 [[nodiscard]] std::string To_hex_color(COLORREF color) {
     auto channel = [&](unsigned shift) {
         return static_cast<uint8_t>((color >> shift) & kColorChannelMask);
@@ -214,6 +240,64 @@ constexpr uint8_t kHexLowNibbleMask = 0x0F;
     return value;
 }
 
+void Load_colors_from_json(easyjson::JSON const &j, core::AnnotationColorPalette &out,
+                           size_t max_count) {
+    if (j.JSON_type() == easyjson::JSON::Class::Object) {
+        for (auto const &[key, val] : j.object_range()) {
+            int32_t index = 0;
+            if (!Try_parse_int32(key, index) || index < 0 ||
+                index >= static_cast<int32_t>(max_count)) {
+                continue;
+            }
+            std::string const s = val.to_string();
+            COLORREF parsed = 0;
+            if (Try_parse_color(s, parsed)) {
+                out[static_cast<size_t>(index)] = parsed;
+            }
+        }
+        return;
+    }
+    if (j.JSON_type() == easyjson::JSON::Class::Array) {
+        auto const items = j.to_deque();
+        for (size_t i = 0; i < max_count && i < items.size(); ++i) {
+            std::string const s = items[i].to_string();
+            COLORREF parsed = 0;
+            if (Try_parse_color(s, parsed)) {
+                out[i] = parsed;
+            }
+        }
+    }
+}
+
+void Load_colors_from_json(easyjson::JSON const &j, core::HighlighterColorPalette &out,
+                           size_t max_count) {
+    if (j.JSON_type() == easyjson::JSON::Class::Object) {
+        for (auto const &[key, val] : j.object_range()) {
+            int32_t index = 0;
+            if (!Try_parse_int32(key, index) || index < 0 ||
+                index >= static_cast<int32_t>(max_count)) {
+                continue;
+            }
+            std::string const s = val.to_string();
+            COLORREF parsed = 0;
+            if (Try_parse_color(s, parsed)) {
+                out[static_cast<size_t>(index)] = parsed;
+            }
+        }
+        return;
+    }
+    if (j.JSON_type() == easyjson::JSON::Class::Array) {
+        auto const items = j.to_deque();
+        for (size_t i = 0; i < max_count && i < items.size(); ++i) {
+            std::string const s = items[i].to_string();
+            COLORREF parsed = 0;
+            if (Try_parse_color(s, parsed)) {
+                out[i] = parsed;
+            }
+        }
+    }
+}
+
 } // namespace
 
 std::filesystem::path Get_app_config_dir() {
@@ -224,6 +308,8 @@ std::filesystem::path Get_app_config_dir() {
     return path.parent_path();
 }
 
+std::filesystem::path Get_config_file_path() { return Get_config_path(); }
+
 core::AppConfig Load_app_config() {
     core::AppConfig config;
     std::filesystem::path const path = Get_config_path();
@@ -232,120 +318,130 @@ core::AppConfig Load_app_config() {
         return config;
     }
     try {
-        std::ifstream file(path);
-        if (!file) {
+        easyjson::JSON root = easyjson::JSON::load_file(path.string());
+        if (root.JSON_type() != easyjson::JSON::Class::Object) {
+            config.Normalize();
             return config;
         }
-        std::string section;
-        std::string line;
-        while (std::getline(file, line)) {
-            std::string_view sv = Trim(line);
-            if (sv.empty() || sv[0] == ';' || sv[0] == '#') {
-                continue;
-            }
-            if (sv[0] == '[') {
-                size_t const close = sv.find(']');
-                if (close != std::string_view::npos) {
-                    section = std::string(sv.substr(1, close - 1));
-                }
-                continue;
-            }
-            size_t const eq = sv.find('=');
-            if (eq == std::string_view::npos) {
-                continue;
-            }
-            std::string const key{Trim(sv.substr(0, eq))};
-            std::string const value{Trim(sv.substr(eq + 1))};
 
-            if (section == "ui") {
-                if (key == "show_balloons") {
-                    config.show_balloons = (value == "true" || value == "1");
-                } else if (key == "show_selection_size_side_labels") {
-                    config.show_selection_size_side_labels =
-                        (value == "true" || value == "1");
-                } else if (key == "show_selection_size_center_label") {
-                    config.show_selection_size_center_label =
-                        (value == "true" || value == "1");
-                } else if (key == "tool_size_overlay_duration_ms") {
-                    int32_t parsed = 0;
-                    if (Try_parse_int32(value, parsed)) {
-                        config.tool_size_overlay_duration_ms = parsed;
-                    }
+        if (root.has_key("ui")) {
+            easyjson::JSON const &ui = root["ui"];
+            if (ui.has_key("show_balloons") &&
+                ui["show_balloons"].JSON_type() == easyjson::JSON::Class::Boolean) {
+                config.show_balloons = ui["show_balloons"].to_bool();
+            }
+            if (ui.has_key("show_selection_size_side_labels") &&
+                ui["show_selection_size_side_labels"].JSON_type() ==
+                    easyjson::JSON::Class::Boolean) {
+                config.show_selection_size_side_labels =
+                    ui["show_selection_size_side_labels"].to_bool();
+            }
+            if (ui.has_key("show_selection_size_center_label") &&
+                ui["show_selection_size_center_label"].JSON_type() ==
+                    easyjson::JSON::Class::Boolean) {
+                config.show_selection_size_center_label =
+                    ui["show_selection_size_center_label"].to_bool();
+            }
+            if (ui.has_key("tool_size_overlay_duration_ms")) {
+                int32_t parsed = 0;
+                if (Read_int_from_json(ui["tool_size_overlay_duration_ms"], parsed)) {
+                    config.tool_size_overlay_duration_ms = parsed;
                 }
-            } else if (section == "tools") {
-                if (key == "brush_width") {
+            }
+        }
+
+        if (root.has_key("tools")) {
+            easyjson::JSON const &tools = root["tools"];
+            if (tools.has_key("current_size")) {
+                int32_t parsed = 0;
+                if (Read_int_from_json(tools["current_size"], parsed)) {
+                    config.brush_width_px = parsed;
+                }
+            }
+            if (tools.has_key("current_color")) {
+                int32_t parsed = 0;
+                if (Read_int_from_json(tools["current_color"], parsed)) {
+                    config.current_annotation_color_index = parsed;
+                }
+            }
+            if (tools.has_key("colors")) {
+                Load_colors_from_json(tools["colors"], config.annotation_colors,
+                                      core::kAnnotationColorSlotCount);
+            }
+            if (tools.has_key("font")) {
+                easyjson::JSON const &font = tools["font"];
+                if (font.has_key("sans")) {
+                    config.text_font_sans = To_wide(font["sans"].to_string());
+                }
+                if (font.has_key("serif")) {
+                    config.text_font_serif = To_wide(font["serif"].to_string());
+                }
+                if (font.has_key("mono")) {
+                    config.text_font_mono = To_wide(font["mono"].to_string());
+                }
+                if (font.has_key("art")) {
+                    config.text_font_art = To_wide(font["art"].to_string());
+                }
+            }
+            if (tools.has_key("highlighter")) {
+                easyjson::JSON const &hl = tools["highlighter"];
+                if (hl.has_key("current_color")) {
                     int32_t parsed = 0;
-                    if (Try_parse_int32(value, parsed)) {
-                        config.brush_width_px = parsed;
-                    }
-                } else if (key == "current_color") {
-                    int32_t parsed = 0;
-                    if (Try_parse_int32(value, parsed)) {
-                        config.current_annotation_color_index = parsed;
-                    }
-                } else if (key == "highlighter_current_color") {
-                    int32_t parsed = 0;
-                    if (Try_parse_int32(value, parsed)) {
+                    if (Read_int_from_json(hl["current_color"], parsed)) {
                         config.current_highlighter_color_index = parsed;
                     }
-                } else if (key == "highlighter_opacity_percent") {
+                }
+                if (hl.has_key("opacity_percent")) {
                     int32_t parsed = 0;
-                    if (Try_parse_int32(value, parsed)) {
+                    if (Read_int_from_json(hl["opacity_percent"], parsed)) {
                         config.highlighter_opacity_percent = parsed;
                     }
-                } else if (key == "text_size_points") {
+                }
+                if (hl.has_key("colors")) {
+                    Load_colors_from_json(hl["colors"], config.highlighter_colors,
+                                          core::kHighlighterColorSlotCount);
+                }
+            }
+            if (tools.has_key("text")) {
+                easyjson::JSON const &text = tools["text"];
+                if (text.has_key("size_points")) {
                     int32_t parsed = 0;
-                    if (Try_parse_int32(value, parsed)) {
+                    if (Read_int_from_json(text["size_points"], parsed)) {
                         config.text_size_points = parsed;
                     }
-                } else if (key == "text_current_font") {
-                    config.text_current_font = Parse_text_font_choice(value);
-                } else if (key == "text_font_sans") {
-                    config.text_font_sans = To_wide(value);
-                } else if (key == "text_font_serif") {
-                    config.text_font_serif = To_wide(value);
-                } else if (key == "text_font_mono") {
-                    config.text_font_mono = To_wide(value);
-                } else if (key == "text_font_art") {
-                    config.text_font_art = To_wide(value);
-                } else {
-                    for (size_t index = 0; index < core::kAnnotationColorSlotCount;
-                         ++index) {
-                        if (key != ("color_" + std::to_string(index))) {
-                            continue;
-                        }
-                        COLORREF parsed = 0;
-                        if (Try_parse_color(value, parsed)) {
-                            config.annotation_colors[index] = parsed;
-                        }
-                        break;
-                    }
-                    for (size_t index = 0; index < core::kHighlighterColorSlotCount;
-                         ++index) {
-                        if (key != ("highlighter_color_" + std::to_string(index))) {
-                            continue;
-                        }
-                        COLORREF parsed = 0;
-                        if (Try_parse_color(value, parsed)) {
-                            config.highlighter_colors[index] = parsed;
-                        }
-                        break;
+                }
+                if (text.has_key("current_font")) {
+                    config.text_current_font =
+                        Parse_text_font_choice(text["current_font"].to_string());
+                }
+            }
+            if (tools.has_key("bubble")) {
+                easyjson::JSON const &bubble = tools["bubble"];
+                if (bubble.has_key("current_font")) {
+                    config.bubble_current_font =
+                        Parse_text_font_choice(bubble["current_font"].to_string());
+                }
+            }
+        }
+
+        if (root.has_key("save")) {
+            easyjson::JSON const &save = root["save"];
+            auto read_string = [&](char const *key, std::wstring &target) {
+                if (save.has_key(key) &&
+                    save[key].JSON_type() == easyjson::JSON::Class::String) {
+                    std::string const s = save[key].to_string();
+                    if (!s.empty()) {
+                        target = To_wide(s);
                     }
                 }
-            } else if (section == "save") {
-                auto read = [&](char const *name, std::wstring &target) {
-                    if (key == name) {
-                        target = To_wide(value);
-                    }
-                };
-                read("default_save_dir", config.default_save_dir);
-                read("last_save_as_dir", config.last_save_as_dir);
-                read("filename_pattern_region", config.filename_pattern_region);
-                read("filename_pattern_desktop", config.filename_pattern_desktop);
-                read("filename_pattern_monitor", config.filename_pattern_monitor);
-                read("filename_pattern_window", config.filename_pattern_window);
-                read("default_save_format", config.default_save_format);
-            }
+            };
+            read_string("default_save_dir", config.default_save_dir);
+            read_string("last_save_as_dir", config.last_save_as_dir);
+            read_string("filename_pattern_region", config.filename_pattern_region);
+            read_string("filename_pattern_desktop", config.filename_pattern_desktop);
+            read_string("filename_pattern_monitor", config.filename_pattern_monitor);
+            read_string("filename_pattern_window", config.filename_pattern_window);
+            read_string("default_save_format", config.default_save_format);
         }
     } catch (...) {
         // Parse error or file read error: return default config.
@@ -362,131 +458,165 @@ bool Save_app_config(core::AppConfig const &config) {
     core::AppConfig const defaults{};
     try {
         std::filesystem::create_directories(path.parent_path());
+        easyjson::JSON root = easyjson::object();
+
+        if (!config.show_balloons || !config.show_selection_size_side_labels ||
+            !config.show_selection_size_center_label ||
+            config.tool_size_overlay_duration_ms !=
+                defaults.tool_size_overlay_duration_ms) {
+            root["ui"] = easyjson::object();
+            if (!config.show_balloons) {
+                root["ui"]["show_balloons"] = false;
+            }
+            if (!config.show_selection_size_side_labels) {
+                root["ui"]["show_selection_size_side_labels"] = false;
+            }
+            if (!config.show_selection_size_center_label) {
+                root["ui"]["show_selection_size_center_label"] = false;
+            }
+            if (config.tool_size_overlay_duration_ms !=
+                defaults.tool_size_overlay_duration_ms) {
+                root["ui"]["tool_size_overlay_duration_ms"] =
+                    config.tool_size_overlay_duration_ms;
+            }
+        }
+
+        bool wrote_tools = config.brush_width_px != defaults.brush_width_px ||
+                           config.current_annotation_color_index !=
+                               defaults.current_annotation_color_index ||
+                           config.annotation_colors != defaults.annotation_colors ||
+                           config.current_highlighter_color_index !=
+                               defaults.current_highlighter_color_index ||
+                           config.highlighter_opacity_percent !=
+                               defaults.highlighter_opacity_percent ||
+                           config.highlighter_colors != defaults.highlighter_colors ||
+                           config.text_size_points != defaults.text_size_points ||
+                           config.text_current_font != defaults.text_current_font ||
+                           config.bubble_current_font != defaults.bubble_current_font ||
+                           config.text_font_sans != defaults.text_font_sans ||
+                           config.text_font_serif != defaults.text_font_serif ||
+                           config.text_font_mono != defaults.text_font_mono ||
+                           config.text_font_art != defaults.text_font_art;
+
+        if (wrote_tools) {
+            root["tools"] = easyjson::object();
+            if (config.brush_width_px != defaults.brush_width_px) {
+                root["tools"]["current_size"] = config.brush_width_px;
+            }
+            if (config.annotation_colors != defaults.annotation_colors) {
+                easyjson::JSON colors_obj = easyjson::object();
+                for (size_t i = 0; i < core::kAnnotationColorSlotCount; ++i) {
+                    if (config.annotation_colors[i] != defaults.annotation_colors[i]) {
+                        colors_obj[std::to_string(i)] =
+                            To_hex_color(config.annotation_colors[i]);
+                    }
+                }
+                root["tools"]["colors"] = colors_obj;
+            }
+            if (config.current_annotation_color_index !=
+                defaults.current_annotation_color_index) {
+                root["tools"]["current_color"] = config.current_annotation_color_index;
+            }
+            if (config.text_font_sans != defaults.text_font_sans ||
+                config.text_font_serif != defaults.text_font_serif ||
+                config.text_font_mono != defaults.text_font_mono ||
+                config.text_font_art != defaults.text_font_art) {
+                root["tools"]["font"] = easyjson::object();
+                root["tools"]["font"]["sans"] = To_utf8(config.text_font_sans);
+                root["tools"]["font"]["serif"] = To_utf8(config.text_font_serif);
+                root["tools"]["font"]["mono"] = To_utf8(config.text_font_mono);
+                root["tools"]["font"]["art"] = To_utf8(config.text_font_art);
+            }
+            if (config.highlighter_colors != defaults.highlighter_colors ||
+                config.current_highlighter_color_index !=
+                    defaults.current_highlighter_color_index ||
+                config.highlighter_opacity_percent !=
+                    defaults.highlighter_opacity_percent) {
+                root["tools"]["highlighter"] = easyjson::object();
+                if (config.highlighter_colors != defaults.highlighter_colors) {
+                    easyjson::JSON hl_colors = easyjson::object();
+                    for (size_t i = 0; i < core::kHighlighterColorSlotCount; ++i) {
+                        if (config.highlighter_colors[i] !=
+                            defaults.highlighter_colors[i]) {
+                            hl_colors[std::to_string(i)] =
+                                To_hex_color(config.highlighter_colors[i]);
+                        }
+                    }
+                    root["tools"]["highlighter"]["colors"] = hl_colors;
+                }
+                if (config.current_highlighter_color_index !=
+                    defaults.current_highlighter_color_index) {
+                    root["tools"]["highlighter"]["current_color"] =
+                        config.current_highlighter_color_index;
+                }
+                if (config.highlighter_opacity_percent !=
+                    defaults.highlighter_opacity_percent) {
+                    root["tools"]["highlighter"]["opacity_percent"] =
+                        config.highlighter_opacity_percent;
+                }
+            }
+            if (config.text_size_points != defaults.text_size_points ||
+                config.text_current_font != defaults.text_current_font) {
+                root["tools"]["text"] = easyjson::object();
+                if (config.text_size_points != defaults.text_size_points) {
+                    root["tools"]["text"]["size_points"] = config.text_size_points;
+                }
+                if (config.text_current_font != defaults.text_current_font) {
+                    root["tools"]["text"]["current_font"] =
+                        std::string(Text_font_choice_token(config.text_current_font));
+                }
+            }
+            if (config.bubble_current_font != defaults.bubble_current_font) {
+                root["tools"]["bubble"] = easyjson::object();
+                root["tools"]["bubble"]["current_font"] =
+                    std::string(Text_font_choice_token(config.bubble_current_font));
+            }
+        }
+
+        bool wrote_save = !config.default_save_dir.empty() ||
+                          !config.last_save_as_dir.empty() ||
+                          !config.filename_pattern_region.empty() ||
+                          !config.filename_pattern_desktop.empty() ||
+                          !config.filename_pattern_monitor.empty() ||
+                          !config.filename_pattern_window.empty() ||
+                          !config.default_save_format.empty();
+
+        if (wrote_save) {
+            root["save"] = easyjson::object();
+            if (!config.default_save_dir.empty()) {
+                root["save"]["default_save_dir"] = To_utf8(config.default_save_dir);
+            }
+            if (!config.last_save_as_dir.empty()) {
+                root["save"]["last_save_as_dir"] = To_utf8(config.last_save_as_dir);
+            }
+            if (!config.filename_pattern_region.empty()) {
+                root["save"]["filename_pattern_region"] =
+                    To_utf8(config.filename_pattern_region);
+            }
+            if (!config.filename_pattern_desktop.empty()) {
+                root["save"]["filename_pattern_desktop"] =
+                    To_utf8(config.filename_pattern_desktop);
+            }
+            if (!config.filename_pattern_monitor.empty()) {
+                root["save"]["filename_pattern_monitor"] =
+                    To_utf8(config.filename_pattern_monitor);
+            }
+            if (!config.filename_pattern_window.empty()) {
+                root["save"]["filename_pattern_window"] =
+                    To_utf8(config.filename_pattern_window);
+            }
+            if (!config.default_save_format.empty()) {
+                root["save"]["default_save_format"] =
+                    To_utf8(config.default_save_format);
+            }
+        }
+
         std::ofstream file(path);
         if (!file) {
             return false;
         }
-
-        // UI section: only write non-default values.
-        bool wrote_ui_header = false;
-        auto write_ui_bool = [&](char const *key, bool value) {
-            if (value) {
-                return;
-            }
-            if (!wrote_ui_header) {
-                file << "[ui]\n";
-                wrote_ui_header = true;
-            }
-            file << key << "=false\n";
-        };
-        write_ui_bool("show_balloons", config.show_balloons);
-        write_ui_bool("show_selection_size_side_labels",
-                      config.show_selection_size_side_labels);
-        write_ui_bool("show_selection_size_center_label",
-                      config.show_selection_size_center_label);
-        if (config.tool_size_overlay_duration_ms !=
-            defaults.tool_size_overlay_duration_ms) {
-            if (!wrote_ui_header) {
-                file << "[ui]\n";
-                wrote_ui_header = true;
-            }
-            file << "tool_size_overlay_duration_ms="
-                 << config.tool_size_overlay_duration_ms << "\n";
-        }
-
-        bool wrote_tools_header = false;
-        bool const write_tools_header =
-            config.brush_width_px != defaults.brush_width_px ||
-            config.current_annotation_color_index !=
-                defaults.current_annotation_color_index ||
-            config.annotation_colors != defaults.annotation_colors ||
-            config.current_highlighter_color_index !=
-                defaults.current_highlighter_color_index ||
-            config.highlighter_opacity_percent !=
-                defaults.highlighter_opacity_percent ||
-            config.highlighter_colors != defaults.highlighter_colors ||
-            config.text_size_points != defaults.text_size_points ||
-            config.text_current_font != defaults.text_current_font ||
-            config.text_font_sans != defaults.text_font_sans ||
-            config.text_font_serif != defaults.text_font_serif ||
-            config.text_font_mono != defaults.text_font_mono ||
-            config.text_font_art != defaults.text_font_art;
-        if (write_tools_header) {
-            file << (wrote_ui_header ? "\n" : "") << "[tools]\n";
-            wrote_tools_header = true;
-        }
-        if (config.brush_width_px != defaults.brush_width_px) {
-            file << "brush_width=" << config.brush_width_px << "\n";
-        }
-        for (size_t index = 0; index < core::kAnnotationColorSlotCount; ++index) {
-            if (config.annotation_colors[index] == defaults.annotation_colors[index]) {
-                continue;
-            }
-            file << "color_" << index << "="
-                 << To_hex_color(config.annotation_colors[index]) << "\n";
-        }
-        if (config.current_annotation_color_index !=
-            defaults.current_annotation_color_index) {
-            file << "current_color=" << config.current_annotation_color_index << "\n";
-        }
-        for (size_t index = 0; index < core::kHighlighterColorSlotCount; ++index) {
-            if (config.highlighter_colors[index] ==
-                defaults.highlighter_colors[index]) {
-                continue;
-            }
-            file << "highlighter_color_" << index << "="
-                 << To_hex_color(config.highlighter_colors[index]) << "\n";
-        }
-        if (config.current_highlighter_color_index !=
-            defaults.current_highlighter_color_index) {
-            file << "highlighter_current_color="
-                 << config.current_highlighter_color_index << "\n";
-        }
-        if (config.highlighter_opacity_percent !=
-            defaults.highlighter_opacity_percent) {
-            file << "highlighter_opacity_percent=" << config.highlighter_opacity_percent
-                 << "\n";
-        }
-        if (config.text_size_points != defaults.text_size_points) {
-            file << "text_size_points=" << config.text_size_points << "\n";
-        }
-        if (config.text_current_font != defaults.text_current_font) {
-            file << "text_current_font="
-                 << Text_font_choice_token(config.text_current_font) << "\n";
-        }
-        if (config.text_font_sans != defaults.text_font_sans) {
-            file << "text_font_sans=" << To_utf8(config.text_font_sans) << "\n";
-        }
-        if (config.text_font_serif != defaults.text_font_serif) {
-            file << "text_font_serif=" << To_utf8(config.text_font_serif) << "\n";
-        }
-        if (config.text_font_mono != defaults.text_font_mono) {
-            file << "text_font_mono=" << To_utf8(config.text_font_mono) << "\n";
-        }
-        if (config.text_font_art != defaults.text_font_art) {
-            file << "text_font_art=" << To_utf8(config.text_font_art) << "\n";
-        }
-
-        // Save section: only write non-default values.
-        bool wrote_save_header = false;
-        auto write_string = [&](char const *key, std::wstring const &value) {
-            if (!value.empty()) {
-                if (!wrote_save_header) {
-                    file << ((wrote_ui_header || wrote_tools_header) ? "\n" : "")
-                         << "[save]\n";
-                    wrote_save_header = true;
-                }
-                file << key << "=" << To_utf8(value) << "\n";
-            }
-        };
-        write_string("default_save_dir", config.default_save_dir);
-        write_string("last_save_as_dir", config.last_save_as_dir);
-        write_string("filename_pattern_region", config.filename_pattern_region);
-        write_string("filename_pattern_desktop", config.filename_pattern_desktop);
-        write_string("filename_pattern_monitor", config.filename_pattern_monitor);
-        write_string("filename_pattern_window", config.filename_pattern_window);
-        write_string("default_save_format", config.default_save_format);
-
+        std::string const json_str = root.dump();
+        file << json_str;
         return file.good();
     } catch (...) {
         return false;

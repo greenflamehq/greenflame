@@ -128,7 +128,7 @@ greenflame.exe --region 1200,100,800,600
 
 1. If `--output` has a supported extension (`.png`, `.jpg`, `.jpeg`, `.bmp`), that extension defines the format.
 2. Otherwise, if `--format` is provided, `--format` defines the format.
-3. Otherwise, `default_save_format` (from `[save]` in the config) defines the format.
+3. Otherwise, `save.default_save_format` (from the config) defines the format.
 4. If `--output` extension conflicts with `--format`, the command fails.
 5. If `--output` has an unsupported extension (for example `.tiff`), the command fails.
 6. If `--output` has no extension, Greenflame appends one based on the resolved format.
@@ -159,76 +159,80 @@ codes are unique and not reused.
 
 ## Configuration
 
-Greenflame reads `~/.config/greenflame/greenflame.ini` (i.e. `%USERPROFILE%\.config\greenflame\greenflame.ini`).
+Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.config\greenflame\greenflame.json`).
 
 ### All config keys
 
-| Section | Key | Default | Meaning |
-|---|---|---|---|
-| `[ui]` | `show_balloons` | `true` | Show tray toast notifications after copy/save actions. |
-| `[ui]` | `show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
-| `[ui]` | `show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
-| `[ui]` | `tool_size_overlay_duration_ms` | `800` | How long the centered tool-size overlay stays visible after a stroke-width change. `0` disables it. |
-| `[tools]` | `brush_width` | `2` | Default Brush/Highlighter/Line/Arrow/Rectangle/Bubble stroke width (diameter for Bubble) in physical pixels. Runtime adjustments are clamped to `1..50` and persisted here. Filled rectangles ignore it. |
-| `[tools]` | `current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
-| `[tools]` | `color_0` ... `color_7` | `#000000`, `#ff0000`, `#00ff00`, `#0000ff`, `#ffff00`, `#ff00ff`, `#00ffff`, `#ffffff` | Annotation color wheel slots, starting at the top-right segment and moving clockwise. Values use `#rrggbb`. |
-| `[tools]` | `highlighter_current_color` | `0` | Current Highlighter color slot index, clamped to `0..5`. |
-| `[tools]` | `highlighter_color_0` ... `highlighter_color_5` | `#f7eb62`, `#7fe36a`, `#ffb44d`, `#ff79b9`, `#64c7ff`, `#c38cff` | Highlighter color wheel slots, starting at the top-right segment and moving clockwise. Values use `#rrggbb`. |
-| `[tools]` | `highlighter_opacity_percent` | `50` | Default Highlighter opacity for live preview, save output, and clipboard output. Values are clamped to `0..100`. |
-| `[tools]` | `text_size_points` | `12` | Default Text tool point size. Values are normalized to the nearest supported preset (`5, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72, 84, 96, 108, 144, 192, 216, 288`). Runtime adjustments are persisted here. |
-| `[tools]` | `text_current_font` | `sans` | Active font slot for the Text tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
-| `[tools]` | `bubble_current_font` | `sans` | Active font slot for the Bubble tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
-| `[tools]` | `text_font_sans` | `Arial` | Font family used for the `sans` slot. Trimmed; falls back to `Arial` if blank or too long. |
-| `[tools]` | `text_font_serif` | `Times New Roman` | Font family used for the `serif` slot. Trimmed; falls back to `Times New Roman` if blank or too long. |
-| `[tools]` | `text_font_mono` | `Courier New` | Font family used for the `mono` slot. Trimmed; falls back to `Courier New` if blank or too long. |
-| `[tools]` | `text_font_art` | `Comic Sans MS` | Font family used for the `art` slot. Trimmed; falls back to `Comic Sans MS` if blank or too long. |
-| `[save]` | `default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
-| `[save]` | `last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
-| `[save]` | `default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
-| `[save]` | `filename_pattern_region` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for region captures. |
-| `[save]` | `filename_pattern_desktop` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for desktop captures. |
-| `[save]` | `filename_pattern_monitor` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}` | Default filename pattern for monitor captures. |
-| `[save]` | `filename_pattern_window` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}` | Default filename pattern for window captures. |
+| Key | Default | Meaning |
+|---|---|---|
+| `ui.show_balloons` | `true` | Show tray toast notifications after copy/save actions. |
+| `ui.show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
+| `ui.show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
+| `ui.tool_size_overlay_duration_ms` | `800` | How long the centered tool-size overlay stays visible after a stroke-width change. `0` disables it. |
+| `tools.current_size` | `2` | Shared stroke width for Brush, Highlighter, Line, Arrow, Rectangle, Bubble (diameter for Bubble) in physical pixels. Runtime adjustments are clamped to `1..50` and persisted here. Filled rectangles ignore it. |
+| `tools.colors` | Object with slot index keys (e.g. `{"4": "#ff00ff"}`) | Annotation color wheel slots (indices 0–7). Only non-default slots are written. Values use `#rrggbb`. |
+| `tools.current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
+| `tools.font.sans` | `Arial` | Font family for the `sans` slot (shared by Text and Bubble tools). |
+| `tools.font.serif` | `Times New Roman` | Font family for the `serif` slot. |
+| `tools.font.mono` | `Courier New` | Font family for the `mono` slot. |
+| `tools.font.art` | `Comic Sans MS` | Font family for the `art` slot. |
+| `tools.highlighter.colors` | Object with slot index keys (e.g. `{"2": "#ffb44d"}`) | Highlighter color wheel slots (indices 0–5). Only non-default slots are written. Values use `#rrggbb`. |
+| `tools.highlighter.current_color` | `0` | Current Highlighter color slot index, clamped to `0..5`. |
+| `tools.highlighter.opacity_percent` | `50` | Default Highlighter opacity for live preview, save output, and clipboard output. Values are clamped to `0..100`. |
+| `tools.text.size_points` | `12` | Default Text tool point size. Values are normalized to the nearest supported preset (`5, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72, 84, 96, 108, 144, 192, 216, 288`). Runtime adjustments are persisted here. |
+| `tools.text.current_font` | `sans` | Active font slot for the Text tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
+| `tools.bubble.current_font` | `sans` | Active font slot for the Bubble tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
+| `save.default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
+| `save.last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
+| `save.default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
+| `save.filename_pattern_region` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for region captures. |
+| `save.filename_pattern_desktop` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for desktop captures. |
+| `save.filename_pattern_monitor` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}` | Default filename pattern for monitor captures. |
+| `save.filename_pattern_window` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}` | Default filename pattern for window captures. |
 
 Example:
 
-```ini
-[ui]
-show_balloons=true
-show_selection_size_side_labels=true
-show_selection_size_center_label=true
-tool_size_overlay_duration_ms=800
-
-[tools]
-brush_width=2
-current_color=0
-color_0=#000000
-color_1=#ff0000
-color_2=#00ff00
-color_3=#0000ff
-color_4=#ffff00
-color_5=#ff00ff
-color_6=#00ffff
-color_7=#ffffff
-highlighter_current_color=0
-highlighter_color_0=#f7eb62
-highlighter_color_1=#7fe36a
-highlighter_color_2=#ffb44d
-highlighter_color_3=#ff79b9
-highlighter_color_4=#64c7ff
-highlighter_color_5=#c38cff
-highlighter_opacity_percent=50
-text_size_points=12
-bubble_current_font=sans
-
-[save]
-default_save_dir=C:\Users\you\Pictures\greenflame
-last_save_as_dir=D:\shots\scratch
-default_save_format=png
-filename_pattern_region=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}
-filename_pattern_desktop=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}
-filename_pattern_monitor=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}
-filename_pattern_window=screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}
+```json
+{
+  "ui": {
+    "show_balloons": true,
+    "show_selection_size_side_labels": true,
+    "show_selection_size_center_label": true,
+    "tool_size_overlay_duration_ms": 800
+  },
+  "tools": {
+    "current_size": 2,
+    "font": {
+      "sans": "Arial",
+      "serif": "Times New Roman",
+      "mono": "Courier New",
+      "art": "Comic Sans MS"
+    },
+    "colors": { "4": "#ff00ff" },
+    "current_color": 0,
+    "highlighter": {
+      "colors": { "2": "#ffb44d" },
+      "current_color": 0,
+      "opacity_percent": 50
+    },
+    "text": {
+      "size_points": 12,
+      "current_font": "sans"
+    },
+    "bubble": {
+      "current_font": "sans"
+    }
+  },
+  "save": {
+    "default_save_dir": "C:\\Users\\you\\Pictures\\greenflame",
+    "last_save_as_dir": "D:\\shots\\scratch",
+    "default_save_format": "png",
+    "filename_pattern_region": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}",
+    "filename_pattern_desktop": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}",
+    "filename_pattern_monitor": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}",
+    "filename_pattern_window": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}"
+  }
+}
 ```
 
 ### Save filenames

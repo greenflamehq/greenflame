@@ -241,6 +241,18 @@ if(BUILD_TESTING)
 endif()
 
 # -----------------------------
+# easyjson (header-only JSON)
+# -----------------------------
+include(FetchContent)
+FetchContent_Declare(
+    easyjson
+    GIT_REPOSITORY https://github.com/jahan-addison/easyjson.git
+    GIT_TAG        v1.2.1
+    GIT_SHALLOW    TRUE
+)
+FetchContent_MakeAvailable(easyjson)
+
+# -----------------------------
 # greenflame (Win32 GUI app)
 # -----------------------------
 add_executable(greenflame WIN32
@@ -341,6 +353,7 @@ endif()
 
 target_link_libraries(greenflame PRIVATE
     greenflame_core
+    easyjson
 
     # Win32 basics
     user32

@@ -32,3 +32,5 @@
 #include <variant>
 #include <vector>
 #include <wchar.h>
+
+#include <easyjson.h>

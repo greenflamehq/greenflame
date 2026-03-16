@@ -59,7 +59,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Keep File Explorer open to verify saved files and file-drop clipboard behavior.
 - Use one visible Notepad window for single-window capture tests.
 - Use two visible Notepad windows at once for ambiguous `--window` CLI tests.
-- Start from a known config file at `%USERPROFILE%\.config\greenflame\greenflame.ini`.
+- Start from a known config file at `%USERPROFILE%\.config\greenflame\greenflame.json`.
 
 ## Smoke And Tray
 
