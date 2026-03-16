@@ -1,6 +1,7 @@
 // Tray window object: notification icon + context menu + PrintScreen hotkey.
 
 #include "win/tray_window.h"
+#include "app_config_store.h"
 #include "win/about_dialog.h"
 #include "win/ui_palette.h"
 
@@ -25,8 +26,9 @@ enum CommandId : int {
     CopyLastRegion = 5,
     CopyLastWindow = 6,
     StartWithWindows = 7,
-    About = 8,
-    Exit = 9,
+    OpenConfig = 8,
+    About = 9,
+    Exit = 10,
 };
 
 enum HotkeyId : int {
@@ -50,6 +52,7 @@ constexpr wchar_t kCaptureLastRegionMenuText[] = L"Capture last region\tAlt + Pr
 constexpr wchar_t kCaptureLastWindowMenuText[] =
     L"Capture last window\tCtrl + Alt + Prt Scrn";
 constexpr wchar_t kStartWithWindowsMenuText[] = L"Start with Windows";
+constexpr wchar_t kOpenConfigMenuText[] = L"Open config file...";
 constexpr wchar_t kAboutMenuText[] = L"About Greenflame...";
 
 #ifdef DEBUG
@@ -1039,6 +1042,9 @@ LRESULT TrayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
         case StartWithWindows:
             Notify_toggle_start_with_windows();
             break;
+        case OpenConfig:
+            Open_config_file();
+            break;
         case About:
             Show_about_dialog();
             break;
@@ -1157,6 +1163,8 @@ void TrayWindow::Show_context_menu() {
     AppendMenuW(menu, start_with_windows_flags, StartWithWindows,
                 kStartWithWindowsMenuText);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, OpenConfig, kOpenConfigMenuText);
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, About, kAboutMenuText);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, Exit, L"Exit");
@@ -1174,6 +1182,24 @@ void TrayWindow::Show_about_dialog() {
     }
     AboutDialog about_dialog(hinstance_);
     about_dialog.Show(hwnd_);
+}
+
+void TrayWindow::Open_config_file() {
+    std::filesystem::path path = Get_config_file_path();
+    if (path.empty()) {
+        return;
+    }
+    if (!std::filesystem::exists(path)) {
+        core::AppConfig const defaults{};
+        (void)Save_app_config(defaults);
+    }
+    std::wstring const path_w = path.wstring();
+    HINSTANCE const result =
+        ShellExecuteW(nullptr, L"open", path_w.c_str(), nullptr, nullptr, SW_SHOW);
+    if (reinterpret_cast<intptr_t>(result) <= 32) {
+        MessageBoxW(hwnd_, L"Could not open config file.", L"Greenflame",
+                    MB_OK | MB_ICONWARNING);
+    }
 }
 
 void TrayWindow::Notify_start_capture() {
