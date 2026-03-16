@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame_core/bubble_annotation_types.h"
 #include "greenflame_core/text_annotation_types.h"
 
 namespace greenflame::core {
@@ -30,6 +31,7 @@ class ITextLayoutEngine {
                                                 int delta_lines,
                                                 int32_t preferred_x_px) = 0;
     virtual void Rasterize(TextAnnotation &annotation) = 0;
+    virtual void Rasterize_bubble(BubbleAnnotation &annotation) = 0;
 };
 
 } // namespace greenflame::core

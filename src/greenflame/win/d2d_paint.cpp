@@ -356,6 +356,44 @@ void Draw_text(ID2D1RenderTarget *rt, D2DOverlayResources &res, uint64_t annotat
                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
 }
 
+void Draw_bubble(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                 uint64_t annotation_id, core::BubbleAnnotation const &annotation) {
+    if (rt == nullptr || annotation.bitmap_width_px <= 0 ||
+        annotation.bitmap_height_px <= 0 || annotation.premultiplied_bgra.empty()) {
+        return;
+    }
+
+    int32_t const r = annotation.diameter_px / 2;
+    core::RectPx const bounds =
+        core::RectPx::From_ltrb(annotation.center.x - r, annotation.center.y - r,
+                                annotation.center.x - r + annotation.diameter_px,
+                                annotation.center.y - r + annotation.diameter_px);
+
+    auto it = res.bubble_bitmaps.find(annotation_id);
+    if (it == res.bubble_bitmaps.end()) {
+        D2D1_BITMAP_PROPERTIES props{};
+        props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                              D2D1_ALPHA_MODE_PREMULTIPLIED);
+        props.dpiX = kDefaultDpi;
+        props.dpiY = kDefaultDpi;
+
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        HRESULT const hr = rt->CreateBitmap(
+            D2D1::SizeU(static_cast<UINT32>(annotation.bitmap_width_px),
+                        static_cast<UINT32>(annotation.bitmap_height_px)),
+            annotation.premultiplied_bgra.data(),
+            static_cast<UINT32>(annotation.bitmap_row_bytes), props,
+            bitmap.GetAddressOf());
+        if (FAILED(hr) || !bitmap) {
+            return;
+        }
+        it = res.bubble_bitmaps.emplace(annotation_id, std::move(bitmap)).first;
+    }
+
+    rt->DrawBitmap(it->second.Get(), Rect(bounds), 1.f,
+                   D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+}
+
 void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                      core::Annotation const &ann) {
     std::visit(
@@ -368,6 +406,9 @@ void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                 Draw_rectangle(rt, res, rect);
             },
             [&](core::TextAnnotation const &text) { Draw_text(rt, res, ann.id, text); },
+            [&](core::BubbleAnnotation const &bubble) {
+                Draw_bubble(rt, res, ann.id, bubble);
+            },
         },
         ann.data);
 }
@@ -1325,7 +1366,7 @@ void Draw_color_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         return;
     }
 
-    bool const has_hub = input.color_wheel_has_text_hub;
+    bool const has_hub = input.color_wheel_has_style_hub;
     bool const font_ring =
         has_hub && input.text_wheel_active_mode == core::TextWheelMode::Font;
 

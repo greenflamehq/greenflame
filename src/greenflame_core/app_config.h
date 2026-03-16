@@ -25,6 +25,7 @@ struct AppConfig final {
     int32_t highlighter_opacity_percent = kDefaultHighlighterOpacityPercent;
     int32_t text_size_points = kDefaultTextPointSize;
     TextFontChoice text_current_font = TextFontChoice::Sans;
+    TextFontChoice bubble_current_font = TextFontChoice::Sans;
     std::wstring text_font_sans = L"Arial";
     std::wstring text_font_serif = L"Times New Roman";
     std::wstring text_font_mono = L"Courier New";

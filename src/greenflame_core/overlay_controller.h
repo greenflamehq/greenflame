@@ -136,6 +136,8 @@ class OverlayController final {
     [[nodiscard]] bool Step_text_size(int delta_steps);
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
     void Set_text_current_font(TextFontChoice choice) noexcept;
+    [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
+    void Set_bubble_current_font(TextFontChoice choice) noexcept;
     bool Commit_active_text_edit();
     void Cancel_text_draft();
     [[nodiscard]] bool Has_active_annotation_edit() const noexcept;

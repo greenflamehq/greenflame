@@ -85,6 +85,11 @@ set(GREENFLAME_HELP_TOOL_GLYPH_PATH
 )
 file(TO_CMAKE_PATH "${GREENFLAME_HELP_TOOL_GLYPH_PATH}"
      GREENFLAME_HELP_TOOL_GLYPH_PATH)
+set(GREENFLAME_BUBBLE_TOOL_GLYPH_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/bubble-mask.png"
+)
+file(TO_CMAKE_PATH "${GREENFLAME_BUBBLE_TOOL_GLYPH_PATH}"
+     GREENFLAME_BUBBLE_TOOL_GLYPH_PATH)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/app.manifest.in"
@@ -148,6 +153,10 @@ add_library(greenflame_core STATIC
     src/greenflame_core/text_edit_controller.h
     src/greenflame_core/text_annotation_tool.cpp
     src/greenflame_core/text_annotation_tool.h
+    src/greenflame_core/bubble_annotation_types.cpp
+    src/greenflame_core/bubble_annotation_types.h
+    src/greenflame_core/bubble_annotation_tool.cpp
+    src/greenflame_core/bubble_annotation_tool.h
     src/greenflame_core/freehand_annotation_tool.cpp
     src/greenflame_core/freehand_annotation_tool.h
     src/greenflame_core/line_annotation_tool.cpp

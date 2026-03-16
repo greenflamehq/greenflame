@@ -87,3 +87,22 @@ TEST(app_config, Normalize_TruncatesTextFontFamiliesTo128CodeUnits) {
 
     EXPECT_EQ(config.text_font_sans.size(), 128u);
 }
+
+TEST(app_config, Normalize_PreservesValidBubbleFontChoices) {
+    for (TextFontChoice const choice : {TextFontChoice::Sans, TextFontChoice::Serif,
+                                        TextFontChoice::Mono, TextFontChoice::Art}) {
+        AppConfig config{};
+        config.bubble_current_font = choice;
+        config.Normalize();
+        EXPECT_EQ(config.bubble_current_font, choice);
+    }
+}
+
+TEST(app_config, Normalize_ResetsInvalidBubbleFontChoiceToSans) {
+    AppConfig config{};
+    config.bubble_current_font = static_cast<TextFontChoice>(99);
+
+    config.Normalize();
+
+    EXPECT_EQ(config.bubble_current_font, TextFontChoice::Sans);
+}

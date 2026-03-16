@@ -44,6 +44,7 @@ Examples of source files:
 - `resources/rectangle.png`
 - `resources/filled_rectangle.png`
 - `resources/help.png`
+- `resources/bubble.png`
 
 Derived embedded assets follow the same naming pattern:
 
@@ -54,6 +55,7 @@ Derived embedded assets follow the same naming pattern:
 - `resources/rectangle-mask.png`
 - `resources/filled_rectangle-mask.png`
 - `resources/help-mask.png`
+- `resources/bubble-mask.png`
 
 Generate the derived asset once with ImageMagick:
 
@@ -74,6 +76,7 @@ magick resources\arrow.png -colorspace Gray -negate -alpha copy -fill white -col
 magick resources\rectangle.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\rectangle-mask.png
 magick resources\filled_rectangle.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\filled_rectangle-mask.png
 magick resources\help.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\help-mask.png
+magick resources\bubble.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\bubble-mask.png
 ```
 
 What this does:

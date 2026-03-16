@@ -55,7 +55,7 @@ struct D2DPaintInput {
     size_t color_wheel_segment_count = 0;
     std::optional<size_t> color_wheel_selected_segment = std::nullopt;
     std::optional<size_t> color_wheel_hovered_segment = std::nullopt;
-    bool color_wheel_has_text_hub = false;
+    bool color_wheel_has_style_hub = false;
     core::TextWheelMode text_wheel_active_mode = core::TextWheelMode::Color;
     std::optional<core::TextWheelHubSide> text_wheel_hovered_hub = std::nullopt;
     std::wstring_view text_wheel_hub_font_family = {};

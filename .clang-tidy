@@ -66,9 +66,9 @@ CheckOptions:
       value: "NULL"
     # Magic numbers: keep flagged, but allow common literals.
     - key: readability-magic-numbers.IgnoredIntegerValues
-      value: "0;1;2;3;10;100"
+      value: "0;1;2;3;10;100;255"
     - key: cppcoreguidelines-avoid-magic-numbers.IgnoredIntegerValues
-      value: "0;1;2;3;10;100"
+      value: "0;1;2;3;10;100;255"
     - key: readability-magic-numbers.IgnoredFloatingPointValues
       value: "1.0;2.0;100.0"
     - key: cppcoreguidelines-avoid-magic-numbers.IgnoredFloatingPointValues

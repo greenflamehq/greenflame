@@ -22,6 +22,7 @@ class D2DTextLayoutEngine final : public core::ITextLayoutEngine {
                                         int delta_lines,
                                         int32_t preferred_x_px) override;
     void Rasterize(core::TextAnnotation &annotation) override;
+    void Rasterize_bubble(core::BubbleAnnotation &annotation) override;
 
   private:
     ID2D1Factory *d2d_factory_ = nullptr;

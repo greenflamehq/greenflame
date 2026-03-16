@@ -67,4 +67,23 @@ class UpdateAnnotationCommand final : public ICommand {
     std::string_view description_ = {};
 };
 
+class AddBubbleAnnotationCommand final : public ICommand {
+  public:
+    AddBubbleAnnotationCommand(AnnotationController *controller, size_t index,
+                               Annotation annotation,
+                               std::optional<uint64_t> selection_before,
+                               std::optional<uint64_t> selection_after);
+
+    void Undo() override;
+    void Redo() override;
+    std::string_view Description() const override { return "Add bubble annotation"; }
+
+  private:
+    AnnotationController *controller_ = nullptr;
+    size_t index_ = 0;
+    Annotation annotation_ = {};
+    std::optional<uint64_t> selection_before_ = std::nullopt;
+    std::optional<uint64_t> selection_after_ = std::nullopt;
+};
+
 } // namespace greenflame::core

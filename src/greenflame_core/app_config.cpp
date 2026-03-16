@@ -105,6 +105,7 @@ void AppConfig::Normalize() {
                    StrokeStyle::kMaxOpacityPercent);
     text_size_points = Normalize_text_point_size(text_size_points);
     text_current_font = Normalize_text_font_choice(text_current_font);
+    bubble_current_font = Normalize_text_font_choice(bubble_current_font);
     Normalize_text_font_family(text_font_sans, TextFontChoice::Sans);
     Normalize_text_font_family(text_font_serif, TextFontChoice::Serif);
     Normalize_text_font_family(text_font_mono, TextFontChoice::Mono);

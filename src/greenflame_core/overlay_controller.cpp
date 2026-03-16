@@ -183,6 +183,14 @@ void OverlayController::Set_text_current_font(TextFontChoice choice) noexcept {
     annotation_controller_.Set_text_current_font(choice);
 }
 
+TextFontChoice OverlayController::Bubble_current_font() const noexcept {
+    return annotation_controller_.Bubble_current_font();
+}
+
+void OverlayController::Set_bubble_current_font(TextFontChoice choice) noexcept {
+    annotation_controller_.Set_bubble_current_font(choice);
+}
+
 bool OverlayController::Commit_active_text_edit() {
     TextEditController *const edit = annotation_controller_.Active_text_edit();
     if (edit == nullptr) {
@@ -256,7 +264,8 @@ std::optional<int32_t> OverlayController::Adjust_brush_width(int32_t delta_steps
          *active_tool != AnnotationToolId::Highlighter &&
          *active_tool != AnnotationToolId::Line &&
          *active_tool != AnnotationToolId::Arrow &&
-         *active_tool != AnnotationToolId::Rectangle)) {
+         *active_tool != AnnotationToolId::Rectangle &&
+         *active_tool != AnnotationToolId::Bubble)) {
         return std::nullopt;
     }
     int32_t const updated_width = annotation_controller_.Brush_width_px() + delta_steps;

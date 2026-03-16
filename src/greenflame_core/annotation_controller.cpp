@@ -95,6 +95,9 @@ void AnnotationController::Reset_for_session() {
     text_edit_ctrl_.reset();
     text_size_points_ = kDefaultTextAnnotationPointSize;
     text_current_font_ = TextFontChoice::Sans;
+    bubble_counter_ = 1;
+    bubble_current_font_ = TextFontChoice::Sans;
+    pending_bubble_cursor_.reset();
     registry_.Reset_all();
 }
 
@@ -253,7 +256,7 @@ AnnotationController::Active_annotation_edit_handle() const noexcept {
 
 bool AnnotationController::Has_active_gesture() const noexcept {
     return Has_active_tool_gesture() || Has_active_edit_interaction() ||
-           Has_active_text_edit();
+           Has_active_text_edit() || pending_bubble_cursor_.has_value();
 }
 
 void AnnotationController::Set_text_layout_engine(ITextLayoutEngine *engine) noexcept {
@@ -334,6 +337,14 @@ void AnnotationController::Set_text_current_font(TextFontChoice choice) noexcept
     text_current_font_ = Normalize_text_font_choice(choice);
 }
 
+TextFontChoice AnnotationController::Bubble_current_font() const noexcept {
+    return bubble_current_font_;
+}
+
+void AnnotationController::Set_bubble_current_font(TextFontChoice choice) noexcept {
+    bubble_current_font_ = Normalize_text_font_choice(choice);
+}
+
 bool AnnotationController::On_primary_press(PointPx cursor) {
     if (active_tool_ == AnnotationToolId::Text) {
         if (!text_edit_ctrl_.has_value()) {
@@ -346,6 +357,11 @@ bool AnnotationController::On_primary_press(PointPx cursor) {
             return false;
         }
         text_edit_ctrl_->On_pointer_press(cursor);
+        return true;
+    }
+
+    if (active_tool_ == AnnotationToolId::Bubble) {
+        pending_bubble_cursor_ = cursor;
         return true;
     }
 
@@ -386,6 +402,34 @@ bool AnnotationController::On_primary_release(UndoStack &undo_stack) {
             selection, selection, command->description));
         return true;
     }
+
+    if (pending_bubble_cursor_.has_value() && text_layout_engine_ != nullptr) {
+        PointPx const cursor = *pending_bubble_cursor_;
+        pending_bubble_cursor_.reset();
+
+        BubbleAnnotation bubble{};
+        bubble.center = cursor;
+        bubble.diameter_px = brush_style_.width_px;
+        bubble.color = brush_style_.color;
+        bubble.font_choice = Normalize_text_font_choice(bubble_current_font_);
+        bubble.counter_value = bubble_counter_;
+        text_layout_engine_->Rasterize_bubble(bubble);
+
+        Annotation committed{};
+        committed.id = Next_annotation_id();
+        committed.data = std::move(bubble);
+
+        size_t const insert_index = document_.annotations.size();
+        undo_stack.Push(std::make_unique<AddBubbleAnnotationCommand>(
+            this, insert_index, std::move(committed), document_.selected_annotation_id,
+            document_.selected_annotation_id));
+        return true;
+    }
+    if (pending_bubble_cursor_.has_value()) {
+        pending_bubble_cursor_.reset();
+        return false;
+    }
+
     IAnnotationTool *const tool = Active_tool_impl();
     if (tool == nullptr) {
         return false;
@@ -397,6 +441,10 @@ bool AnnotationController::On_cancel() {
     if (text_edit_ctrl_.has_value()) {
         text_edit_ctrl_->Cancel();
         text_edit_ctrl_.reset();
+        return true;
+    }
+    if (pending_bubble_cursor_.has_value()) {
+        pending_bubble_cursor_.reset();
         return true;
     }
     if (active_edit_interaction_ != nullptr) {
@@ -435,6 +483,7 @@ void AnnotationController::Clear_annotations() noexcept {
     document_.selected_annotation_id = std::nullopt;
     active_edit_interaction_.reset();
     text_edit_ctrl_.reset();
+    pending_bubble_cursor_.reset();
     registry_.Reset_all();
 }
 

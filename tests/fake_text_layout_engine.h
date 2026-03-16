@@ -122,6 +122,15 @@ class FakeTextLayoutEngine final : public ITextLayoutEngine {
                 static_cast<size_t>(annotation.bitmap_height_px),
             0);
     }
+
+    void Rasterize_bubble(BubbleAnnotation &annotation) override {
+        int32_t const d = annotation.diameter_px;
+        annotation.bitmap_width_px = d;
+        annotation.bitmap_height_px = d;
+        annotation.bitmap_row_bytes = d * 4;
+        annotation.premultiplied_bgra.assign(
+            static_cast<size_t>(d) * static_cast<size_t>(d) * 4u, 0);
+    }
 };
 
 } // namespace

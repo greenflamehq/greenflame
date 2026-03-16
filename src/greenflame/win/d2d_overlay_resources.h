@@ -47,9 +47,10 @@ struct D2DOverlayResources final {
                static_cast<size_t>(OverlayToolbarGlyphId::Count)>
         toolbar_glyphs = {};
 
-    // Per-annotation text bitmap cache: keyed by annotation ID.
+    // Per-annotation bitmap caches: keyed by annotation ID.
     // Cleared on Invalidate_annotations() and Release_device_resources().
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> text_bitmaps;
+    std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> bubble_bitmaps;
 
     bool annotations_valid = false;
     bool frozen_valid = false;

@@ -33,8 +33,8 @@ constexpr int kArrowToolGlyphResourceId = 106;
 constexpr int kRectangleToolGlyphResourceId = 107;
 constexpr int kFilledRectangleToolGlyphResourceId = 108;
 constexpr int kHelpToolGlyphResourceId = 109;
-constexpr int kTextToolGlyphResourceId =
-    110; // Appended after Help; IDs are insertion-ordered.
+constexpr int kTextToolGlyphResourceId = 110;
+constexpr int kBubbleToolGlyphResourceId = 111;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 constexpr UINT_PTR kCaretBlinkTimerId = 2;
 
@@ -59,7 +59,7 @@ struct ToolbarGlyphResourceSpec final {
     int resource_id = 0;
 };
 
-constexpr std::array<ToolbarGlyphResourceSpec, 8> kToolbarGlyphResourceSpecs = {{
+constexpr std::array<ToolbarGlyphResourceSpec, 9> kToolbarGlyphResourceSpecs = {{
     {greenflame::OverlayToolbarGlyphId::Brush, kBrushToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Highlighter, kHighlighterToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Line, kLineToolGlyphResourceId},
@@ -68,6 +68,7 @@ constexpr std::array<ToolbarGlyphResourceSpec, 8> kToolbarGlyphResourceSpecs = {
     {greenflame::OverlayToolbarGlyphId::FilledRectangle,
      kFilledRectangleToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Text, kTextToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Bubble, kBubbleToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Help, kHelpToolGlyphResourceId},
 }};
 
@@ -655,6 +656,8 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
             return OverlayToolbarGlyphId::FilledRectangle;
         case core::AnnotationToolbarGlyph::Text:
             return OverlayToolbarGlyphId::Text;
+        case core::AnnotationToolbarGlyph::Bubble:
+            return OverlayToolbarGlyphId::Bubble;
         case core::AnnotationToolbarGlyph::None:
             return OverlayToolbarGlyphId::None;
         }
@@ -812,6 +815,8 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
                                         : core::AppConfig::kDefaultTextPointSize);
     controller_.Set_text_current_font(config_ != nullptr ? config_->text_current_font
                                                          : core::TextFontChoice::Sans);
+    controller_.Set_bubble_current_font(
+        config_ != nullptr ? config_->bubble_current_font : core::TextFontChoice::Sans);
     ShowWindow(hwnd, SW_SHOW);
     return true;
 }
@@ -1050,7 +1055,9 @@ size_t OverlayWindow::Current_annotation_color_index() const noexcept {
 }
 
 size_t OverlayWindow::Current_color_wheel_segment_count() const noexcept {
-    if (controller_.Active_annotation_tool() == core::AnnotationToolId::Text) {
+    auto const tool = controller_.Active_annotation_tool();
+    if (tool == core::AnnotationToolId::Text ||
+        tool == core::AnnotationToolId::Bubble) {
         return (color_wheel_.text_mode == core::TextWheelMode::Color)
                    ? core::kAnnotationColorSlotCount
                    : kTextWheelFontChoices.size();
@@ -1091,9 +1098,10 @@ bool OverlayWindow::Update_color_wheel_hover(core::PointPx cursor) {
     if (!color_wheel_.visible) {
         return false;
     }
-    bool const is_text =
-        controller_.Active_annotation_tool() == core::AnnotationToolId::Text;
-    if (is_text) {
+    auto const active_tool = controller_.Active_annotation_tool();
+    bool const is_style_hub = active_tool == core::AnnotationToolId::Text ||
+                              active_tool == core::AnnotationToolId::Bubble;
+    if (is_style_hub) {
         auto hub_hit = core::Hit_test_text_wheel_hub(color_wheel_.center, cursor);
         if (hub_hit.has_value()) {
             bool const changed = (hub_hit != color_wheel_.hovered_hub ||
@@ -1112,7 +1120,7 @@ bool OverlayWindow::Update_color_wheel_hover(core::PointPx cursor) {
         }
         return changed;
     }
-    // Non-text: original behavior.
+    // Non-style-hub: original behavior.
     std::optional<size_t> const hovered = core::Hit_test_color_wheel_segment(
         color_wheel_.center, cursor, Current_color_wheel_segment_count());
     if (hovered == color_wheel_.hovered_segment) {
@@ -1124,7 +1132,9 @@ bool OverlayWindow::Update_color_wheel_hover(core::PointPx cursor) {
 
 void OverlayWindow::Select_color_wheel_segment(size_t index) {
     std::span<const COLORREF> const palette = Current_tool_color_palette();
-    if (controller_.Active_annotation_tool() == core::AnnotationToolId::Text) {
+    auto const active_tool = controller_.Active_annotation_tool();
+    if (active_tool == core::AnnotationToolId::Text ||
+        active_tool == core::AnnotationToolId::Bubble) {
         if (color_wheel_.text_mode == core::TextWheelMode::Color) {
             if (index < palette.size()) {
                 controller_.Set_brush_annotation_color(palette[index]);
@@ -1137,11 +1147,20 @@ void OverlayWindow::Select_color_wheel_segment(size_t index) {
             }
         } else {
             if (index < kTextWheelFontChoices.size()) {
-                controller_.Set_text_current_font(kTextWheelFontChoices[index]);
-                if (config_ != nullptr) {
-                    config_->text_current_font = kTextWheelFontChoices[index];
-                    config_->Normalize();
-                    (void)Save_app_config(*config_);
+                if (active_tool == core::AnnotationToolId::Text) {
+                    controller_.Set_text_current_font(kTextWheelFontChoices[index]);
+                    if (config_ != nullptr) {
+                        config_->text_current_font = kTextWheelFontChoices[index];
+                        config_->Normalize();
+                        (void)Save_app_config(*config_);
+                    }
+                } else {
+                    controller_.Set_bubble_current_font(kTextWheelFontChoices[index]);
+                    if (config_ != nullptr) {
+                        config_->bubble_current_font = kTextWheelFontChoices[index];
+                        config_->Normalize();
+                        (void)Save_app_config(*config_);
+                    }
                 }
             }
         }
@@ -1212,7 +1231,9 @@ bool OverlayWindow::Should_show_brush_cursor_preview() const {
         return false;
     }
     auto const &s = controller_.State();
-    return controller_.Active_annotation_tool() == core::AnnotationToolId::Freehand &&
+    auto const tool = controller_.Active_annotation_tool();
+    return (tool == core::AnnotationToolId::Freehand ||
+            tool == core::AnnotationToolId::Bubble) &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value();
 }
@@ -1657,9 +1678,10 @@ LRESULT OverlayWindow::On_l_button_down() {
     core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
     if (color_wheel_.visible) {
         suppress_next_lbutton_up_ = true;
-        bool const is_text =
-            controller_.Active_annotation_tool() == core::AnnotationToolId::Text;
-        if (is_text) {
+        auto const lbd_tool = controller_.Active_annotation_tool();
+        bool const is_style_hub = lbd_tool == core::AnnotationToolId::Text ||
+                                  lbd_tool == core::AnnotationToolId::Bubble;
+        if (is_style_hub) {
             auto hub_hit = core::Hit_test_text_wheel_hub(color_wheel_.center, cur);
             if (hub_hit.has_value()) {
                 color_wheel_.text_mode = (*hub_hit == core::TextWheelHubSide::Color)
@@ -1908,7 +1930,8 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
         *active_tool != core::AnnotationToolId::Highlighter &&
         *active_tool != core::AnnotationToolId::Line &&
         *active_tool != core::AnnotationToolId::Arrow &&
-        *active_tool != core::AnnotationToolId::Rectangle) {
+        *active_tool != core::AnnotationToolId::Rectangle &&
+        *active_tool != core::AnnotationToolId::Bubble) {
         mouse_wheel_delta_remainder_ = 0;
         return 0;
     }
@@ -2573,17 +2596,22 @@ LRESULT OverlayWindow::On_paint() {
         input.show_color_wheel = color_wheel_.visible;
         input.color_wheel_center_px = color_wheel_.center;
         input.color_wheel_colors = Current_tool_color_palette();
-        bool const is_text =
-            controller_.Active_annotation_tool() == core::AnnotationToolId::Text;
-        input.color_wheel_has_text_hub = is_text;
-        if (is_text) {
+        auto const active_tool_for_wheel = controller_.Active_annotation_tool();
+        bool const is_style_hub =
+            active_tool_for_wheel == core::AnnotationToolId::Text ||
+            active_tool_for_wheel == core::AnnotationToolId::Bubble;
+        input.color_wheel_has_style_hub = is_style_hub;
+        if (is_style_hub) {
             input.text_wheel_active_mode = color_wheel_.text_mode;
             input.text_wheel_hovered_hub = color_wheel_.hovered_hub;
             std::array<std::wstring_view, 4> const font_families =
                 Resolve_text_font_families(config_);
+            core::TextFontChoice const hub_font =
+                (active_tool_for_wheel == core::AnnotationToolId::Bubble)
+                    ? controller_.Bubble_current_font()
+                    : controller_.Text_current_font();
             input.text_wheel_hub_font_family =
-                font_families[core::Text_font_choice_index(
-                    controller_.Text_current_font())];
+                font_families[core::Text_font_choice_index(hub_font)];
             input.color_wheel_font_families = font_families;
             if (color_wheel_.text_mode == core::TextWheelMode::Color) {
                 input.color_wheel_segment_count = core::kAnnotationColorSlotCount;
@@ -2591,7 +2619,7 @@ LRESULT OverlayWindow::On_paint() {
             } else {
                 input.color_wheel_segment_count = kTextWheelFontChoices.size();
                 input.color_wheel_selected_segment =
-                    core::Text_font_choice_index(controller_.Text_current_font());
+                    core::Text_font_choice_index(hub_font);
             }
             input.color_wheel_hovered_segment = color_wheel_.hovered_segment;
         } else {

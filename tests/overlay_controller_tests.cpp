@@ -1201,6 +1201,17 @@ TEST(overlay_controller, BrushWidthAdjust_IgnoresTextTool) {
     EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
 }
 
+TEST(overlay_controller, BrushWidthAdjust_AppliesToBubbleTool) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'N'), OverlayAction::Repaint);
+
+    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_brush_width(2), std::optional<int32_t>{4});
+    EXPECT_EQ(c.Adjust_brush_width(-3), std::optional<int32_t>{1});
+}
+
 TEST(overlay_controller,
      AnnotationToolbar_FreehandStrokeStaysVisibleButNonInteractive) {
     auto c = Make_controller();

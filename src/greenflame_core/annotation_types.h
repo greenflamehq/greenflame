@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame_core/bubble_annotation_types.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/selection_handles.h"
 #include "greenflame_core/text_annotation_types.h"
@@ -11,6 +12,7 @@ enum class AnnotationKind : uint8_t {
     Line,
     Rectangle,
     Text,
+    Bubble,
 };
 
 enum class FreehandTipShape : uint8_t {
@@ -61,8 +63,9 @@ struct RectangleAnnotation final {
     constexpr bool operator==(RectangleAnnotation const &) const noexcept = default;
 };
 
-using AnnotationData = std::variant<FreehandStrokeAnnotation, LineAnnotation,
-                                    RectangleAnnotation, TextAnnotation>;
+using AnnotationData =
+    std::variant<FreehandStrokeAnnotation, LineAnnotation, RectangleAnnotation,
+                 TextAnnotation, BubbleAnnotation>;
 
 template <class... Ts> struct Overloaded : Ts... {
     using Ts::operator()...;

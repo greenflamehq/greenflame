@@ -346,6 +346,7 @@ D2DOverlayResources::Toolbar_glyph_bitmap(OverlayToolbarGlyphId glyph) const noe
 
 void D2DOverlayResources::Invalidate_annotations() noexcept {
     text_bitmaps.clear();
+    bubble_bitmaps.clear();
     annotations_valid = false;
     frozen_valid = false;
 }
@@ -374,6 +375,7 @@ void D2DOverlayResources::Release_device_resources() {
         glyph.Reset();
     }
     text_bitmaps.clear();
+    bubble_bitmaps.clear();
     hwnd_rt.Reset();
     annotations_valid = false;
     frozen_valid = false;

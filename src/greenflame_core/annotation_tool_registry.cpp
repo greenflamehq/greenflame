@@ -1,5 +1,6 @@
 #include "greenflame_core/annotation_tool_registry.h"
 
+#include "greenflame_core/bubble_annotation_tool.h"
 #include "greenflame_core/freehand_annotation_tool.h"
 #include "greenflame_core/line_annotation_tool.h"
 #include "greenflame_core/rectangle_annotation_tool.h"
@@ -39,6 +40,7 @@ AnnotationToolRegistry::AnnotationToolRegistry() {
                                  AnnotationToolbarGlyph::FilledRectangle},
         true));
     tools_.push_back(std::make_unique<TextAnnotationTool>());
+    tools_.push_back(std::make_unique<BubbleAnnotationTool>());
 }
 
 IAnnotationTool const *

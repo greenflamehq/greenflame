@@ -599,4 +599,142 @@ void D2DTextLayoutEngine::Rasterize(core::TextAnnotation &annotation) {
     }
 }
 
+void D2DTextLayoutEngine::Rasterize_bubble(core::BubbleAnnotation &annotation) {
+    annotation.bitmap_width_px = 0;
+    annotation.bitmap_height_px = 0;
+    annotation.bitmap_row_bytes = 0;
+    annotation.premultiplied_bgra.clear();
+
+    if (d2d_factory_ == nullptr || dwrite_factory_ == nullptr ||
+        annotation.diameter_px <= 0) {
+        return;
+    }
+
+    int32_t const d = annotation.diameter_px;
+    float const fd = static_cast<float>(d);
+
+    ScopedCoInit const co_init = Ensure_com_initialized();
+    (void)co_init;
+
+    Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory;
+    HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+                                  CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic_factory));
+    if (FAILED(hr) || !wic_factory) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
+    hr = wic_factory->CreateBitmap(static_cast<UINT>(d), static_cast<UINT>(d),
+                                   GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad,
+                                   wic_bitmap.GetAddressOf());
+    if (FAILED(hr) || !wic_bitmap) {
+        return;
+    }
+
+    D2D1_RENDER_TARGET_PROPERTIES rt_props = D2D1::RenderTargetProperties(
+        D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
+        kDefaultDpi, kDefaultDpi);
+
+    Microsoft::WRL::ComPtr<ID2D1RenderTarget> render_target;
+    hr = d2d_factory_->CreateWicBitmapRenderTarget(wic_bitmap.Get(), rt_props,
+                                                   render_target.GetAddressOf());
+    if (FAILED(hr) || !render_target) {
+        return;
+    }
+
+    COLORREF const text_color = core::Bubble_text_color(annotation.color);
+
+    // Font size: fraction of diameter in DIP units. Larger fraction for 1-2 digits.
+    int32_t const n = annotation.counter_value;
+    float const font_fraction = (n >= 100) ? 0.38f : 0.55f;
+    float const font_size_dip = font_fraction * fd;
+
+    size_t const family_index = Text_font_choice_index(annotation.font_choice);
+    std::wstring_view const family =
+        font_families_[family_index].empty()
+            ? Default_font_family(annotation.font_choice)
+            : std::wstring_view(font_families_[family_index]);
+
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
+    hr = dwrite_factory_->CreateTextFormat(
+        family.data(), nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL, font_size_dip, L"", format.GetAddressOf());
+    if (FAILED(hr) || !format) {
+        return;
+    }
+    (void)format->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    (void)format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    (void)format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+
+    std::wstring const text = std::to_wstring(n);
+
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+    hr = dwrite_factory_->CreateTextLayout(text.c_str(),
+                                           static_cast<UINT32>(text.size()),
+                                           format.Get(), fd, fd, layout.GetAddressOf());
+    if (FAILED(hr) || !layout) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> fill_brush;
+    hr = render_target->CreateSolidColorBrush(Colorref_to_d2d(annotation.color),
+                                              fill_brush.GetAddressOf());
+    if (FAILED(hr) || !fill_brush) {
+        return;
+    }
+
+    Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> text_brush;
+    hr = render_target->CreateSolidColorBrush(Colorref_to_d2d(text_color),
+                                              text_brush.GetAddressOf());
+    if (FAILED(hr) || !text_brush) {
+        return;
+    }
+
+    render_target->BeginDraw();
+    render_target->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
+
+    // Filled circle (inset by 0.5px so the edge doesn't get clipped)
+    float const r = fd / 2.0f;
+    float const fill_r = r - 0.5f;
+    if (fill_r > 0.0f) {
+        D2D1_ELLIPSE const fill_ellipse =
+            D2D1::Ellipse(D2D1::Point2F(r, r), fill_r, fill_r);
+        render_target->FillEllipse(fill_ellipse, fill_brush.Get());
+    }
+
+    // Inner 1px stroke inset 1px from the outer edge (stroke center at r - 1.5)
+    float const stroke_r = r - 1.5f;
+    if (stroke_r > 0.0f) {
+        D2D1_ELLIPSE const stroke_ellipse =
+            D2D1::Ellipse(D2D1::Point2F(r, r), stroke_r, stroke_r);
+        render_target->DrawEllipse(stroke_ellipse, text_brush.Get(), 1.0f);
+    }
+
+    // Number centered in the bitmap
+    render_target->DrawTextLayout(D2D1::Point2F(0.0f, 0.0f), layout.Get(),
+                                  text_brush.Get());
+
+    hr = render_target->EndDraw();
+    if (FAILED(hr)) {
+        return;
+    }
+
+    WICRect rect = {0, 0, d, d};
+    annotation.bitmap_width_px = d;
+    annotation.bitmap_height_px = d;
+    annotation.bitmap_row_bytes = d * 4;
+    annotation.premultiplied_bgra.resize(
+        static_cast<size_t>(annotation.bitmap_row_bytes) * static_cast<size_t>(d));
+    hr = wic_bitmap->CopyPixels(&rect, static_cast<UINT>(annotation.bitmap_row_bytes),
+                                static_cast<UINT>(annotation.premultiplied_bgra.size()),
+                                annotation.premultiplied_bgra.data());
+    if (FAILED(hr)) {
+        annotation.bitmap_width_px = 0;
+        annotation.bitmap_height_px = 0;
+        annotation.bitmap_row_bytes = 0;
+        annotation.premultiplied_bgra.clear();
+    }
+}
+
 } // namespace greenflame

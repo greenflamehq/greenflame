@@ -90,7 +90,7 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     std::vector<AnnotationToolbarButtonView> const views =
         controller.Build_toolbar_button_views();
 
-    ASSERT_EQ(views.size(), 7u);
+    ASSERT_EQ(views.size(), 8u);
     EXPECT_EQ(views[0].id, AnnotationToolId::Freehand);
     EXPECT_EQ(views[0].label, L"B");
     EXPECT_EQ(views[0].tooltip, L"Brush tool");
@@ -126,6 +126,11 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     EXPECT_EQ(views[6].tooltip, L"Text tool");
     EXPECT_EQ(views[6].glyph, AnnotationToolbarGlyph::Text);
     EXPECT_FALSE(views[6].active);
+    EXPECT_EQ(views[7].id, AnnotationToolId::Bubble);
+    EXPECT_EQ(views[7].label, L"N");
+    EXPECT_EQ(views[7].tooltip, L"Bubble tool");
+    EXPECT_EQ(views[7].glyph, AnnotationToolbarGlyph::Bubble);
+    EXPECT_FALSE(views[7].active);
 }
 
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFreehand) {
@@ -1221,4 +1226,210 @@ TEST(annotation_controller, SelectedAnnotationBounds_LineUsesVisualNotHitTestBou
     ASSERT_TRUE(bounds.has_value());
     EXPECT_EQ(*bounds, Annotation_visual_bounds(line));
     EXPECT_NE(*bounds, Annotation_bounds(line));
+}
+
+// ---------------------------------------------------------------------------
+// Bubble tool — hotkey, font, counter
+// ---------------------------------------------------------------------------
+
+TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesBubble) {
+    AnnotationController controller;
+
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'N'));
+    EXPECT_EQ(controller.Active_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Bubble});
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'n'));
+    EXPECT_EQ(controller.Active_tool(), std::nullopt);
+}
+
+TEST(annotation_controller, BubbleFontChoice_DefaultsToSans) {
+    AnnotationController controller;
+    EXPECT_EQ(controller.Bubble_current_font(), TextFontChoice::Sans);
+}
+
+TEST(annotation_controller, BubbleFontChoice_PersistsAfterSet) {
+    AnnotationController controller;
+
+    controller.Set_bubble_current_font(TextFontChoice::Serif);
+    EXPECT_EQ(controller.Bubble_current_font(), TextFontChoice::Serif);
+
+    controller.Set_bubble_current_font(TextFontChoice::Mono);
+    EXPECT_EQ(controller.Bubble_current_font(), TextFontChoice::Mono);
+}
+
+TEST(annotation_controller, BubbleCounter_InitialValueIsOne) {
+    AnnotationController controller;
+    EXPECT_EQ(controller.Current_bubble_counter(), 1);
+}
+
+TEST(annotation_controller, BubblePlacement_PlacesWithCurrentCounterThenIncrements) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    EXPECT_EQ(controller.Current_bubble_counter(), 1);
+    EXPECT_TRUE(controller.On_primary_press({50, 50}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(
+        std::get<BubbleAnnotation>(controller.Annotations()[0].data).counter_value, 1);
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+}
+
+TEST(annotation_controller, BubblePlacement_UndoDecrementsCounter) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    EXPECT_TRUE(controller.On_primary_press({50, 50}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    undo_stack.Undo();
+    EXPECT_TRUE(controller.Annotations().empty());
+    EXPECT_EQ(controller.Current_bubble_counter(), 1);
+}
+
+TEST(annotation_controller, BubblePlacement_RedoIncrementsCounter) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    EXPECT_TRUE(controller.On_primary_press({50, 50}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    undo_stack.Undo();
+    EXPECT_EQ(controller.Current_bubble_counter(), 1);
+
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+}
+
+TEST(annotation_controller, BubblePlacement_DeleteDoesNotAffectCounter) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    EXPECT_TRUE(controller.On_primary_press({50, 50}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble)); // deactivate
+    uint64_t const id = controller.Annotations()[0].id;
+    EXPECT_TRUE(controller.Set_selected_annotation(std::optional<uint64_t>{id}));
+    EXPECT_TRUE(controller.Delete_selected_annotation(undo_stack));
+    EXPECT_TRUE(controller.Annotations().empty());
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+}
+
+TEST(annotation_controller, BubblePlacement_UndoDeleteDoesNotAffectCounter) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    EXPECT_TRUE(controller.On_primary_press({50, 50}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble)); // deactivate
+    uint64_t const id = controller.Annotations()[0].id;
+    EXPECT_TRUE(controller.Set_selected_annotation(std::optional<uint64_t>{id}));
+    EXPECT_TRUE(controller.Delete_selected_annotation(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    undo_stack.Undo(); // undo Delete
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+}
+
+TEST(annotation_controller, BubblePlacement_SwitchingToolsDoesNotResetCounter) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    EXPECT_TRUE(controller.On_primary_press({50, 50}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));   // off
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand)); // on
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand)); // off
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));   // back on
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+}
+
+TEST(annotation_controller, BubblePlacement_FullCounterSequence) {
+    AnnotationController controller;
+    FakeTextLayoutEngine engine;
+    UndoStack undo_stack;
+    controller.Set_text_layout_engine(&engine);
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble));
+
+    // Add bubble: counter 1→2, shows "1"
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+    EXPECT_EQ(
+        std::get<BubbleAnnotation>(controller.Annotations()[0].data).counter_value, 1);
+
+    // Add bubble: counter 2→3, shows "2"
+    EXPECT_TRUE(controller.On_primary_press({20, 20}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 3);
+    EXPECT_EQ(
+        std::get<BubbleAnnotation>(controller.Annotations()[1].data).counter_value, 2);
+
+    // Undo(Add): counter 3→2, "2" removed
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    // Delete "1": counter unchanged at 2
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble)); // deactivate
+    uint64_t const id_1 = controller.Annotations()[0].id;
+    EXPECT_TRUE(controller.Set_selected_annotation(std::optional<uint64_t>{id_1}));
+    EXPECT_TRUE(controller.Delete_selected_annotation(undo_stack));
+    EXPECT_TRUE(controller.Annotations().empty());
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    // Add bubble: counter 2→3, shows "2"
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Bubble)); // reactivate
+    EXPECT_TRUE(controller.On_primary_press({30, 30}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Current_bubble_counter(), 3);
+    EXPECT_EQ(
+        std::get<BubbleAnnotation>(controller.Annotations().back().data).counter_value,
+        2);
+
+    // Undo(Add): counter 3→2
+    undo_stack.Undo();
+    EXPECT_TRUE(controller.Annotations().empty());
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    // Undo(Delete): "1" restored, counter unchanged at 2
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    // Redo(Delete): "1" removed, counter unchanged at 2
+    undo_stack.Redo();
+    EXPECT_TRUE(controller.Annotations().empty());
+    EXPECT_EQ(controller.Current_bubble_counter(), 2);
+
+    // Redo(Add): "2" restored, counter 2→3
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Current_bubble_counter(), 3);
 }

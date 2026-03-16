@@ -101,6 +101,8 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] bool Step_text_size(int delta_steps);
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
     void Set_text_current_font(TextFontChoice choice) noexcept;
+    [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
+    void Set_bubble_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] bool Has_annotations() const noexcept {
         return !document_.annotations.empty();
     }
@@ -135,6 +137,17 @@ class AnnotationController final : public IAnnotationToolHost,
     void Erase_annotation_at(size_t index,
                              std::optional<uint64_t> selected_annotation_id);
 
+    // Called by AddBubbleAnnotationCommand on Undo/Redo.
+    [[nodiscard]] int32_t Current_bubble_counter() const noexcept {
+        return bubble_counter_;
+    }
+    void Increment_bubble_counter() noexcept { ++bubble_counter_; }
+    void Decrement_bubble_counter() noexcept {
+        if (bubble_counter_ > 1) {
+            --bubble_counter_;
+        }
+    }
+
   private:
     [[nodiscard]] StrokeStyle Current_stroke_style() const noexcept override;
     [[nodiscard]] uint64_t Next_annotation_id() const noexcept override;
@@ -158,6 +171,9 @@ class AnnotationController final : public IAnnotationToolHost,
     std::optional<TextEditController> text_edit_ctrl_ = std::nullopt;
     int32_t text_size_points_ = kDefaultTextAnnotationPointSize;
     TextFontChoice text_current_font_ = TextFontChoice::Sans;
+    int32_t bubble_counter_ = 1;
+    TextFontChoice bubble_current_font_ = TextFontChoice::Sans;
+    std::optional<PointPx> pending_bubble_cursor_ = std::nullopt;
 };
 
 } // namespace greenflame::core

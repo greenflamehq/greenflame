@@ -30,6 +30,7 @@ add_executable(greenflame_tests
     cli_options_tests.cpp
     app_config_tests.cpp
     annotation_hit_test_tests.cpp
+    bubble_annotation_tests.cpp
     annotation_tool_tests.cpp
     annotation_edit_interaction_tests.cpp
     annotation_controller_tests.cpp

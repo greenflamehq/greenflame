@@ -64,4 +64,24 @@ void UpdateAnnotationCommand::Redo() {
     }
 }
 
+AddBubbleAnnotationCommand::AddBubbleAnnotationCommand(
+    AnnotationController *controller, size_t index, Annotation annotation,
+    std::optional<uint64_t> selection_before, std::optional<uint64_t> selection_after)
+    : controller_(controller), index_(index), annotation_(std::move(annotation)),
+      selection_before_(selection_before), selection_after_(selection_after) {}
+
+void AddBubbleAnnotationCommand::Undo() {
+    if (controller_ != nullptr) {
+        controller_->Erase_annotation_at(index_, selection_before_);
+        controller_->Decrement_bubble_counter();
+    }
+}
+
+void AddBubbleAnnotationCommand::Redo() {
+    if (controller_ != nullptr) {
+        controller_->Insert_annotation_at(index_, annotation_, selection_after_);
+        controller_->Increment_bubble_counter();
+    }
+}
+
 } // namespace greenflame::core

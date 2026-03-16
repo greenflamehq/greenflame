@@ -1,5 +1,7 @@
 #include "greenflame_core/annotation_hit_test.h"
 
+#include "greenflame_core/bubble_annotation_types.h"
+
 namespace greenflame::core {
 
 namespace {
@@ -439,6 +441,75 @@ struct ArrowGeometry final {
                              std::max(a.right, b.right), std::max(a.bottom, b.bottom));
 }
 
+[[nodiscard]] RectPx Bubble_visual_bounds(BubbleAnnotation const &bubble) noexcept {
+    int32_t const r = bubble.diameter_px / 2;
+    return RectPx::From_ltrb(bubble.center.x - r, bubble.center.y - r,
+                             bubble.center.x - r + bubble.diameter_px,
+                             bubble.center.y - r + bubble.diameter_px);
+}
+
+[[nodiscard]] bool Bubble_bitmap_is_valid(BubbleAnnotation const &annotation) noexcept {
+    if (annotation.bitmap_width_px <= 0 || annotation.bitmap_height_px <= 0 ||
+        annotation.bitmap_row_bytes < annotation.bitmap_width_px * 4) {
+        return false;
+    }
+    size_t const required_size = static_cast<size_t>(annotation.bitmap_row_bytes) *
+                                 static_cast<size_t>(annotation.bitmap_height_px);
+    return annotation.premultiplied_bgra.size() >= required_size;
+}
+
+void Blend_bubble_annotation_onto_pixels(std::span<uint8_t> pixels, int row_bytes,
+                                         BubbleAnnotation const &annotation,
+                                         RectPx target_bounds,
+                                         RectPx clipped_bounds) noexcept {
+    if (!Bubble_bitmap_is_valid(annotation)) {
+        return;
+    }
+    RectPx const visual_bounds = Bubble_visual_bounds(annotation);
+
+    for (int32_t y = clipped_bounds.top; y < clipped_bounds.bottom; ++y) {
+        int32_t const target_y = y - target_bounds.top;
+        int32_t const source_y = y - visual_bounds.top;
+        size_t const target_row_offset =
+            static_cast<size_t>(target_y) * static_cast<size_t>(row_bytes);
+        size_t const source_row_offset =
+            static_cast<size_t>(source_y) *
+            static_cast<size_t>(annotation.bitmap_row_bytes);
+
+        for (int32_t x = clipped_bounds.left; x < clipped_bounds.right; ++x) {
+            int32_t const source_x = x - visual_bounds.left;
+            size_t const source_offset =
+                source_row_offset + static_cast<size_t>(source_x) * 4u;
+            if (source_offset + 3u >= annotation.premultiplied_bgra.size()) {
+                continue;
+            }
+
+            uint8_t const alpha = annotation.premultiplied_bgra[source_offset + 3u];
+            if (alpha == 0) {
+                continue;
+            }
+
+            int32_t const target_x = x - target_bounds.left;
+            size_t const target_offset =
+                target_row_offset + static_cast<size_t>(target_x) * 4u;
+            if (target_offset + 3u >= pixels.size()) {
+                continue;
+            }
+
+            pixels[target_offset] = Blend_premultiplied_channel(
+                pixels[target_offset], annotation.premultiplied_bgra[source_offset],
+                alpha);
+            pixels[target_offset + 1u] = Blend_premultiplied_channel(
+                pixels[target_offset + 1u],
+                annotation.premultiplied_bgra[source_offset + 1u], alpha);
+            pixels[target_offset + 2u] = Blend_premultiplied_channel(
+                pixels[target_offset + 2u],
+                annotation.premultiplied_bgra[source_offset + 2u], alpha);
+            pixels[target_offset + 3u] = kFullOpacity;
+        }
+    }
+}
+
 [[nodiscard]] bool Text_bitmap_is_valid(TextAnnotation const &annotation) noexcept {
     if (annotation.bitmap_width_px <= 0 || annotation.bitmap_height_px <= 0 ||
         annotation.bitmap_row_bytes < annotation.bitmap_width_px * 4) {
@@ -536,6 +607,7 @@ AnnotationKind Annotation::Kind() const noexcept {
                 return AnnotationKind::Rectangle;
             },
             [](TextAnnotation const &) noexcept { return AnnotationKind::Text; },
+            [](BubbleAnnotation const &) noexcept { return AnnotationKind::Bubble; },
         },
         data);
 }
@@ -585,6 +657,9 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
             [](TextAnnotation const &text) -> RectPx {
                 return text.visual_bounds.Normalized();
             },
+            [](BubbleAnnotation const &bubble) -> RectPx {
+                return Bubble_visual_bounds(bubble);
+            },
         },
         annotation.data);
 }
@@ -597,6 +672,8 @@ bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept {
         return true;
     case AnnotationKind::Rectangle:
         return false;
+    case AnnotationKind::Bubble:
+        return true;
     }
     return true;
 }
@@ -627,6 +704,9 @@ RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept {
             },
             [](TextAnnotation const &text) -> RectPx {
                 return text.visual_bounds.Normalized();
+            },
+            [](BubbleAnnotation const &bubble) -> RectPx {
+                return Bubble_visual_bounds(bubble);
             },
         },
         annotation.data);
@@ -705,6 +785,19 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                 std::optional<size_t> const offset =
                     Text_bitmap_pixel_offset(text, point);
                 return offset.has_value() && text.premultiplied_bgra[*offset + 3u] > 0;
+            },
+            [&](BubbleAnnotation const &bubble) -> bool {
+                if (bubble.diameter_px <= 0) {
+                    return false;
+                }
+                float const cx = static_cast<float>(bubble.center.x);
+                float const cy = static_cast<float>(bubble.center.y);
+                float const px = static_cast<float>(point.x) + kHalf;
+                float const py = static_cast<float>(point.y) + kHalf;
+                float const r = static_cast<float>(bubble.diameter_px) * kHalf;
+                float const dx = px - cx;
+                float const dy = py - cy;
+                return (dx * dx + dy * dy) <= (r * r);
             },
         },
         annotation.data);
@@ -931,6 +1024,10 @@ Annotation Translate_annotation(Annotation annotation, PointPx delta) noexcept {
                                              text.visual_bounds.right + delta.x,
                                              text.visual_bounds.bottom + delta.y);
                    },
+                   [&](BubbleAnnotation &bubble) noexcept {
+                       bubble.center.x += delta.x;
+                       bubble.center.y += delta.y;
+                   },
                },
                annotation.data);
     return annotation;
@@ -1096,6 +1193,10 @@ void Blend_annotation_onto_pixels(std::span<uint8_t> pixels, int width, int heig
                 blend_stroke(rect.style,
                              RectState{r, inner, !inner.Is_empty() && !rect.filled,
                                        rect.filled});
+            },
+            [&](BubbleAnnotation const &bubble) noexcept {
+                Blend_bubble_annotation_onto_pixels(pixels, row_bytes, bubble,
+                                                    target_bounds, *clipped);
             },
         },
         annotation.data);
