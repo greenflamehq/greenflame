@@ -1235,7 +1235,8 @@ bool OverlayWindow::Should_show_brush_cursor_preview() const {
     return (tool == core::AnnotationToolId::Freehand ||
             tool == core::AnnotationToolId::Bubble) &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
-           !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value();
+           !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value() &&
+           !controller_.Has_active_annotation_gesture();
 }
 
 bool OverlayWindow::Should_show_square_cursor_preview() const {
@@ -1250,18 +1251,8 @@ bool OverlayWindow::Should_show_square_cursor_preview() const {
             *active_tool == core::AnnotationToolId::Line ||
             *active_tool == core::AnnotationToolId::Arrow) &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
-           !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value();
-}
-
-std::optional<double>
-OverlayWindow::Current_square_cursor_preview_angle_radians() const {
-    if (!Should_show_square_cursor_preview()) {
-        return std::nullopt;
-    }
-    if (controller_.Active_annotation_tool() == core::AnnotationToolId::Highlighter) {
-        return std::nullopt;
-    }
-    return controller_.Draft_line_angle_radians();
+           !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value() &&
+           !controller_.Has_active_annotation_gesture();
 }
 
 bool OverlayWindow::Is_selection_stable_for_help() const {
@@ -2639,9 +2630,11 @@ LRESULT OverlayWindow::On_paint() {
             input.brush_cursor_preview_width_px = controller_.Brush_width_px();
         }
         if (Should_show_square_cursor_preview()) {
-            input.square_cursor_preview_width_px = controller_.Brush_width_px();
-            input.square_cursor_preview_angle_radians =
-                Current_square_cursor_preview_angle_radians();
+            if (controller_.Active_annotation_tool() == core::AnnotationToolId::Arrow) {
+                input.arrow_cursor_preview_width_px = controller_.Brush_width_px();
+            } else {
+                input.square_cursor_preview_width_px = controller_.Brush_width_px();
+            }
         }
         input.toolbar_buttons = std::span<IOverlayButton *const>(btn_ptrs);
         input.toolbar_button_glyphs = std::span<ID2D1Bitmap *const>(btn_glyphs);

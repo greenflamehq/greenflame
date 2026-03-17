@@ -1278,40 +1278,77 @@ void Draw_brush_cursor_preview(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     rt->DrawEllipse(ell, res.solid_brush.Get(), black_w, res.flat_cap_style.Get());
 }
 
+void Draw_arrow_cursor_preview(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                               core::PointPx cursor, int32_t width_px) {
+    float const w =
+        static_cast<float>(std::max<int32_t>(core::StrokeStyle::kMinWidthPx, width_px));
+
+    // Stabilized arrowhead geometry: the shape that obtains when the line is long
+    // enough that head_length no longer clamps to line length.
+    float const head_length =
+        kArrowBaseLength + w * (kArrowLengthPerStroke - kArrowOverlapPerStroke);
+    float const head_half = (kArrowBaseWidth + w * kArrowWidthPerStroke) / 2.f;
+    float const stub_length = head_length * 0.25f;
+    float const total_width = stub_length + head_length;
+
+    float const cx = static_cast<float>(cursor.x);
+    float const cy = static_cast<float>(cursor.y);
+
+    // Pointing right. Center the entire shape (stub + head) at (cx, cy).
+    float const tip_x = cx + total_width * 0.5f;
+    float const base_x = tip_x - head_length;
+    float const stub_start_x = base_x - stub_length;
+
+    // Build a single closed contour tracing the full arrow silhouette (shaft + head),
+    // so there is no internal edge where they meet.
+    // Winding order (clockwise from top-left of shaft):
+    //   shaft top-left → shaft top-right → head top corner →
+    //   tip → head bottom corner → shaft bottom-right → shaft bottom-left → close
+    Microsoft::WRL::ComPtr<ID2D1PathGeometry> arrow_outline;
+    if (FAILED(res.factory->CreatePathGeometry(arrow_outline.GetAddressOf()))) {
+        return;
+    }
+    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
+    if (FAILED(arrow_outline->Open(sink.GetAddressOf()))) {
+        return;
+    }
+    float const shaft_half = w * kHalfPixel;
+    sink->BeginFigure(D2D1::Point2F(stub_start_x, cy - shaft_half), D2D1_FIGURE_BEGIN_HOLLOW);
+    sink->AddLine(D2D1::Point2F(base_x, cy - shaft_half));
+    sink->AddLine(D2D1::Point2F(base_x, cy - head_half));
+    sink->AddLine(D2D1::Point2F(tip_x, cy));
+    sink->AddLine(D2D1::Point2F(base_x, cy + head_half));
+    sink->AddLine(D2D1::Point2F(base_x, cy + shaft_half));
+    sink->AddLine(D2D1::Point2F(stub_start_x, cy + shaft_half));
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink->Close();
+
+    constexpr float white_w = 3.f;
+    constexpr float black_w = 1.f;
+
+    // White pass first (thicker), then black on top (thinner).
+    res.solid_brush->SetColor(D2D1::ColorF(1.f, 1.f, 1.f));
+    rt->DrawGeometry(arrow_outline.Get(), res.solid_brush.Get(), white_w, nullptr);
+
+    res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f));
+    rt->DrawGeometry(arrow_outline.Get(), res.solid_brush.Get(), black_w, nullptr);
+}
+
 void Draw_square_cursor_preview(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                                core::PointPx cursor, int32_t width_px,
-                                std::optional<double> angle_radians) {
+                                core::PointPx cursor, int32_t width_px) {
     float const inner_sz =
         static_cast<float>(std::max<int32_t>(core::StrokeStyle::kMinWidthPx, width_px));
     constexpr float white_w = 3.f;
     constexpr float black_w = 1.f;
-    float const half = inner_sz * 0.5f;
+    float const half = inner_sz * kHalfPixel;
     float const cx = static_cast<float>(cursor.x);
     float const cy = static_cast<float>(cursor.y);
-
-    // Build a matrix for the optional rotation.
-    D2D1_MATRIX_3X2_F old_transform{};
-    rt->GetTransform(&old_transform);
-    if (angle_radians.has_value()) {
-        double const deg = *angle_radians * (180.0 / 3.14159265358979323846);
-        D2D1_MATRIX_3X2_F rot =
-            D2D1::Matrix3x2F::Rotation(static_cast<float>(deg), D2D1::Point2F(cx, cy));
-        D2D1_MATRIX_3X2_F combined;
-        D2D1::Matrix3x2F::ReinterpretBaseType(&combined)->SetProduct(
-            *D2D1::Matrix3x2F::ReinterpretBaseType(&old_transform),
-            *D2D1::Matrix3x2F::ReinterpretBaseType(&rot));
-        rt->SetTransform(combined);
-    }
 
     D2D1_RECT_F const rf = D2D1::RectF(cx - half, cy - half, cx + half, cy + half);
     res.solid_brush->SetColor(D2D1::ColorF(1.f, 1.f, 1.f));
     rt->DrawRectangle(rf, res.solid_brush.Get(), white_w, res.flat_cap_style.Get());
     res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f));
     rt->DrawRectangle(rf, res.solid_brush.Get(), black_w, res.flat_cap_style.Get());
-
-    if (angle_radians.has_value()) {
-        rt->SetTransform(old_transform);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1944,7 +1981,8 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     // Cursor previews (clipped to final selection).
     if (input.brush_cursor_preview_width_px.has_value() ||
-        input.square_cursor_preview_width_px.has_value()) {
+        input.square_cursor_preview_width_px.has_value() ||
+        input.arrow_cursor_preview_width_px.has_value()) {
         // Push clip to final selection.
         bool has_clip = false;
         Microsoft::WRL::ComPtr<ID2D1Layer> clip_layer;
@@ -1962,8 +2000,11 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         }
         if (input.square_cursor_preview_width_px.has_value()) {
             Draw_square_cursor_preview(rt, res, input.cursor_client_px,
-                                       *input.square_cursor_preview_width_px,
-                                       input.square_cursor_preview_angle_radians);
+                                       *input.square_cursor_preview_width_px);
+        }
+        if (input.arrow_cursor_preview_width_px.has_value()) {
+            Draw_arrow_cursor_preview(rt, res, input.cursor_client_px,
+                                      *input.arrow_cursor_preview_width_px);
         }
 
         if (has_clip) {

@@ -99,10 +99,6 @@ class IAnnotationTool {
         (void)host;
         return std::nullopt;
     }
-    [[nodiscard]] virtual std::optional<double>
-    Draft_line_angle_radians() const noexcept {
-        return std::nullopt;
-    }
     virtual void On_stroke_style_changed() noexcept {}
 };
 

@@ -32,7 +32,7 @@ struct D2DPaintInput {
     float draft_freehand_blit_opacity = 1.0f;
     std::optional<int32_t> brush_cursor_preview_width_px = std::nullopt;
     std::optional<int32_t> square_cursor_preview_width_px = std::nullopt;
-    std::optional<double> square_cursor_preview_angle_radians = std::nullopt;
+    std::optional<int32_t> arrow_cursor_preview_width_px = std::nullopt;
     bool dragging = false;
     bool handle_dragging = false;
     bool move_dragging = false;

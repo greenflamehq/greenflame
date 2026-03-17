@@ -121,7 +121,6 @@ class OverlayController final {
     [[nodiscard]] Annotation const *Draft_annotation() const noexcept;
     [[nodiscard]] std::span<const PointPx> Draft_freehand_points() const noexcept;
     [[nodiscard]] std::optional<StrokeStyle> Draft_freehand_style() const noexcept;
-    [[nodiscard]] std::optional<double> Draft_line_angle_radians() const noexcept;
     [[nodiscard]] Annotation const *Selected_annotation() const noexcept;
     [[nodiscard]] std::optional<RectPx> Selected_annotation_bounds() const noexcept;
     [[nodiscard]] std::optional<AnnotationEditTarget>

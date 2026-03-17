@@ -129,8 +129,6 @@ class OverlayWindow final {
     [[nodiscard]] bool Update_toolbar_hover_states(core::PointPx cursor);
     [[nodiscard]] bool Should_show_brush_cursor_preview() const;
     [[nodiscard]] bool Should_show_square_cursor_preview() const;
-    [[nodiscard]] std::optional<double>
-    Current_square_cursor_preview_angle_radians() const;
     [[nodiscard]] bool Is_selection_stable_for_help() const;
     void Show_help_overlay_at_cursor();
     void Hide_help_overlay(bool suppress_next_lbutton_up);

@@ -148,7 +148,7 @@ TEST(annotation_tool, FreehandTool_RefreshesDraftAfterStyleChangeNotification) {
         host.stroke_style);
 }
 
-TEST(annotation_tool, LineTool_UsesHostStyleAngleAndCommit) {
+TEST(annotation_tool, LineTool_UsesHostStyleAndCommit) {
     RecordingAnnotationToolHost host;
     UndoStack undo_stack;
     LineAnnotationTool tool(Line_tool_descriptor(), false);
@@ -169,9 +169,6 @@ TEST(annotation_tool, LineTool_UsesHostStyleAngleAndCommit) {
         EXPECT_EQ(draft_line.start, (PointPx{15, 20}));
         EXPECT_EQ(draft_line.end, (PointPx{45, 60}));
     }
-    ASSERT_TRUE(tool.Draft_line_angle_radians().has_value());
-    EXPECT_NEAR(*tool.Draft_line_angle_radians(), 0.927295218, 1e-6);
-
     EXPECT_TRUE(tool.On_primary_release(host, undo_stack));
     EXPECT_FALSE(tool.Has_active_gesture());
     EXPECT_EQ(tool.Draft_annotation(host), nullptr);

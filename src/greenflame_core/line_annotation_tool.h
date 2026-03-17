@@ -21,8 +21,6 @@ class LineAnnotationTool final : public IAnnotationTool {
     [[nodiscard]] bool On_cancel(IAnnotationToolHost &host) override;
     [[nodiscard]] Annotation const *
     Draft_annotation(IAnnotationToolHost const &host) const noexcept override;
-    [[nodiscard]] std::optional<double>
-    Draft_line_angle_radians() const noexcept override;
     void On_stroke_style_changed() noexcept override;
 
   private:

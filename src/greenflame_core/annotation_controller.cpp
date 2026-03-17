@@ -197,14 +197,6 @@ std::optional<StrokeStyle> AnnotationController::Draft_freehand_style() const no
     return tool->Draft_freehand_style(*this);
 }
 
-std::optional<double> AnnotationController::Draft_line_angle_radians() const noexcept {
-    IAnnotationTool const *const tool = Active_tool_impl();
-    if (tool == nullptr) {
-        return std::nullopt;
-    }
-    return tool->Draft_line_angle_radians();
-}
-
 std::optional<size_t> AnnotationController::Selected_annotation_index() const noexcept {
     if (!document_.selected_annotation_id.has_value()) {
         return std::nullopt;

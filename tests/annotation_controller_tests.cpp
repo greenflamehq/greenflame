@@ -632,7 +632,7 @@ TEST(annotation_controller, FreehandDraftPointsTrackActiveGesture) {
     EXPECT_EQ(controller.Draft_freehand_style(), std::nullopt);
 }
 
-TEST(annotation_controller, LineDraftTracksActiveGestureAndAngle) {
+TEST(annotation_controller, LineDraftTracksActiveGesture) {
     AnnotationController controller;
     UndoStack undo_stack;
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Line));
@@ -649,15 +649,11 @@ TEST(annotation_controller, LineDraftTracksActiveGestureAndAngle) {
         EXPECT_EQ(draft_line.start, (PointPx{10, 10}));
         EXPECT_EQ(draft_line.end, (PointPx{20, 20}));
     }
-    ASSERT_TRUE(controller.Draft_line_angle_radians().has_value());
-    EXPECT_NEAR(*controller.Draft_line_angle_radians(), 0.78539816339, 1e-6);
-
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
     EXPECT_EQ(controller.Draft_annotation(), nullptr);
-    EXPECT_EQ(controller.Draft_line_angle_radians(), std::nullopt);
 }
 
-TEST(annotation_controller, ArrowDraftTracksActiveGestureAndAngle) {
+TEST(annotation_controller, ArrowDraftTracksActiveGesture) {
     AnnotationController controller;
     UndoStack undo_stack;
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
@@ -674,12 +670,8 @@ TEST(annotation_controller, ArrowDraftTracksActiveGestureAndAngle) {
         EXPECT_EQ(draft_arrow.start, (PointPx{10, 10}));
         EXPECT_EQ(draft_arrow.end, (PointPx{20, 20}));
     }
-    ASSERT_TRUE(controller.Draft_line_angle_radians().has_value());
-    EXPECT_NEAR(*controller.Draft_line_angle_radians(), 0.78539816339, 1e-6);
-
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
     EXPECT_EQ(controller.Draft_annotation(), nullptr);
-    EXPECT_EQ(controller.Draft_line_angle_radians(), std::nullopt);
 }
 
 TEST(annotation_controller, RectangleDraftTracksActiveGesture) {

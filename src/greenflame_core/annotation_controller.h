@@ -78,7 +78,6 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] Annotation const *Draft_annotation() const noexcept;
     [[nodiscard]] std::span<const PointPx> Draft_freehand_points() const noexcept;
     [[nodiscard]] std::optional<StrokeStyle> Draft_freehand_style() const noexcept;
-    [[nodiscard]] std::optional<double> Draft_line_angle_radians() const noexcept;
     [[nodiscard]] std::optional<uint64_t> Selected_annotation_id() const noexcept {
         return document_.selected_annotation_id;
     }

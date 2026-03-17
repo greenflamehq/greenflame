@@ -82,18 +82,6 @@ LineAnnotationTool::Draft_annotation(IAnnotationToolHost const &host) const noex
     return &*draft_annotation_cache_;
 }
 
-std::optional<double> LineAnnotationTool::Draft_line_angle_radians() const noexcept {
-    if (!drawing_) {
-        return std::nullopt;
-    }
-    int32_t const dx = end_.x - start_.x;
-    int32_t const dy = end_.y - start_.y;
-    if (dx == 0 && dy == 0) {
-        return std::nullopt;
-    }
-    return std::atan2(static_cast<double>(dy), static_cast<double>(dx));
-}
-
 void LineAnnotationTool::On_stroke_style_changed() noexcept { Invalidate_draft(); }
 
 Annotation LineAnnotationTool::Build_annotation(IAnnotationToolHost const &host,

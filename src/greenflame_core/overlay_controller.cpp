@@ -122,10 +122,6 @@ std::optional<StrokeStyle> OverlayController::Draft_freehand_style() const noexc
     return annotation_controller_.Draft_freehand_style();
 }
 
-std::optional<double> OverlayController::Draft_line_angle_radians() const noexcept {
-    return annotation_controller_.Draft_line_angle_radians();
-}
-
 Annotation const *OverlayController::Selected_annotation() const noexcept {
     return annotation_controller_.Selected_annotation();
 }
