@@ -393,10 +393,7 @@ OverlayAction OverlayController::On_cancel() {
             annotation_controller_.Active_tool();
         active_tool.has_value()) {
         if (annotation_controller_.Has_active_tool_gesture()) {
-            bool const canceled_gesture = annotation_controller_.On_cancel();
-            bool const deselected_tool =
-                annotation_controller_.Toggle_tool(*active_tool);
-            if (canceled_gesture || deselected_tool) {
+            if (annotation_controller_.On_cancel()) {
                 return OverlayAction::Repaint;
             }
         } else if (annotation_controller_.Toggle_tool(*active_tool)) {

@@ -604,7 +604,7 @@ TEST(overlay_controller, G_Cancel_ActiveTool_DeselectsBeforeClearingSelection) {
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
-TEST(overlay_controller, G_Cancel_ActiveToolGesture_ClearsDraftAndDeselectsTool) {
+TEST(overlay_controller, G_Cancel_ActiveToolGesture_ClearsDraftKeepsTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
@@ -617,12 +617,53 @@ TEST(overlay_controller, G_Cancel_ActiveToolGesture_ClearsDraftAndDeselectsTool)
     ASSERT_TRUE(c.Has_active_annotation_gesture());
     ASSERT_FALSE(c.Draft_freehand_points().empty());
 
+    // First Esc: cancels gesture, tool stays selected.
     EXPECT_EQ(c.On_cancel(), OverlayAction::Repaint);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
     EXPECT_FALSE(c.Has_active_annotation_gesture());
     EXPECT_TRUE(c.Draft_freehand_points().empty());
     EXPECT_TRUE(c.Annotations().empty());
+    EXPECT_EQ(c.Active_annotation_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
+
+    // Second Esc: deselects tool.
+    EXPECT_EQ(c.On_cancel(), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+}
+
+TEST(overlay_controller, G_Cancel_ActiveToolGesture_SubsequentMoveAndReleaseAreNoOps) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {120, 120}, {120, 120}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_TRUE(c.Has_active_annotation_gesture());
+
+    ASSERT_EQ(c.On_cancel(), OverlayAction::Repaint);
+    ASSERT_FALSE(c.Has_active_annotation_gesture());
+    ASSERT_TRUE(c.Draft_freehand_points().empty());
+
+    // Mouse still physically held down: move and release should be no-ops.
+    std::ignore = Move(c, {150, 150});
+    EXPECT_TRUE(c.Draft_freehand_points().empty());
+    EXPECT_TRUE(c.Annotations().empty());
+
+    std::ignore = Release(c, {200, 200});
+    EXPECT_TRUE(c.Annotations().empty());
+
+    // Tool is still armed: a new press should start a fresh gesture.
+    ASSERT_EQ(c.Active_annotation_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Freehand});
+    ASSERT_EQ(c.On_primary_press(No_mods(), {130, 130}, {130, 130}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    EXPECT_TRUE(c.Has_active_annotation_gesture());
+    EXPECT_FALSE(c.Draft_freehand_points().empty());
 }
 
 TEST(overlay_controller,
