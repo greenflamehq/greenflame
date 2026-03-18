@@ -2091,8 +2091,28 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     } else if (!input.draft_freehand_points.empty() &&
                input.draft_freehand_style.has_value()) {
         if (res.draft_stroke_bitmap) {
-            rt->DrawBitmap(res.draft_stroke_bitmap.Get(), nullptr,
-                           input.draft_freehand_blit_opacity);
+            if (input.draft_freehand_tip_shape == core::FreehandTipShape::Square &&
+                res.screenshot && res.multiply_effect) {
+                // Multiply blend: result = screenshot * stroke (opacity baked in stroke).
+                // Non-stroke pixels are transparent and leave the destination unchanged.
+                Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+                if (SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
+                    // k1 = opacity (stroke is full-alpha; k1 scales the multiply result).
+                    D2D1_VECTOR_4F const coeffs = {input.draft_freehand_blit_opacity,
+                                                   0.0f, 0.0f, 0.0f};
+                    (void)res.multiply_effect->SetValue(
+                        D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
+                    res.multiply_effect->SetInput(0, res.screenshot.Get());
+                    res.multiply_effect->SetInput(1, res.draft_stroke_bitmap.Get());
+                    dc->DrawImage(res.multiply_effect.Get());
+                } else {
+                    rt->DrawBitmap(res.draft_stroke_bitmap.Get(), nullptr,
+                                   input.draft_freehand_blit_opacity);
+                }
+            } else {
+                rt->DrawBitmap(res.draft_stroke_bitmap.Get(), nullptr,
+                               input.draft_freehand_blit_opacity);
+            }
         }
     }
 
@@ -2201,16 +2221,86 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
     if (!res.annotations_rt) {
         return;
     }
+
+    // Returns true if this annotation is a square-tip freehand (highlighter).
+    auto const is_highlighter = [](core::Annotation const &ann) -> bool {
+        auto const *fh = std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
+        return fh && fh->freehand_tip_shape == core::FreehandTipShape::Square;
+    };
+
+    // Only use the multiply path when all required resources are present.
+    bool const can_multiply = res.screenshot && res.multiply_effect && res.draft_stroke_rt &&
+                              std::any_of(annotations.begin(), annotations.end(), is_highlighter);
+
     res.annotations_rt->BeginDraw();
     res.annotations_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+
     for (auto const &ann : annotations) {
-        Draw_annotation(res.annotations_rt.Get(), res, ann);
+        if (can_multiply && is_highlighter(ann)) {
+            auto const &fh = *std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
+
+            // End the annotations draw temporarily so draft_stroke_rt can be used.
+            if (FAILED(res.annotations_rt->EndDraw())) {
+                res.annotations_rt->BeginDraw();
+                continue;
+            }
+
+            // Render the stroke at desired opacity into the scratch surface.
+            res.draft_stroke_rt->BeginDraw();
+            res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+            Draw_freehand_points(res.draft_stroke_rt.Get(), res, fh.points, fh.style,
+                                 fh.freehand_tip_shape);
+            bool drew_multiply = false;
+            if (SUCCEEDED(res.draft_stroke_rt->EndDraw())) {
+                Microsoft::WRL::ComPtr<ID2D1Bitmap> stroke_bmp;
+                if (SUCCEEDED(res.draft_stroke_rt->GetBitmap(
+                        stroke_bmp.ReleaseAndGetAddressOf()))) {
+                    // k1 = 1: stroke already drawn at desired opacity (single-pass
+                    // FillGeometry, no accumulation), so no additional scaling needed.
+                    D2D1_VECTOR_4F const coeffs = {1.0f, 0.0f, 0.0f, 0.0f};
+                    (void)res.multiply_effect->SetValue(
+                        D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
+                    res.multiply_effect->SetInput(0, res.screenshot.Get());
+                    res.multiply_effect->SetInput(1, stroke_bmp.Get());
+                    // Re-enter annotations draw and composite the multiply result.
+                    res.annotations_rt->BeginDraw();
+                    Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+                    if (SUCCEEDED(
+                            res.annotations_rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
+                        dc->DrawImage(res.multiply_effect.Get());
+                    }
+                    drew_multiply = true;
+                }
+            }
+            if (!drew_multiply) {
+                // Fallback: re-enter and draw with normal SOURCE_OVER.
+                res.annotations_rt->BeginDraw();
+                Draw_freehand_points(res.annotations_rt.Get(), res, fh.points, fh.style,
+                                     fh.freehand_tip_shape);
+            }
+        } else {
+            Draw_annotation(res.annotations_rt.Get(), res, ann);
+        }
     }
+
     HRESULT const hr = res.annotations_rt->EndDraw();
     if (SUCCEEDED(hr)) {
         (void)res.annotations_rt->GetBitmap(
             res.annotations_bitmap.ReleaseAndGetAddressOf());
         res.annotations_valid = true;
+    }
+
+    // If draft_stroke_rt was used as scratch, reset the incremental draw state and
+    // clear the surface so the next gesture does not inherit stale pixels.
+    // Without the explicit clear, Update_draft_stroke_bitmap skips the surface clear
+    // when draft_stroke_point_count transitions 0→1→2, leaving committed stroke pixels
+    // in the surface that then get double-blended against the frozen bitmap.
+    if (can_multiply) {
+        res.draft_stroke_point_count = 0;
+        res.draft_stroke_bitmap.Reset();
+        res.draft_stroke_rt->BeginDraw();
+        res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+        (void)res.draft_stroke_rt->EndDraw();
     }
 }
 

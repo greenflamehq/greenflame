@@ -16,9 +16,12 @@ namespace greenflame {
 //   draft_stroke  — incrementally updated during freehand gesture (O(1) per frame)
 //   live layer    — drawn every frame (draft blit, selection border, handles, UI)
 struct D2DOverlayResources final {
-    Microsoft::WRL::ComPtr<ID2D1Factory> factory;
+    Microsoft::WRL::ComPtr<ID2D1Factory1> factory;
     Microsoft::WRL::ComPtr<IDWriteFactory> dwrite_factory;
     Microsoft::WRL::ComPtr<ID2D1HwndRenderTarget> hwnd_rt;
+    // ArithmeticComposite effect (k1=1, k2=k3=k4=0) for multiply-blend highlighting.
+    // Null until Create_hwnd_rt succeeds and ID2D1DeviceContext QI is available.
+    Microsoft::WRL::ComPtr<ID2D1Effect> multiply_effect;
 
     // Per-session bitmaps
     Microsoft::WRL::ComPtr<ID2D1Bitmap> screenshot;

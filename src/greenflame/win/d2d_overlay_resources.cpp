@@ -46,7 +46,7 @@ constexpr float kTextWheelHuePositionDivisor =
 
 bool D2DOverlayResources::Initialize_factory() {
     HRESULT hr = D2D1CreateFactory(
-        D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory), nullptr,
+        D2D1_FACTORY_TYPE_SINGLE_THREADED, __uuidof(ID2D1Factory1), nullptr,
         reinterpret_cast<void **>(factory.ReleaseAndGetAddressOf()));
     if (FAILED(hr)) {
         return false;
@@ -76,7 +76,24 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height) {
 
     HRESULT const hr = factory->CreateHwndRenderTarget(
         rt_props, hwnd_props, hwnd_rt.ReleaseAndGetAddressOf());
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) {
+        return false;
+    }
+
+    // Create the ArithmeticComposite multiply-blend effect (O = I1 * I2).
+    // Requires ID2D1DeviceContext, available when factory is ID2D1Factory1.
+    multiply_effect.Reset();
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+    if (SUCCEEDED(hwnd_rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
+        Microsoft::WRL::ComPtr<ID2D1Effect> effect;
+        if (SUCCEEDED(dc->CreateEffect(CLSID_D2D1ArithmeticComposite, &effect))) {
+            // k1=1, k2=k3=k4=0 → O = I1 * I2 (premultiplied multiply).
+            D2D1_VECTOR_4F const coeffs = {1.0f, 0.0f, 0.0f, 0.0f};
+            (void)effect->SetValue(D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
+            multiply_effect = std::move(effect);
+        }
+    }
+    return true;
 }
 
 bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
@@ -108,6 +125,13 @@ bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
     ReleaseDC(nullptr, screen_dc);
     if (lines != h) {
         return false;
+    }
+
+    // GDI DIBs leave the alpha byte undefined (typically 0x00). Set it to 0xFF so
+    // the D2D effects pipeline sees fully-opaque pixels when using this bitmap as an
+    // ArithmeticComposite input, regardless of how it handles D2D1_ALPHA_MODE_IGNORE.
+    for (size_t i = 3; i < pixels.size(); i += 4) {
+        pixels[i] = 0xFF;
     }
 
     D2D1_BITMAP_PROPERTIES props{};
@@ -362,6 +386,7 @@ void D2DOverlayResources::Release_device_resources() {
     frozen_bitmap.Reset();
     draft_stroke_bitmap.Reset();
     draft_stroke_point_count = 0;
+    multiply_effect.Reset();
     solid_brush.Reset();
     round_cap_style.Reset();
     flat_cap_style.Reset();

@@ -43,7 +43,7 @@ TEST(app_config, Defaults_UseBlackFirstPaletteEntryAndCurrentSlotZero) {
     EXPECT_EQ(config.current_annotation_color_index, 0);
     EXPECT_EQ(config.highlighter_colors, kDefaultHighlighterColorPalette);
     EXPECT_EQ(config.current_highlighter_color_index, 0);
-    EXPECT_EQ(config.highlighter_opacity_percent, 50);
+    EXPECT_EQ(config.highlighter_opacity_percent, kDefaultHighlighterOpacityPercent);
 }
 
 TEST(app_config, Normalize_ClampsTextSizeToNearestAllowedValue) {

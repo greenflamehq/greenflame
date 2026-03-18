@@ -7,6 +7,8 @@
 #include <ShlObj.h>
 #include <commdlg.h>
 #include <d2d1_1.h>
+#include <d2d1_1helper.h>
+#include <d2d1effects.h>
 #include <dwmapi.h>
 #include <dwrite.h>
 #include <gdiplus.h>

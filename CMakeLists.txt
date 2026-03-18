@@ -368,6 +368,7 @@ target_link_libraries(greenflame PRIVATE
     gdiplus
     d2d1
     dwrite
+    dxguid  # CLSID_D2D1ArithmeticComposite and other D2D effect GUIDs
 )
 
 # -----------------------------

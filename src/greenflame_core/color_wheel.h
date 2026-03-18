@@ -52,7 +52,7 @@ inline constexpr HighlighterColorPalette kDefaultHighlighterColorPalette = {
 
 inline constexpr int32_t kDefaultAnnotationColorIndex = 0;
 inline constexpr int32_t kDefaultHighlighterColorIndex = 0;
-inline constexpr int32_t kDefaultHighlighterOpacityPercent = 50;
+inline constexpr int32_t kDefaultHighlighterOpacityPercent = 35;
 
 enum class TextWheelMode : uint8_t { Color, Font };
 enum class TextWheelHubSide : uint8_t { Color, Font };
