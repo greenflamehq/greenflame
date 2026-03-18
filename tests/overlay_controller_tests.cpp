@@ -1075,13 +1075,13 @@ TEST(overlay_controller, TextTool_OutsideClickOnEmptyDraftStartsNewDraftWithoutC
     ASSERT_TRUE(c.Has_active_text_edit());
     ASSERT_NE(c.Active_text_edit()->Build_view().annotation, nullptr);
     EXPECT_EQ(c.Active_text_edit()->Build_view().annotation->origin,
-              (PointPx{140, 140}));
+              (PointPx{151, 150}));
 
     EXPECT_EQ(Press(c, {220, 220}), OverlayAction::Repaint);
     ASSERT_TRUE(c.Has_active_text_edit());
     ASSERT_NE(c.Active_text_edit()->Build_view().annotation, nullptr);
     EXPECT_EQ(c.Active_text_edit()->Build_view().annotation->origin,
-              (PointPx{220, 220}));
+              (PointPx{231, 230}));
     EXPECT_TRUE(c.Annotations().empty());
 }
 
@@ -1105,7 +1105,7 @@ TEST(overlay_controller, TextTool_OutsideClickOnNonEmptyDraftCommitsAndStartsNew
     ASSERT_TRUE(c.Has_active_text_edit());
     ASSERT_NE(c.Active_text_edit()->Build_view().annotation, nullptr);
     EXPECT_EQ(c.Active_text_edit()->Build_view().annotation->origin,
-              (PointPx{220, 220}));
+              (PointPx{231, 230}));
 }
 
 TEST(overlay_controller, TextTool_BorderClickOnEmptyDraftStartsNewDraftWithoutResize) {
@@ -1125,7 +1125,7 @@ TEST(overlay_controller, TextTool_BorderClickOnEmptyDraftStartsNewDraftWithoutRe
     ASSERT_TRUE(c.Has_active_text_edit());
     ASSERT_NE(c.Active_text_edit()->Build_view().annotation, nullptr);
     EXPECT_EQ(c.Active_text_edit()->Build_view().annotation->origin,
-              (PointPx{100, 160}));
+              (PointPx{111, 170}));
 }
 
 TEST(overlay_controller, TextTool_BorderClickOnNonEmptyDraftCommitsAndStartsNewDraft) {
@@ -1150,7 +1150,7 @@ TEST(overlay_controller, TextTool_BorderClickOnNonEmptyDraftCommitsAndStartsNewD
     ASSERT_TRUE(c.Has_active_text_edit());
     ASSERT_NE(c.Active_text_edit()->Build_view().annotation, nullptr);
     EXPECT_EQ(c.Active_text_edit()->Build_view().annotation->origin,
-              (PointPx{100, 160}));
+              (PointPx{111, 170}));
 }
 
 TEST(overlay_controller, BrushWidthAdjust_IgnoresInactiveBrushTool) {

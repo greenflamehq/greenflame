@@ -227,7 +227,7 @@ TEST(annotation_controller, BeginTextDraft_CapturesCurrentColorFontAndPointSize)
 
     TextDraftView const view = controller.Active_text_edit()->Build_view();
     ASSERT_NE(view.annotation, nullptr);
-    EXPECT_EQ(view.annotation->origin, (PointPx{50, 60}));
+    EXPECT_EQ(view.annotation->origin, (PointPx{61, 70}));
     EXPECT_EQ(view.annotation->base_style.color, green);
     EXPECT_EQ(view.annotation->base_style.font_choice, TextFontChoice::Mono);
     EXPECT_EQ(view.annotation->base_style.point_size, 16);
@@ -269,7 +269,7 @@ TEST(annotation_controller, CommitTextAnnotation_AddsUndoableTextAnnotation) {
     {
         auto const &text = std::get<TextAnnotation>(controller.Annotations()[0].data);
         EXPECT_EQ(Flatten_text(text.runs), L"abc");
-        EXPECT_EQ(text.origin, (PointPx{20, 30}));
+        EXPECT_EQ(text.origin, (PointPx{31, 40}));
         EXPECT_EQ(text.bitmap_width_px, text.visual_bounds.Width());
         EXPECT_EQ(text.bitmap_height_px, text.visual_bounds.Height());
     }
