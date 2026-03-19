@@ -10,6 +10,7 @@ struct AppConfig final {
     static constexpr int32_t kDefaultLineSize = 2;
     static constexpr int32_t kDefaultArrowSize = 2;
     static constexpr int32_t kDefaultRectSize = 2;
+    static constexpr int32_t kDefaultEllipseSize = 2;
     static constexpr int32_t kDefaultHighlighterSize = 10;
     static constexpr int32_t kDefaultBubbleSize = 10;
     static constexpr int32_t kDefaultTextSize = 10;
@@ -27,6 +28,7 @@ struct AppConfig final {
     int32_t line_size = kDefaultLineSize;
     int32_t arrow_size = kDefaultArrowSize;
     int32_t rect_size = kDefaultRectSize;
+    int32_t ellipse_size = kDefaultEllipseSize;
     int32_t highlighter_size = kDefaultHighlighterSize;
     int32_t bubble_size = kDefaultBubbleSize;
     int32_t text_size = kDefaultTextSize;

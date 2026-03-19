@@ -80,6 +80,7 @@ void AppConfig::Normalize() {
     line_size = std::clamp(line_size, kMinToolSize, kMaxToolSize);
     arrow_size = std::clamp(arrow_size, kMinToolSize, kMaxToolSize);
     rect_size = std::clamp(rect_size, kMinToolSize, kMaxToolSize);
+    ellipse_size = std::clamp(ellipse_size, kMinToolSize, kMaxToolSize);
     highlighter_size = std::clamp(highlighter_size, kMinToolSize, kMaxToolSize);
     bubble_size = std::clamp(bubble_size, kMinToolSize, kMaxToolSize);
     text_size = std::clamp(text_size, kMinToolSize, kMaxToolSize);

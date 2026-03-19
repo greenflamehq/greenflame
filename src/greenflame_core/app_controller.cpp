@@ -229,13 +229,15 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
         {L"A", L"Toggle Arrow tool"},
         {L"R", L"Toggle Rectangle tool"},
         {L"F", L"Toggle Filled rectangle tool"},
+        {L"E", L"Toggle Ellipse tool"},
+        {L"G", L"Toggle Filled ellipse tool"},
         {L"T", L"Toggle Text tool"},
         {L"N", L"Toggle Bubble tool"},
         {L"Right Click", L"Open the active tool's color wheel at cursor"},
         {L"Wheel Up / Ctrl + =",
-         L"Increase Brush/Highlighter/Line/Arrow/Rectangle width"},
+         L"Increase Brush/Highlighter/Line/Arrow/Rectangle/Ellipse width"},
         {L"Wheel Down / Ctrl + -",
-         L"Decrease Brush/Highlighter/Line/Arrow/Rectangle width"},
+         L"Decrease Brush/Highlighter/Line/Arrow/Rectangle/Ellipse width"},
     };
     content.sections.push_back(std::move(tools));
 

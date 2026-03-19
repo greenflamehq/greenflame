@@ -12,6 +12,14 @@ namespace {
 constexpr int32_t kMinToolSizeStep = 1;
 constexpr int32_t kMaxToolSizeStep = 50;
 
+// Highlighter: width_px = size step + this offset (default step 10 → 20 px).
+constexpr int32_t kHighlighterStrokeWidthStepOffsetPx = 10;
+constexpr int32_t kDefaultHighlighterSizeStep = 10;
+
+// Bubble: diameter_px = size step + this offset for new bubbles and toolbar physical
+// size.
+constexpr int32_t kBubbleDiameterStepOffsetPx = 20;
+
 [[nodiscard]] int32_t Clamp_tool_size_step(int32_t step) noexcept {
     return std::clamp(step, kMinToolSizeStep, kMaxToolSizeStep);
 }
@@ -23,8 +31,7 @@ constexpr int32_t kMaxToolSizeStep = 50;
 
 [[nodiscard]] StrokeStyle Default_highlighter_style() noexcept {
     return StrokeStyle{
-        // Step 10 is the default highlighter size; physical width = step + 10 = 20 px.
-        .width_px = 20,
+        .width_px = kDefaultHighlighterSizeStep + kHighlighterStrokeWidthStepOffsetPx,
         .color = kDefaultHighlighterColorPalette[static_cast<size_t>(
             kDefaultHighlighterColorIndex)],
         .opacity_percent = kDefaultHighlighterOpacityPercent,
@@ -77,6 +84,7 @@ void AnnotationController::Reset_for_session() {
     line_style_ = {};
     arrow_style_ = {};
     rect_style_ = {};
+    ellipse_style_ = {};
     highlighter_style_ = Default_highlighter_style();
     bubble_size_step_ = 10;
     text_size_step_ = 10;
@@ -134,13 +142,16 @@ int32_t AnnotationController::Tool_size_step(AnnotationToolId tool) const noexce
         return arrow_style_.width_px;
     case AnnotationToolId::Rectangle:
         return rect_style_.width_px;
+    case AnnotationToolId::Ellipse:
+        return ellipse_style_.width_px;
     case AnnotationToolId::Highlighter:
-        return highlighter_style_.width_px - 10;
+        return highlighter_style_.width_px - kHighlighterStrokeWidthStepOffsetPx;
     case AnnotationToolId::Bubble:
         return bubble_size_step_;
     case AnnotationToolId::Text:
         return text_size_step_;
     case AnnotationToolId::FilledRectangle:
+    case AnnotationToolId::FilledEllipse:
         return 0;
     }
     return 0;
@@ -156,13 +167,16 @@ int32_t AnnotationController::Tool_physical_size(AnnotationToolId tool) const no
         return arrow_style_.width_px;
     case AnnotationToolId::Rectangle:
         return rect_style_.width_px;
+    case AnnotationToolId::Ellipse:
+        return ellipse_style_.width_px;
     case AnnotationToolId::Highlighter:
         return highlighter_style_.width_px;
     case AnnotationToolId::Bubble:
-        return bubble_size_step_ + 20;
+        return bubble_size_step_ + kBubbleDiameterStepOffsetPx;
     case AnnotationToolId::Text:
         return kTextSizePtTable[static_cast<size_t>(text_size_step_ - 1)];
     case AnnotationToolId::FilledRectangle:
+    case AnnotationToolId::FilledEllipse:
         return 0;
     }
     return 0;
@@ -196,8 +210,14 @@ bool AnnotationController::Set_tool_size_step(AnnotationToolId tool,
         }
         rect_style_.width_px = clamped;
         break;
+    case AnnotationToolId::Ellipse:
+        if (ellipse_style_.width_px == clamped) {
+            return false;
+        }
+        ellipse_style_.width_px = clamped;
+        break;
     case AnnotationToolId::Highlighter: {
-        int32_t const new_width = clamped + 10;
+        int32_t const new_width = clamped + kHighlighterStrokeWidthStepOffsetPx;
         if (highlighter_style_.width_px == new_width) {
             return false;
         }
@@ -217,6 +237,7 @@ bool AnnotationController::Set_tool_size_step(AnnotationToolId tool,
         text_size_step_ = clamped;
         break;
     case AnnotationToolId::FilledRectangle:
+    case AnnotationToolId::FilledEllipse:
         return false;
     }
     registry_.On_stroke_style_changed();
@@ -238,6 +259,7 @@ bool AnnotationController::Set_brush_annotation_color(COLORREF color) noexcept {
     line_style_.color = color;
     arrow_style_.color = color;
     rect_style_.color = color;
+    ellipse_style_.color = color;
     registry_.On_stroke_style_changed();
     return true;
 }
@@ -575,6 +597,9 @@ StrokeStyle AnnotationController::Current_stroke_style() const noexcept {
     case AnnotationToolId::Rectangle:
     case AnnotationToolId::FilledRectangle:
         return rect_style_;
+    case AnnotationToolId::Ellipse:
+    case AnnotationToolId::FilledEllipse:
+        return ellipse_style_;
     case AnnotationToolId::Freehand:
     case AnnotationToolId::Bubble:
     case AnnotationToolId::Text:
@@ -600,7 +625,7 @@ AnnotationController::Build_bubble_annotation(PointPx cursor) const {
 
     BubbleAnnotation bubble{};
     bubble.center = cursor;
-    bubble.diameter_px = bubble_size_step_ + 20;
+    bubble.diameter_px = bubble_size_step_ + kBubbleDiameterStepOffsetPx;
     bubble.color = freehand_style_.color;
     bubble.font_choice = Normalize_text_font_choice(bubble_current_font_);
     bubble.counter_value = bubble_counter_;

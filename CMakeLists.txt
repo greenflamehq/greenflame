@@ -75,6 +75,16 @@ set(GREENFLAME_FILLED_RECTANGLE_TOOL_GLYPH_PATH
 )
 file(TO_CMAKE_PATH "${GREENFLAME_FILLED_RECTANGLE_TOOL_GLYPH_PATH}"
      GREENFLAME_FILLED_RECTANGLE_TOOL_GLYPH_PATH)
+set(GREENFLAME_ELLIPSE_TOOL_GLYPH_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/ellipse-mask.png"
+)
+file(TO_CMAKE_PATH "${GREENFLAME_ELLIPSE_TOOL_GLYPH_PATH}"
+     GREENFLAME_ELLIPSE_TOOL_GLYPH_PATH)
+set(GREENFLAME_FILLED_ELLIPSE_TOOL_GLYPH_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/filled_ellipse-mask.png"
+)
+file(TO_CMAKE_PATH "${GREENFLAME_FILLED_ELLIPSE_TOOL_GLYPH_PATH}"
+     GREENFLAME_FILLED_ELLIPSE_TOOL_GLYPH_PATH)
 set(GREENFLAME_TEXT_TOOL_GLYPH_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/text-mask.png"
 )
@@ -161,6 +171,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/freehand_annotation_tool.h
     src/greenflame_core/line_annotation_tool.cpp
     src/greenflame_core/line_annotation_tool.h
+    src/greenflame_core/ellipse_annotation_tool.cpp
+    src/greenflame_core/ellipse_annotation_tool.h
     src/greenflame_core/rectangle_annotation_tool.cpp
     src/greenflame_core/rectangle_annotation_tool.h
     src/greenflame_core/annotation_tool_registry.cpp

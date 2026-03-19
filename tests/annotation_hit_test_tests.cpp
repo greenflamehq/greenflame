@@ -43,6 +43,18 @@ Annotation Make_rectangle(uint64_t id, RectPx outer_bounds, int32_t width_px,
     return annotation;
 }
 
+Annotation Make_ellipse(uint64_t id, RectPx outer_bounds, int32_t width_px,
+                        bool filled = false) {
+    Annotation annotation{};
+    annotation.id = id;
+    annotation.data = EllipseAnnotation{
+        .outer_bounds = outer_bounds,
+        .style = {.width_px = width_px},
+        .filled = filled,
+    };
+    return annotation;
+}
+
 Annotation Make_text(uint64_t id, PointPx origin, RectPx visual_bounds,
                      std::vector<uint8_t> premultiplied_bgra) {
     Annotation annotation{};
@@ -160,6 +172,24 @@ TEST(annotation_hit_test, RasterizeRectangle_FilledIgnoresInteriorHole) {
     EXPECT_TRUE(Annotation_hits_point(rectangle, {20, 20}));
 }
 
+TEST(annotation_hit_test, AnnotationHitsPoint_EllipseOutlineUsesInteriorHole) {
+    Annotation const ellipse =
+        Make_ellipse(11, RectPx::From_ltrb(10, 10, 31, 31), 4, false);
+
+    EXPECT_TRUE(Annotation_hits_point(ellipse, {20, 10}));
+    EXPECT_TRUE(Annotation_hits_point(ellipse, {10, 20}));
+    EXPECT_FALSE(Annotation_hits_point(ellipse, {20, 20}));
+}
+
+TEST(annotation_hit_test, AnnotationHitsPoint_FilledEllipseCoversInterior) {
+    Annotation const ellipse =
+        Make_ellipse(12, RectPx::From_ltrb(10, 10, 31, 31), 4, true);
+
+    EXPECT_TRUE(Annotation_hits_point(ellipse, {20, 20}));
+    EXPECT_TRUE(Annotation_hits_point(ellipse, {20, 10}));
+    EXPECT_FALSE(Annotation_hits_point(ellipse, {10, 10}));
+}
+
 TEST(annotation_hit_test,
      RectangleResizeHandles_HideSideHandlesWhenTheyOverlapCorners) {
     std::array<bool, 8> const visible =
@@ -201,6 +231,15 @@ TEST(annotation_hit_test, TranslateAnnotation_RectangleMovesBounds) {
               (RectPx::From_ltrb(15, 7, 26, 18)));
 }
 
+TEST(annotation_hit_test, TranslateAnnotation_EllipseMovesBounds) {
+    Annotation const ellipse = Make_ellipse(13, RectPx::From_ltrb(10, 10, 21, 21), 2);
+
+    Annotation const moved = Translate_annotation(ellipse, {5, -3});
+
+    EXPECT_EQ(std::get<EllipseAnnotation>(moved.data).outer_bounds,
+              (RectPx::From_ltrb(15, 7, 26, 18)));
+}
+
 TEST(annotation_hit_test, AnnotationHitsPoint_TextUsesBitmapAlphaCoverage) {
     std::vector<uint8_t> bitmap(16u, 0);
     bitmap[7] = 255;  // pixel (1, 0) alpha
@@ -238,6 +277,10 @@ TEST(annotation_hit_test, AnnotationShowsCornerBrackets_RectangleReturnsFalse) {
     EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Rectangle));
 }
 
+TEST(annotation_hit_test, AnnotationShowsCornerBrackets_EllipseReturnsFalse) {
+    EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Ellipse));
+}
+
 TEST(annotation_hit_test, AnnotationVisualBounds_FreehandMatchesHitTestBounds) {
     Annotation ann{};
     ann.id = 1;
@@ -253,6 +296,72 @@ TEST(annotation_hit_test, AnnotationVisualBounds_RectangleMatchesHitTestBounds) 
     Annotation const rect = Make_rectangle(1, RectPx::From_ltrb(10, 20, 50, 60), 4);
 
     EXPECT_EQ(Annotation_visual_bounds(rect), Annotation_bounds(rect));
+}
+
+TEST(annotation_hit_test, AnnotationVisualBounds_EllipseMatchesHitTestBounds) {
+    Annotation const ellipse = Make_ellipse(1, RectPx::From_ltrb(10, 20, 50, 60), 4);
+
+    EXPECT_EQ(Annotation_visual_bounds(ellipse), Annotation_bounds(ellipse));
+}
+
+TEST(annotation_hit_test,
+     BlendAnnotationOntoPixels_FilledEllipse_PaintsInteriorSkipsCorner) {
+    // Ellipse bounds [0,0,10,10]: rx=ry=5, center=(5,5).
+    // Pixel (4,4) center (4.5,4.5): dx=dy=-0.1, sum=0.02 — inside → painted.
+    // Pixel (0,0) center (0.5,0.5): dx=dy=-0.9, sum=1.62 — outside corner → not
+    // painted.
+    Annotation ann{};
+    ann.id = 1;
+    ann.data = EllipseAnnotation{
+        .outer_bounds = RectPx::From_ltrb(0, 0, 10, 10),
+        .style = {.width_px = 2, .color = RGB(0xFF, 0x00, 0x00)},
+        .filled = true,
+    };
+    std::array<uint8_t, 4> const background = {10, 20, 30, 255};
+
+    {
+        auto px = background;
+        Blend_annotation_onto_pixels(px, 1, 1, 4, ann, RectPx::From_ltrb(4, 4, 5, 5));
+        EXPECT_EQ(px[0], 0x00); // blue of RGB(0xFF,0,0)
+        EXPECT_EQ(px[1], 0x00); // green
+        EXPECT_EQ(px[2], 0xFF); // red
+        EXPECT_EQ(px[3], 255);
+    }
+    {
+        auto px = background;
+        Blend_annotation_onto_pixels(px, 1, 1, 4, ann, RectPx::From_ltrb(0, 0, 1, 1));
+        EXPECT_EQ(px, background); // outside ellipse — unchanged
+    }
+}
+
+TEST(annotation_hit_test,
+     BlendAnnotationOntoPixels_EllipseOutline_PaintsEdgeSkipsCenter) {
+    // Ellipse bounds [0,0,10,10], width=2: inner bounds [2,2,8,8], inner rx=ry=3.
+    // Edge pixel (0,4) center (0.5,4.5): outer sum=0.82 ≤1, inner sum=2.28 >1 →
+    // painted. Center pixel (4,4) center (4.5,4.5): outer sum=0.02 ≤1, inner sum=0.056
+    // ≤1 → not painted.
+    Annotation ann{};
+    ann.id = 1;
+    ann.data = EllipseAnnotation{
+        .outer_bounds = RectPx::From_ltrb(0, 0, 10, 10),
+        .style = {.width_px = 2, .color = RGB(0xFF, 0x00, 0x00)},
+        .filled = false,
+    };
+    std::array<uint8_t, 4> const background = {10, 20, 30, 255};
+
+    {
+        auto px = background;
+        Blend_annotation_onto_pixels(px, 1, 1, 4, ann, RectPx::From_ltrb(0, 4, 1, 5));
+        EXPECT_EQ(px[0], 0x00);
+        EXPECT_EQ(px[1], 0x00);
+        EXPECT_EQ(px[2], 0xFF);
+        EXPECT_EQ(px[3], 255);
+    }
+    {
+        auto px = background;
+        Blend_annotation_onto_pixels(px, 1, 1, 4, ann, RectPx::From_ltrb(4, 4, 5, 5));
+        EXPECT_EQ(px, background); // inside inner hole — unchanged
+    }
 }
 
 TEST(annotation_hit_test, BlendAnnotationOntoPixels_UsesOpacityForFreehandStroke) {

@@ -1,4 +1,5 @@
 #include "greenflame_core/bubble_annotation_tool.h"
+#include "greenflame_core/ellipse_annotation_tool.h"
 #include "greenflame_core/freehand_annotation_tool.h"
 #include "greenflame_core/line_annotation_tool.h"
 #include "greenflame_core/rectangle_annotation_tool.h"
@@ -28,6 +29,17 @@ namespace {
     return AnnotationToolDescriptor{AnnotationToolId::FilledRectangle,
                                     L"Filled rectangle tool", L'F', L"F",
                                     AnnotationToolbarGlyph::FilledRectangle};
+}
+
+[[nodiscard]] AnnotationToolDescriptor Ellipse_tool_descriptor() {
+    return AnnotationToolDescriptor{AnnotationToolId::Ellipse, L"Ellipse tool", L'E',
+                                    L"E", AnnotationToolbarGlyph::Ellipse};
+}
+
+[[nodiscard]] AnnotationToolDescriptor Filled_ellipse_tool_descriptor() {
+    return AnnotationToolDescriptor{AnnotationToolId::FilledEllipse,
+                                    L"Filled ellipse tool", L'G', L"G",
+                                    AnnotationToolbarGlyph::FilledEllipse};
 }
 
 class RecordingAnnotationToolHost final : public IAnnotationToolHost {
@@ -344,6 +356,70 @@ TEST(annotation_tool, FilledRectangleTool_UsesCurrentColorAndCommit) {
             std::get<RectangleAnnotation>(host.committed_annotations[0].data);
         EXPECT_TRUE(committed_rect.filled);
         EXPECT_EQ(committed_rect.style.color, host.stroke_style.color);
+    }
+}
+
+TEST(annotation_tool, EllipseTool_UsesHostStyleAndCommit) {
+    RecordingAnnotationToolHost host;
+    UndoStack undo_stack;
+    EllipseAnnotationTool tool(Ellipse_tool_descriptor(), false);
+
+    host.next_annotation_id = 29;
+    host.stroke_style = StrokeStyle{6, RGB(0x20, 0x40, 0x60)};
+
+    EXPECT_TRUE(tool.On_primary_press(host, {15, 20}));
+    EXPECT_TRUE(tool.On_pointer_move(host, {45, 60}));
+    ASSERT_NE(tool.Draft_annotation(host), nullptr);
+    EXPECT_EQ(tool.Draft_annotation(host)->Kind(), AnnotationKind::Ellipse);
+    EXPECT_EQ(tool.Draft_annotation(host)->id, 29u);
+    {
+        auto const &draft_ellipse =
+            std::get<EllipseAnnotation>(tool.Draft_annotation(host)->data);
+        EXPECT_FALSE(draft_ellipse.filled);
+        EXPECT_EQ(draft_ellipse.style, host.stroke_style);
+        EXPECT_EQ(draft_ellipse.outer_bounds, (RectPx::From_ltrb(15, 20, 46, 61)));
+    }
+
+    EXPECT_TRUE(tool.On_primary_release(host, undo_stack));
+    EXPECT_FALSE(tool.Has_active_gesture());
+    ASSERT_EQ(host.committed_annotations.size(), 1u);
+    EXPECT_EQ(host.committed_annotations[0].Kind(), AnnotationKind::Ellipse);
+    {
+        auto const &committed_ellipse =
+            std::get<EllipseAnnotation>(host.committed_annotations[0].data);
+        EXPECT_FALSE(committed_ellipse.filled);
+        EXPECT_EQ(committed_ellipse.style, host.stroke_style);
+    }
+}
+
+TEST(annotation_tool, FilledEllipseTool_UsesCurrentColorAndCommit) {
+    RecordingAnnotationToolHost host;
+    UndoStack undo_stack;
+    EllipseAnnotationTool tool(Filled_ellipse_tool_descriptor(), true);
+
+    host.next_annotation_id = 31;
+    host.stroke_style = StrokeStyle{9, RGB(0xAA, 0x44, 0x11)};
+
+    EXPECT_TRUE(tool.On_primary_press(host, {50, 40}));
+    EXPECT_TRUE(tool.On_pointer_move(host, {70, 60}));
+    ASSERT_NE(tool.Draft_annotation(host), nullptr);
+    EXPECT_EQ(tool.Draft_annotation(host)->Kind(), AnnotationKind::Ellipse);
+    {
+        auto const &draft_ellipse =
+            std::get<EllipseAnnotation>(tool.Draft_annotation(host)->data);
+        EXPECT_TRUE(draft_ellipse.filled);
+        EXPECT_EQ(draft_ellipse.style.color, host.stroke_style.color);
+        EXPECT_EQ(draft_ellipse.outer_bounds, (RectPx::From_ltrb(50, 40, 71, 61)));
+    }
+
+    EXPECT_TRUE(tool.On_primary_release(host, undo_stack));
+    EXPECT_FALSE(tool.Has_active_gesture());
+    ASSERT_EQ(host.committed_annotations.size(), 1u);
+    {
+        auto const &committed_ellipse =
+            std::get<EllipseAnnotation>(host.committed_annotations[0].data);
+        EXPECT_TRUE(committed_ellipse.filled);
+        EXPECT_EQ(committed_ellipse.style.color, host.stroke_style.color);
     }
 }
 

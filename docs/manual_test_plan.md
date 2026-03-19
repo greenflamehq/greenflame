@@ -7,7 +7,7 @@ audience:
 status: reference
 owners:
   - core-team
-last_updated: 2026-03-14
+last_updated: 2026-03-19
 tags:
   - testing
   - manual
@@ -98,7 +98,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Dismiss the menu without choosing an action.
 - Expected:
   - Left-click starts interactive capture.
-  - The right-click menu includes region, monitor, window, desktop, last-region, last-window, start-with-Windows, About, and Exit actions.
+  - The right-click menu includes region, monitor, window, desktop, last-region, last-window, start-with-Windows, `Open config file...`, About, and Exit actions.
   - Dismissing the menu does not trigger a capture.
 
 ### GF-MAN-TRAY-002 - Tray Current-Window Capture Does Not Capture Tray UI
@@ -154,6 +154,23 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The tray icon disappears.
   - The process exits.
   - No overlay window or toast is left behind.
+
+### GF-MAN-TRAY-006 - Open Config File From Tray
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Exit Greenflame.
+  2. Delete `%USERPROFILE%\.config\greenflame\greenflame.json` if it exists.
+  3. Launch `greenflame.exe`.
+  4. Right-click the tray icon and choose `Open config file...`.
+  5. Close the opened editor or shell surface.
+  6. Repeat once with the config file already present.
+- Expected:
+  - Choosing `Open config file...` creates the config file first when it does not yet exist.
+  - The opened target is `%USERPROFILE%\.config\greenflame\greenflame.json`.
+  - The tray instance stays resident and responsive after the file is opened.
+  - Repeating the action with an existing file opens the same file without showing a warning dialog.
 
 ## Global Hotkeys
 
@@ -236,6 +253,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - The desktop is dimmed outside the selection.
   - A border and resize handles appear.
+  - The selection border is visually stable with no marching-ants or marquee-style motion.
   - Selection-size labels appear if enabled in config.
 
 ### GF-MAN-SEL-002 - Resize And Move Selection
@@ -288,11 +306,13 @@ unless a real end-to-end bug escapes into the Win32 shell:
   1. Open the overlay and press `Esc` before making a selection.
   2. Create a selection and open the color wheel, then press `Esc`.
   3. Open the help overlay and press `Esc`.
-  4. With a normal stable selection and no sub-UI open, press `Esc`.
+  4. Activate an annotation tool, start a stroke, and press `Esc` before releasing the mouse.
+  5. With a normal stable selection and no sub-UI open, press `Esc`.
 - Expected:
   - `Esc` closes the innermost active UI first.
   - Color wheel closes before the overlay cancels.
   - Help closes before the overlay cancels.
+  - Pressing `Esc` during an active annotation gesture cancels only the in-progress gesture and leaves the tool armed.
   - With no nested UI open, the overlay cancels or backs out cleanly.
 
 ### GF-MAN-UI-001 - Overlay Help
@@ -310,6 +330,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - A help overlay opens near the cursor.
   - It shows the current shortcut reference.
+  - All listed shortcuts remain readable without clipping; when content would overflow vertically, the layout reflows cleanly into two columns.
   - The toolbar `Help` button opens help on button release and does not toggle an
     annotation tool.
   - While visible, other overlay interactions are blocked.
@@ -341,7 +362,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Run on: `ENV-A`
 - Steps:
   1. Create a selection.
-  2. Toggle `B`, `H`, `L`, `A`, `R`, `F`, and `T` from the keyboard.
+  2. Toggle `B`, `H`, `L`, `A`, `R`, `F`, `E`, `G`, `T`, and `N` from the keyboard.
   3. Toggle the same tools from the toolbar.
   4. Activate the same tool twice in a row.
 - Expected:
@@ -360,17 +381,43 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Activate the Highlighter tool and move the cursor without drawing.
   5. Press and hold the left mouse button once without moving the cursor.
   6. Draw a highlighter stroke across visible text or another detailed background.
-  7. Return to default mode and click each stroke.
-  8. Drag each selected stroke.
+  7. Start another highlighter stroke, hold the pointer still long enough to trigger
+     straighten, then move the cursor and release.
+  8. Return to default mode and click each stroke.
+  9. Drag each selected stroke.
+  10. Select the straightened highlighter stroke and drag each endpoint handle.
 - Expected:
   - The Brush tool shows a circular size preview.
   - Pressing the left mouse button with the Brush tool shows an initial circular mark immediately, before any mouse movement.
   - The Highlighter tool shows an axis-aligned square size preview.
   - Pressing the left mouse button with the Highlighter tool shows an initial square mark immediately, before any mouse movement.
   - Both committed strokes render cleanly.
-  - The Highlighter stroke remains semi-transparent and the underlying content stays visible.
+  - The Highlighter stroke remains semi-transparent, darkens underlying content with a marker-like multiply effect, and leaves the underlying detail legible.
+  - Pause-to-straighten snaps the in-progress highlighter stroke to a straight bar from the original start point to the live cursor position.
   - Selecting either stroke shows L-bracket corner markers hugging the tight bounding box of the stroke geometry.
+  - A straightened highlighter stroke exposes draggable start and end handles in default mode, and dragging either handle reshapes only that endpoint.
   - Both strokes can be moved in default mode.
+
+### GF-MAN-ANN-002A - Bubble Tool Placement, Drag Preview, And Editing
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Create a selection and activate the Bubble tool.
+  2. Move the cursor inside the selection without pressing the mouse.
+  3. Press and hold the left mouse button, then drag before releasing.
+  4. Release to commit the bubble.
+  5. Place a second bubble.
+  6. Undo once, then place another bubble.
+  7. Return to default mode, select a committed bubble, and drag it.
+  8. Right-click with the Bubble tool active and choose a different color and font.
+- Expected:
+  - The Bubble tool shows a circular size preview while armed.
+  - Pressing the left mouse button shows the live bubble immediately on mouse-down.
+  - Dragging before release moves the live bubble so the committed bubble lands at the release position.
+  - Bubble numbering increments with each committed placement and decrements correctly when the latest bubble is undone and replaced.
+  - Committed bubbles can be selected and moved in default mode.
+  - The Bubble style wheel shows annotation colors plus font choices, and the next placed bubble uses the chosen style.
 
 ### GF-MAN-ANN-003 - Line And Arrow Editing
 
@@ -378,28 +425,35 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Run on: `ENV-A`
 - Steps:
   1. Draw one line and one arrow.
-  2. Return to default mode and select each one.
-  3. Drag the body of each shape.
-  4. Drag each endpoint handle.
+  2. While drawing the arrow, note the live shape before release.
+  3. Return to default mode and select each one.
+  4. Drag the body of each shape.
+  5. Drag each endpoint handle.
 - Expected:
   - Line and arrow drawing show a direction-aligned square size preview.
+  - The live arrow being drawn renders as a clean single silhouette without a contrasting outline around it.
+  - The committed arrow renders with a visible outline that improves contrast against the screenshot.
   - Selected line and arrow annotations show endpoint handles and L-bracket corner markers around the tight bounding box of the drawn geometry (not including the endpoint handles themselves).
   - Dragging the body moves the whole annotation.
   - Dragging an endpoint reshapes the annotation.
 
-### GF-MAN-ANN-004 - Rectangle And Filled Rectangle Editing
+### GF-MAN-ANN-004 - Rectangle, Filled Rectangle, Ellipse, And Filled Ellipse Editing
 
 - Priority: `P1`
 - Run on: `ENV-A`
 - Steps:
   1. Draw one outlined rectangle and one filled rectangle.
-  2. Move each one in default mode.
-  3. Resize the outlined rectangle from a corner and then a side handle.
+  2. Draw one outlined ellipse and one filled ellipse.
+  3. Move each one in default mode.
+  4. Resize the outlined rectangle from a corner and then a side handle.
+  5. Resize the outlined ellipse from a corner and then a side handle.
 - Expected:
-  - Neither rectangle mode shows a cursor size preview.
-  - Selected rectangles show resize handles when space permits but no L-bracket corner markers.
+  - Rectangle and Ellipse show an axis-aligned square cursor preview sized to their stroke width while armed.
+  - Filled Rectangle and Filled Ellipse do not expose a cursor stroke-size preview while armed.
+  - Selected rectangles and ellipses show resize handles when space permits but no L-bracket corner markers.
   - Filled rectangles render as filled shapes and remain movable.
-  - Resizing follows the dragged handle correctly.
+  - Filled ellipses render as filled shapes and remain movable.
+  - Resizing follows the dragged handle correctly for both outlined shapes.
 
 ### GF-MAN-ANN-005 - Overlap And Topmost Selection
 
@@ -441,7 +495,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The wheel opens centered on the cursor.
   - Hovering highlights the segment under the pointer.
   - Selecting a segment changes the color used by future annotations.
-  - Brush, Line, Arrow, Rectangle, and Filled rectangle show the 8-slot annotation palette.
+  - Brush, Line, Arrow, Rectangle, Filled rectangle, Ellipse, and Filled ellipse show the 8-slot annotation palette.
   - Highlighter shows the 6-slot highlighter palette.
   - `Esc` closes the wheel without changing the current color.
 
@@ -450,15 +504,17 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Priority: `P1`
 - Run on: `ENV-A`
 - Steps:
-  1. Activate Brush, Highlighter, Line, Arrow, and Rectangle in turn.
+  1. Activate Brush, Highlighter, Line, Arrow, Rectangle, and Ellipse in turn.
   2. Adjust width with mouse wheel and with `Ctrl + =` and `Ctrl + -`.
   3. Attempt to go below the minimum and above the maximum.
   4. Repeat once with Filled Rectangle active.
+  5. Repeat once with Filled Ellipse active.
 - Expected:
-  - Width changes affect Brush, Highlighter, Line, Arrow, and outlined Rectangle.
+  - Width changes affect Brush, Highlighter, Line, Arrow, outlined Rectangle, and outlined Ellipse.
   - The value clamps at `1..50`.
   - A centered size overlay appears when enabled.
   - Filled Rectangle rendering does not depend on stroke width.
+  - Filled Ellipse rendering does not depend on stroke width.
 
 ### GF-MAN-ANN-009 - Undo Then Switch Freehand Tool Preview
 
@@ -498,7 +554,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Use the mouse wheel and `Ctrl + =` / `Ctrl + -` before starting the next draft.
   5. Start a new draft and inspect the initial font, color, and point size.
 - Expected:
-  - The armed Text tool shows an `I-beam` cursor.
+  - The armed Text tool shows an `I-beam` cursor plus an outlined `A` placement preview that tracks the pointer inside the selection.
   - Left-click inside the selection starts a live text draft at the click point.
   - Right-click while the Text tool is armed opens the hub-and-ring text style wheel
     (see `GF-MAN-ANN-015`).
@@ -614,7 +670,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - The overlay closes after copy.
   - The pasted image contains the selected crop plus committed annotations.
-  - Highlighter annotations remain semi-transparent in the pasted image.
+  - Highlighter annotations remain semi-transparent in the pasted image and preserve the marker-like darkening effect over the captured content.
   - Overlay chrome, labels, toolbar, help, and color wheel are absent from the pasted image.
 
 ### GF-MAN-OUT-002 - Direct Save
@@ -716,34 +772,78 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - With `0`, the centered tool-size overlay does not appear.
   - With a non-zero value, the overlay appears and remains visible for roughly the configured duration.
 
-### GF-MAN-CFG-004 - Tool Color And Width Persistence
+### GF-MAN-CFG-004 - Tool Size Overlay Dismisses On Draw Start
 
 - Priority: `P1`
 - Run on: `ENV-A`
 - Steps:
-  1. Change the brush color slot, the highlighter color slot, and the shared stroke
-     width.
+  1. Create a selection and activate the `Brush` tool.
+  2. Change the brush size so the centered size overlay appears.
+  3. Before the overlay times out, press and drag to start a brush stroke.
+  4. Repeat with `Highlighter`, `Line`, and `Arrow`.
+- Expected:
+  - The first press dismisses the centered size overlay immediately.
+  - That same press starts the annotation gesture without requiring an extra click.
+
+### GF-MAN-CFG-005 - Per-Tool Size Step Persistence
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Start a capture and set distinct non-default size steps for Brush, Highlighter,
+     Line, Arrow, Rectangle, Bubble, and Text.
+  2. Switch back through those tools during the same capture and note the displayed
+     size step and visible preview size for each one.
+  3. Close the overlay and exit the app.
+  4. Relaunch Greenflame, start a fresh capture, and revisit the same tools.
+- Expected:
+  - Each tool keeps its own independent size step instead of reusing one shared value.
+  - Switching tools within the same session restores that tool's last-used size step immediately.
+  - After relaunch, each tool restores the same size step it had before exit.
+  - Filled Rectangle still ignores size stepping.
+
+### GF-MAN-CFG-006 - Tool Color Persistence
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Change the brush color slot and the highlighter color slot.
   2. Close the overlay and exit the app.
   3. Relaunch and start a fresh capture.
   4. Open the brush color wheel and then the highlighter color wheel.
 - Expected:
   - The previously chosen brush color slot is restored.
   - The previously chosen highlighter color slot is restored.
-  - The saved stroke width is restored.
   - Custom brush and highlighter palette colors appear in their configured wheel
     slots.
 
-### GF-MAN-CFG-005 - Text Point Size Persistence
+### GF-MAN-CFG-007 - Highlighter Straighten Config Behavior
 
 - Priority: `P1`
 - Run on: `ENV-A`
 - Steps:
-  1. Start a capture, activate the Text tool, and set a non-default text point size before drafting.
+  1. Set `tools.highlighter.pause_straighten_ms=0` and relaunch Greenflame.
+  2. Start a capture and draw a highlighter stroke while moving continuously.
+  3. Set `tools.highlighter.pause_straighten_ms=800` and relaunch.
+  4. Draw one continuously moving stroke and one stroke where the pointer pauses long
+     enough to trigger straighten.
+- Expected:
+  - With `pause_straighten_ms=0`, each highlighter stroke starts as a straight bar immediately.
+  - With a non-zero value, a continuously moving stroke remains freehand until the pause threshold is met.
+  - After the pause threshold is met, the stroke snaps to a straight bar and continues tracking the cursor endpoint until release.
+
+### GF-MAN-CFG-008 - Text Size Step Persistence
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Start a capture, activate the Text tool, and set a non-default text size step
+     before drafting.
   2. Cancel or finish the capture, then exit Greenflame.
   3. Relaunch Greenflame, start a fresh capture, activate the Text tool, and start a new draft.
 - Expected:
-  - The chosen text point size persists after closing and reopening the app.
-  - The new draft starts with the previously chosen point size.
+  - The chosen text size step persists after closing and reopening the app.
+  - The new draft starts with the previously chosen mapped point size.
 
 ## Mixed-DPI And Multi-Monitor
 

@@ -43,6 +43,8 @@ Examples of source files:
 - `resources/arrow.png`
 - `resources/rectangle.png`
 - `resources/filled_rectangle.png`
+- `resources/ellipse.png`
+- `resources/filled_ellipse.png`
 - `resources/help.png`
 - `resources/bubble.png`
 
@@ -54,6 +56,8 @@ Derived embedded assets follow the same naming pattern:
 - `resources/arrow-mask.png`
 - `resources/rectangle-mask.png`
 - `resources/filled_rectangle-mask.png`
+- `resources/ellipse-mask.png`
+- `resources/filled_ellipse-mask.png`
 - `resources/help-mask.png`
 - `resources/bubble-mask.png`
 
@@ -75,6 +79,8 @@ And:
 magick resources\arrow.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\arrow-mask.png
 magick resources\rectangle.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\rectangle-mask.png
 magick resources\filled_rectangle.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\filled_rectangle-mask.png
+magick resources\ellipse.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\ellipse-mask.png
+magick resources\filled_ellipse.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\filled_ellipse-mask.png
 magick resources\help.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\help-mask.png
 magick resources\bubble.png -colorspace Gray -negate -alpha copy -fill white -colorize 100 -strip resources\bubble-mask.png
 ```

@@ -1,6 +1,7 @@
 #include "greenflame_core/annotation_tool_registry.h"
 
 #include "greenflame_core/bubble_annotation_tool.h"
+#include "greenflame_core/ellipse_annotation_tool.h"
 #include "greenflame_core/freehand_annotation_tool.h"
 #include "greenflame_core/line_annotation_tool.h"
 #include "greenflame_core/rectangle_annotation_tool.h"
@@ -38,6 +39,15 @@ AnnotationToolRegistry::AnnotationToolRegistry() {
         AnnotationToolDescriptor{AnnotationToolId::FilledRectangle,
                                  L"Filled rectangle tool", L'F', L"F",
                                  AnnotationToolbarGlyph::FilledRectangle},
+        true));
+    tools_.push_back(std::make_unique<EllipseAnnotationTool>(
+        AnnotationToolDescriptor{AnnotationToolId::Ellipse, L"Ellipse tool", L'E', L"E",
+                                 AnnotationToolbarGlyph::Ellipse},
+        false));
+    tools_.push_back(std::make_unique<EllipseAnnotationTool>(
+        AnnotationToolDescriptor{AnnotationToolId::FilledEllipse,
+                                 L"Filled ellipse tool", L'G', L"G",
+                                 AnnotationToolbarGlyph::FilledEllipse},
         true));
     tools_.push_back(std::make_unique<TextAnnotationTool>());
     tools_.push_back(std::make_unique<BubbleAnnotationTool>());

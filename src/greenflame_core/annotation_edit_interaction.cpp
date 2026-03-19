@@ -260,10 +260,10 @@ class FreehandStrokeEndpointEditInteraction final : public EndpointEditInteracti
     }
 };
 
-class RectangleResizeEditInteraction final : public IAnnotationEditInteraction {
+class BoundsResizeEditInteraction final : public IAnnotationEditInteraction {
   public:
-    RectangleResizeEditInteraction(uint64_t annotation_id, size_t index,
-                                   Annotation annotation_before, SelectionHandle handle)
+    BoundsResizeEditInteraction(uint64_t annotation_id, size_t index,
+                                Annotation annotation_before, SelectionHandle handle)
         : annotation_id_(annotation_id), index_(index),
           annotation_before_(std::move(annotation_before)),
           annotation_after_(annotation_before_), handle_(handle) {}
@@ -271,16 +271,29 @@ class RectangleResizeEditInteraction final : public IAnnotationEditInteraction {
     [[nodiscard]] bool Update(IAnnotationEditInteractionHost &host,
                               PointPx cursor) override {
         Annotation const *const current = host.Annotation_at(index_);
-        RectangleAnnotation const *const rect_before =
-            std::get_if<RectangleAnnotation>(&annotation_before_.data);
-        if (current == nullptr || current->id != annotation_id_ ||
-            rect_before == nullptr) {
+        if (current == nullptr || current->id != annotation_id_) {
             return false;
         }
 
         Annotation edited = annotation_before_;
-        std::get<RectangleAnnotation>(edited.data).outer_bounds =
-            Resize_rectangle_from_handle(rect_before->outer_bounds, handle_, cursor);
+        bool updated = false;
+        std::visit(Overloaded{
+                       [&](RectangleAnnotation &rect) noexcept {
+                           rect.outer_bounds = Resize_rectangle_from_handle(
+                               rect.outer_bounds, handle_, cursor);
+                           updated = true;
+                       },
+                       [&](EllipseAnnotation &ellipse) noexcept {
+                           ellipse.outer_bounds = Resize_rectangle_from_handle(
+                               ellipse.outer_bounds, handle_, cursor);
+                           updated = true;
+                       },
+                       [&](auto &) noexcept {},
+                   },
+                   edited.data);
+        if (!updated) {
+            return false;
+        }
         if (*current == edited) {
             return false;
         }
@@ -294,9 +307,13 @@ class RectangleResizeEditInteraction final : public IAnnotationEditInteraction {
         if (annotation_after_ == annotation_before_) {
             return std::nullopt;
         }
+        std::string_view const description =
+            std::holds_alternative<EllipseAnnotation>(annotation_before_.data)
+                ? "Resize ellipse annotation"
+                : "Resize rectangle annotation";
         return AnnotationEditCommandData{
             index_,         annotation_before_, annotation_after_,
-            annotation_id_, annotation_id_,     "Resize rectangle annotation"};
+            annotation_id_, annotation_id_,     description};
     }
 
     [[nodiscard]] bool Cancel(IAnnotationEditInteractionHost &host) override {
@@ -368,6 +385,16 @@ Hit_test_annotation_edit_target(Annotation const *selected_annotation,
             return AnnotationEditTarget{selected_annotation->id,
                                         Target_kind_for_rectangle_handle(*handle)};
         }
+    } else if (EllipseAnnotation const *const sel_ellipse =
+                   selected_annotation
+                       ? std::get_if<EllipseAnnotation>(&selected_annotation->data)
+                       : nullptr) {
+        if (std::optional<SelectionHandle> const handle =
+                Hit_test_rectangle_resize_handles(sel_ellipse->outer_bounds, cursor);
+            handle.has_value()) {
+            return AnnotationEditTarget{selected_annotation->id,
+                                        Target_kind_for_rectangle_handle(*handle)};
+        }
     }
 
     std::optional<size_t> const index =
@@ -421,13 +448,14 @@ Create_annotation_edit_interaction(AnnotationEditTarget target, size_t index,
     case AnnotationEditTargetKind::RectangleRightHandle:
     case AnnotationEditTargetKind::RectangleBottomHandle:
     case AnnotationEditTargetKind::RectangleLeftHandle:
-        if (!std::holds_alternative<RectangleAnnotation>(annotation_before.data)) {
+        if (!std::holds_alternative<RectangleAnnotation>(annotation_before.data) &&
+            !std::holds_alternative<EllipseAnnotation>(annotation_before.data)) {
             return {};
         }
         if (std::optional<SelectionHandle> const handle =
                 Rectangle_handle_from_target_kind(target.kind);
             handle.has_value()) {
-            return std::make_unique<RectangleResizeEditInteraction>(
+            return std::make_unique<BoundsResizeEditInteraction>(
                 target.annotation_id, index, std::move(annotation_before), *handle);
         }
         return {};

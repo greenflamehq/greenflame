@@ -51,6 +51,18 @@ Annotation Make_rectangle(uint64_t id, RectPx outer_bounds, int32_t width_px,
     return annotation;
 }
 
+Annotation Make_ellipse(uint64_t id, RectPx outer_bounds, int32_t width_px,
+                        bool filled = false) {
+    Annotation annotation{};
+    annotation.id = id;
+    annotation.data = EllipseAnnotation{
+        .outer_bounds = outer_bounds,
+        .style = {.width_px = width_px},
+        .filled = filled,
+    };
+    return annotation;
+}
+
 class RecordingEditInteractionHost final : public IAnnotationEditInteractionHost {
   public:
     [[nodiscard]] Annotation const *
@@ -218,6 +230,45 @@ TEST(annotation_edit_interaction,
     EXPECT_TRUE(interaction->Cancel(host));
     EXPECT_EQ(host.annotations[0], original);
     EXPECT_EQ(host.selected_annotation_id, std::optional<uint64_t>{8});
+}
+
+TEST(annotation_edit_interaction,
+     HitTest_PrefersSelectedEllipseHandlesAndFallsBackToBody) {
+    Annotation const ellipse =
+        Make_ellipse(14, RectPx::From_ltrb(40, 40, 81, 81), 4, true);
+    std::vector<Annotation> const annotations = {ellipse};
+
+    EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {40, 40}),
+              (std::optional<AnnotationEditTarget>{AnnotationEditTarget{
+                  14, AnnotationEditTargetKind::RectangleTopLeftHandle}}));
+    EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {60, 60}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{14, AnnotationEditTargetKind::Body}}));
+}
+
+TEST(annotation_edit_interaction,
+     EllipseResizeInteraction_CancelRestoresOriginalEllipseAndExposesHandle) {
+    RecordingEditInteractionHost host;
+    Annotation const original =
+        Make_ellipse(15, RectPx::From_ltrb(40, 40, 81, 81), 5, true);
+    host.annotations.push_back(original);
+
+    std::unique_ptr<IAnnotationEditInteraction> interaction =
+        Create_annotation_edit_interaction(
+            AnnotationEditTarget{15, AnnotationEditTargetKind::RectangleRightHandle}, 0,
+            original, {80, 60});
+    ASSERT_NE(interaction, nullptr);
+    EXPECT_EQ(interaction->Active_handle(),
+              std::optional<AnnotationEditHandleKind>{
+                  AnnotationEditHandleKind::RectangleRight});
+
+    EXPECT_TRUE(interaction->Update(host, {95, 60}));
+    EXPECT_EQ(std::get<EllipseAnnotation>(host.annotations[0].data).outer_bounds,
+              (RectPx::From_ltrb(40, 40, 96, 81)));
+
+    std::optional<AnnotationEditCommandData> const command = interaction->Commit();
+    ASSERT_TRUE(command.has_value());
+    EXPECT_EQ(command->description, "Resize ellipse annotation");
 }
 
 TEST(annotation_edit_interaction,

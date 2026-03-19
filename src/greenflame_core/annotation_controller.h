@@ -168,6 +168,7 @@ class AnnotationController final : public IAnnotationToolHost,
     StrokeStyle line_style_ = {};
     StrokeStyle arrow_style_ = {};
     StrokeStyle rect_style_ = {};
+    StrokeStyle ellipse_style_ = {};
     StrokeStyle highlighter_style_ = {};
     int32_t bubble_size_step_ = 10;
     int32_t text_size_step_ = 10;

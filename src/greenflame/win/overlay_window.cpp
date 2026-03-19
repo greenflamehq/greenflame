@@ -32,9 +32,11 @@ constexpr int kLineToolGlyphResourceId = 105;
 constexpr int kArrowToolGlyphResourceId = 106;
 constexpr int kRectangleToolGlyphResourceId = 107;
 constexpr int kFilledRectangleToolGlyphResourceId = 108;
-constexpr int kHelpToolGlyphResourceId = 109;
-constexpr int kTextToolGlyphResourceId = 110;
-constexpr int kBubbleToolGlyphResourceId = 111;
+constexpr int kEllipseToolGlyphResourceId = 109;
+constexpr int kFilledEllipseToolGlyphResourceId = 110;
+constexpr int kHelpToolGlyphResourceId = 111;
+constexpr int kTextToolGlyphResourceId = 112;
+constexpr int kBubbleToolGlyphResourceId = 113;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 constexpr UINT_PTR kCaretBlinkTimerId = 2;
 constexpr UINT_PTR kHighlighterStraightenTimerId = 3;
@@ -60,7 +62,7 @@ struct ToolbarGlyphResourceSpec final {
     int resource_id = 0;
 };
 
-constexpr std::array<ToolbarGlyphResourceSpec, 9> kToolbarGlyphResourceSpecs = {{
+constexpr std::array<ToolbarGlyphResourceSpec, 11> kToolbarGlyphResourceSpecs = {{
     {greenflame::OverlayToolbarGlyphId::Brush, kBrushToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Highlighter, kHighlighterToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Line, kLineToolGlyphResourceId},
@@ -68,6 +70,9 @@ constexpr std::array<ToolbarGlyphResourceSpec, 9> kToolbarGlyphResourceSpecs = {
     {greenflame::OverlayToolbarGlyphId::Rectangle, kRectangleToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::FilledRectangle,
      kFilledRectangleToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Ellipse, kEllipseToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::FilledEllipse,
+     kFilledEllipseToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Text, kTextToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Bubble, kBubbleToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Help, kHelpToolGlyphResourceId},
@@ -659,6 +664,10 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
             return OverlayToolbarGlyphId::Rectangle;
         case core::AnnotationToolbarGlyph::FilledRectangle:
             return OverlayToolbarGlyphId::FilledRectangle;
+        case core::AnnotationToolbarGlyph::Ellipse:
+            return OverlayToolbarGlyphId::Ellipse;
+        case core::AnnotationToolbarGlyph::FilledEllipse:
+            return OverlayToolbarGlyphId::FilledEllipse;
         case core::AnnotationToolbarGlyph::Text:
             return OverlayToolbarGlyphId::Text;
         case core::AnnotationToolbarGlyph::Bubble:
@@ -804,6 +813,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         tool_step(core::AnnotationToolId::Line, config_->line_size);
         tool_step(core::AnnotationToolId::Arrow, config_->arrow_size);
         tool_step(core::AnnotationToolId::Rectangle, config_->rect_size);
+        tool_step(core::AnnotationToolId::Ellipse, config_->ellipse_size);
         tool_step(core::AnnotationToolId::Highlighter, config_->highlighter_size);
         tool_step(core::AnnotationToolId::Bubble, config_->bubble_size);
         tool_step(core::AnnotationToolId::Text, config_->text_size);
@@ -813,6 +823,8 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         tool_step(core::AnnotationToolId::Line, core::AppConfig::kDefaultLineSize);
         tool_step(core::AnnotationToolId::Arrow, core::AppConfig::kDefaultArrowSize);
         tool_step(core::AnnotationToolId::Rectangle, core::AppConfig::kDefaultRectSize);
+        tool_step(core::AnnotationToolId::Ellipse,
+                  core::AppConfig::kDefaultEllipseSize);
         tool_step(core::AnnotationToolId::Highlighter,
                   core::AppConfig::kDefaultHighlighterSize);
         tool_step(core::AnnotationToolId::Bubble, core::AppConfig::kDefaultBubbleSize);
@@ -878,7 +890,7 @@ bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
         return false;
     }
     int32_t const step = controller_.Tool_size_step(*active_tool);
-    // step == 0 means this tool (FilledRectangle) does not have a size.
+    // step == 0 means this tool does not have a size.
     // Also skip when there's no selection or a text edit is blocking input.
     if (step == 0 || controller_.State().final_selection.Is_empty() ||
         (*active_tool == core::AnnotationToolId::Text &&
@@ -901,6 +913,9 @@ bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
         case core::AnnotationToolId::Rectangle:
             config_->rect_size = new_step;
             break;
+        case core::AnnotationToolId::Ellipse:
+            config_->ellipse_size = new_step;
+            break;
         case core::AnnotationToolId::Highlighter:
             config_->highlighter_size = new_step;
             break;
@@ -911,6 +926,7 @@ bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
             config_->text_size = new_step;
             break;
         case core::AnnotationToolId::FilledRectangle:
+        case core::AnnotationToolId::FilledEllipse:
             break;
         }
         config_->Normalize();
@@ -1283,7 +1299,8 @@ bool OverlayWindow::Should_show_square_cursor_preview() const {
            (*active_tool == core::AnnotationToolId::Highlighter ||
             *active_tool == core::AnnotationToolId::Line ||
             *active_tool == core::AnnotationToolId::Arrow ||
-            *active_tool == core::AnnotationToolId::Rectangle) &&
+            *active_tool == core::AnnotationToolId::Rectangle ||
+            *active_tool == core::AnnotationToolId::Ellipse) &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value() &&
            !controller_.Has_active_annotation_gesture();
@@ -2866,7 +2883,9 @@ void OverlayWindow::Refresh_cursor() {
             *active_tool == core::AnnotationToolId::Line ||
             *active_tool == core::AnnotationToolId::Arrow ||
             *active_tool == core::AnnotationToolId::Rectangle ||
-            *active_tool == core::AnnotationToolId::FilledRectangle) {
+            *active_tool == core::AnnotationToolId::FilledRectangle ||
+            *active_tool == core::AnnotationToolId::Ellipse ||
+            *active_tool == core::AnnotationToolId::FilledEllipse) {
             SetCursor(Load_annotation_tool_cursor(hinstance_));
         } else if (*active_tool == core::AnnotationToolId::Text) {
             SetCursor(LoadCursorW(nullptr, IDC_IBEAM));

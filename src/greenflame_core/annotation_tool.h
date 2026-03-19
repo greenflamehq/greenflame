@@ -13,6 +13,8 @@ enum class AnnotationToolId : uint8_t {
     Arrow,
     Rectangle,
     FilledRectangle,
+    Ellipse,
+    FilledEllipse,
     Text,
     Bubble,
 };
@@ -25,6 +27,8 @@ enum class AnnotationToolbarGlyph : uint8_t {
     Arrow,
     Rectangle,
     FilledRectangle,
+    Ellipse,
+    FilledEllipse,
     Text,
     Bubble,
 };

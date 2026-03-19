@@ -314,6 +314,34 @@ void Draw_rectangle(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     }
 }
 
+void Draw_ellipse(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                  core::EllipseAnnotation const &ellipse) {
+    res.solid_brush->SetColor(
+        Colorref_to_d2d(ellipse.style.color,
+                        Alpha_from_opacity_percent(ellipse.style.opacity_percent)));
+    D2D1_RECT_F const rf = Rect(ellipse.outer_bounds);
+    float const rx = (rf.right - rf.left) * 0.5f;
+    float const ry = (rf.bottom - rf.top) * 0.5f;
+    D2D1_ELLIPSE const shape = D2D1::Ellipse(D2D1::Point2F(rf.left + rx, rf.top + ry),
+                                             std::max(0.0f, rx), std::max(0.0f, ry));
+
+    if (ellipse.filled) {
+        rt->FillEllipse(shape, res.solid_brush.Get());
+        return;
+    }
+
+    float const stroke_width = static_cast<float>(ellipse.style.width_px);
+    float const inset_rx = rx - (stroke_width * 0.5f);
+    float const inset_ry = ry - (stroke_width * 0.5f);
+    if (inset_rx <= 0.0f || inset_ry <= 0.0f) {
+        rt->FillEllipse(shape, res.solid_brush.Get());
+        return;
+    }
+
+    rt->DrawEllipse(D2D1::Ellipse(shape.point, inset_rx, inset_ry),
+                    res.solid_brush.Get(), stroke_width, res.flat_cap_style.Get());
+}
+
 [[nodiscard]] bool
 Text_bitmap_is_valid(core::TextAnnotation const &annotation) noexcept {
     if (annotation.bitmap_width_px <= 0 || annotation.bitmap_height_px <= 0 ||
@@ -404,6 +432,9 @@ void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
             [&](core::LineAnnotation const &line) { Draw_line(rt, res, line); },
             [&](core::RectangleAnnotation const &rect) {
                 Draw_rectangle(rt, res, rect);
+            },
+            [&](core::EllipseAnnotation const &ellipse) {
+                Draw_ellipse(rt, res, ellipse);
             },
             [&](core::TextAnnotation const &text) { Draw_text(rt, res, ann.id, text); },
             [&](core::BubbleAnnotation const &bubble) {
@@ -978,6 +1009,9 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 constexpr float kDimMarginF = 4.f;
 constexpr float kDimGapF = 4.f;
 constexpr float kCenterMinPad = 24.f;
+// Transient center label: two margins on each side of the measured text (4× kDimMarginF
+// total width).
+constexpr int kTransientCenterLabelHorizontalMarginUnits = 4;
 
 // Clamp a box position so it stays within [lo, hi].
 void Clamp_box(float &left, float w, float lo, float hi) {
@@ -1083,7 +1117,9 @@ void Draw_transient_center_label(ID2D1RenderTarget *rt, D2DOverlayResources &res
     if (!Measure_text(res, res.text_center.Get(), L"50", fixed_w, ch)) {
         return;
     }
-    float cbox_w = fixed_w + 4.f * kDimMarginF;
+    float cbox_w =
+        fixed_w +
+        static_cast<float>(kTransientCenterLabelHorizontalMarginUnits) * kDimMarginF;
     float cbox_h = ch + 2.f * kDimMarginF;
     int const sel_w = sel.Width();
     int const sel_h = sel.Height();
@@ -1226,6 +1262,18 @@ void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     rt, res,
                     core::Rectangle_resize_handle_center(
                         rect->outer_bounds, static_cast<core::SelectionHandle>(i)));
+            }
+        }
+    } else if (core::EllipseAnnotation const *const ellipse =
+                   std::get_if<core::EllipseAnnotation>(&ann->data)) {
+        std::array<bool, 8> const visible =
+            core::Visible_rectangle_resize_handles(ellipse->outer_bounds);
+        for (size_t i = 0; i < visible.size(); ++i) {
+            if (visible[i]) {
+                Draw_endpoint_handle(
+                    rt, res,
+                    core::Rectangle_resize_handle_center(
+                        ellipse->outer_bounds, static_cast<core::SelectionHandle>(i)));
             }
         }
     }

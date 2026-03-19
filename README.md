@@ -39,10 +39,12 @@ Once a region is selected:
 - Press **A** or use the toolbar to toggle the **Arrow tool** on or off.
 - Press **R** or use the toolbar to toggle the **Rectangle tool** on or off.
 - Press **F** or use the toolbar to toggle the **Filled Rectangle tool** on or off.
+- Press **E** or use the toolbar to toggle the **Ellipse tool** on or off.
+- Press **G** or use the toolbar to toggle the **Filled Ellipse tool** on or off.
 - Press **T** or use the toolbar to toggle the **Text tool** on or off.
 - Press **N** or use the toolbar to toggle the **Bubble tool** on or off.
 - With an annotation tool active, **right-click** anywhere to open the active tool's **color wheel** at the cursor. **Left-click** a segment to select that color, or press **Escape** to dismiss the wheel.
-- With any stroke or size tool active (**Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Bubble**, or **Text**), use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent size step that is persisted separately.
+- With any stroke or size tool active (**Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Ellipse**, **Bubble**, or **Text**), use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent size step that is persisted separately.
 - With the **Text tool** active and no draft open, **left-click inside the selection** to start a text annotation at the click point.
 - With the **Text tool** active and no draft open, **right-click** opens a **12-segment text style wheel**: 8 annotation-color slots on the left half and 4 font choices on the right half.
 - With the **Text tool** active and no draft open, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change text size step (1–50, mapped to 5–288 pt). The chosen step is persisted.
@@ -51,7 +53,7 @@ Once a region is selected:
 - With the **Highlighter tool** active, the overlay shows an anti-aliased axis-aligned square size preview around the cursor hotspot.
 - While drawing a **Highlighter** stroke, holding the mouse still for `tools.highlighter.pause_straighten_ms` milliseconds (default 800 ms) snaps the stroke to a straight bar from the start point to the cursor. After snapping, the end of the bar tracks the mouse live until release. The snap is one-way — it cannot be reverted to freehand. Setting `pause_straighten_ms` to `0` makes every stroke start as a straight bar immediately.
 - With the **Line** or **Arrow** tool active, the overlay shows an anti-aliased square size preview around the cursor hotspot aligned to the current line direction.
-- The **Rectangle** and **Filled Rectangle** tools do not draw a cursor size preview overlay.
+- The **Rectangle**, **Filled Rectangle**, **Ellipse**, and **Filled Ellipse** tools do not draw a cursor size preview overlay.
 - While editing text, **Ctrl+A / Ctrl+C / Ctrl+X / Ctrl+V** work on the active draft, and **Ctrl-Z / Ctrl-Shift-Z** affect only that draft.
 - While editing text, **Ctrl+B**, **Ctrl+I**, **Ctrl+U**, and **Alt+Shift+5** toggle bold, italic, underline, and strikethrough.
 - While editing text, **Insert** toggles insert/overwrite mode, **Ctrl+Enter** inserts a newline, **Enter** commits the draft, and **Escape** cancels the draft while keeping the Text tool armed.
@@ -173,7 +175,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `tools.freehand.size` | `2` | Brush tool size step (1–50). Physical stroke width = step px. |
 | `tools.line.size` | `2` | Line tool size step (1–50). Physical stroke width = step px. |
 | `tools.arrow.size` | `2` | Arrow tool size step (1–50). Physical stroke width = step px. |
-| `tools.rect.size` | `2` | Rectangle tool size step (1–50). Physical stroke width = step px. |
+| `tools.rect.size` | `2` | Rectangle and Ellipse tool size step (1–50). Physical stroke width = step px. |
 | `tools.colors` | Object with slot index keys (e.g. `{"4": "#ff00ff"}`) | Annotation color wheel slots (indices 0–7). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
 | `tools.font.sans` | `Arial` | Font family for the `sans` slot (shared by Text and Bubble tools). |

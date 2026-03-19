@@ -388,6 +388,15 @@ core::AppConfig Load_app_config() {
                     }
                 }
             }
+            if (tools.has_key("ellipse")) {
+                easyjson::JSON const &ellipse = tools["ellipse"];
+                if (ellipse.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(ellipse["size"], parsed)) {
+                        config.ellipse_size = parsed;
+                    }
+                }
+            }
             if (tools.has_key("current_color")) {
                 int32_t parsed = 0;
                 if (Read_int_from_json(tools["current_color"], parsed)) {
@@ -540,6 +549,7 @@ bool Save_app_config(core::AppConfig const &config) {
                            config.line_size != defaults.line_size ||
                            config.arrow_size != defaults.arrow_size ||
                            config.rect_size != defaults.rect_size ||
+                           config.ellipse_size != defaults.ellipse_size ||
                            config.highlighter_size != defaults.highlighter_size ||
                            config.bubble_size != defaults.bubble_size ||
                            config.text_size != defaults.text_size ||
@@ -575,6 +585,9 @@ bool Save_app_config(core::AppConfig const &config) {
             }
             if (config.rect_size != defaults.rect_size) {
                 root["tools"]["rect"]["size"] = config.rect_size;
+            }
+            if (config.ellipse_size != defaults.ellipse_size) {
+                root["tools"]["ellipse"]["size"] = config.ellipse_size;
             }
             if (config.annotation_colors != defaults.annotation_colors) {
                 easyjson::JSON colors_obj = easyjson::object();

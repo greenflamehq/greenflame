@@ -448,6 +448,49 @@ struct ArrowGeometry final {
                              bubble.center.y - r + bubble.diameter_px);
 }
 
+[[nodiscard]] bool Point_inside_ellipse(float px, float py,
+                                        RectPx outer_bounds) noexcept {
+    RectPx const r = outer_bounds.Normalized();
+    float const width = static_cast<float>(r.Width());
+    float const height = static_cast<float>(r.Height());
+    if (width <= 0.0F || height <= 0.0F) {
+        return false;
+    }
+
+    float const rx = width * kHalf;
+    float const ry = height * kHalf;
+    if (rx <= 0.0F || ry <= 0.0F) {
+        return false;
+    }
+
+    float const cx = static_cast<float>(r.left) + rx;
+    float const cy = static_cast<float>(r.top) + ry;
+    float const dx = (px - cx) / rx;
+    float const dy = (py - cy) / ry;
+    return (dx * dx + dy * dy) <= 1.0F;
+}
+
+[[nodiscard]] bool
+Point_inside_ellipse_outline(float px, float py,
+                             EllipseAnnotation const &ellipse) noexcept {
+    RectPx const r = ellipse.outer_bounds.Normalized();
+    if (!Point_inside_ellipse(px, py, r)) {
+        return false;
+    }
+    if (ellipse.filled) {
+        return true;
+    }
+
+    int32_t const inset =
+        std::max<int32_t>(StrokeStyle::kMinWidthPx, ellipse.style.width_px);
+    RectPx const inner = RectPx::From_ltrb(r.left + inset, r.top + inset,
+                                           r.right - inset, r.bottom - inset);
+    if (inner.Is_empty()) {
+        return true;
+    }
+    return !Point_inside_ellipse(px, py, inner);
+}
+
 [[nodiscard]] bool Bubble_bitmap_is_valid(BubbleAnnotation const &annotation) noexcept {
     if (annotation.bitmap_width_px <= 0 || annotation.bitmap_height_px <= 0 ||
         annotation.bitmap_row_bytes < annotation.bitmap_width_px * 4) {
@@ -606,6 +649,7 @@ AnnotationKind Annotation::Kind() const noexcept {
             [](RectangleAnnotation const &) noexcept {
                 return AnnotationKind::Rectangle;
             },
+            [](EllipseAnnotation const &) noexcept { return AnnotationKind::Ellipse; },
             [](TextAnnotation const &) noexcept { return AnnotationKind::Text; },
             [](BubbleAnnotation const &) noexcept { return AnnotationKind::Bubble; },
         },
@@ -654,6 +698,9 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
             [](RectangleAnnotation const &rect) -> RectPx {
                 return rect.outer_bounds.Normalized();
             },
+            [](EllipseAnnotation const &ellipse) -> RectPx {
+                return ellipse.outer_bounds.Normalized();
+            },
             [](TextAnnotation const &text) -> RectPx {
                 return text.visual_bounds.Normalized();
             },
@@ -671,6 +718,7 @@ bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept {
     case AnnotationKind::Text:
         return true;
     case AnnotationKind::Rectangle:
+    case AnnotationKind::Ellipse:
         return false;
     case AnnotationKind::Bubble:
         return true;
@@ -700,6 +748,9 @@ RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept {
                 return Line_tight_visual_bounds_px(start_f, end_f, line.style);
             },
             [&](RectangleAnnotation const &) -> RectPx {
+                return Annotation_bounds(annotation);
+            },
+            [&](EllipseAnnotation const &) -> RectPx {
                 return Annotation_bounds(annotation);
             },
             [](TextAnnotation const &text) -> RectPx {
@@ -780,6 +831,11 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                 RectPx const inner = RectPx::From_ltrb(
                     r.left + inset, r.top + inset, r.right - inset, r.bottom - inset);
                 return inner.Is_empty() || !inner.Contains(point);
+            },
+            [&](EllipseAnnotation const &ellipse) -> bool {
+                return Point_inside_ellipse_outline(static_cast<float>(point.x) + kHalf,
+                                                    static_cast<float>(point.y) + kHalf,
+                                                    ellipse);
             },
             [&](TextAnnotation const &text) -> bool {
                 std::optional<size_t> const offset =
@@ -1015,6 +1071,13 @@ Annotation Translate_annotation(Annotation annotation, PointPx delta) noexcept {
                                              rect.outer_bounds.right + delta.x,
                                              rect.outer_bounds.bottom + delta.y);
                    },
+                   [&](EllipseAnnotation &ellipse) noexcept {
+                       ellipse.outer_bounds =
+                           RectPx::From_ltrb(ellipse.outer_bounds.left + delta.x,
+                                             ellipse.outer_bounds.top + delta.y,
+                                             ellipse.outer_bounds.right + delta.x,
+                                             ellipse.outer_bounds.bottom + delta.y);
+                   },
                    [&](TextAnnotation &text) noexcept {
                        text.origin.x += delta.x;
                        text.origin.y += delta.y;
@@ -1193,6 +1256,99 @@ void Blend_annotation_onto_pixels(std::span<uint8_t> pixels, int width, int heig
                 blend_stroke(rect.style,
                              RectState{r, inner, !inner.Is_empty() && !rect.filled,
                                        rect.filled});
+            },
+            [&](EllipseAnnotation const &ellipse) noexcept {
+                uint8_t const red = Colorref_red(ellipse.style.color);
+                uint8_t const green = Colorref_green(ellipse.style.color);
+                uint8_t const blue = Colorref_blue(ellipse.style.color);
+                uint8_t const alpha =
+                    Opacity_percent_to_alpha(ellipse.style.opacity_percent);
+                if (alpha == 0) {
+                    return;
+                }
+
+                // Precompute outer ellipse geometry
+                RectPx const r = ellipse.outer_bounds.Normalized();
+                float const ell_width = static_cast<float>(r.Width());
+                float const ell_height = static_cast<float>(r.Height());
+                if (ell_width <= 0.0f || ell_height <= 0.0f) {
+                    return;
+                }
+                float const rx = ell_width * kHalf;
+                float const ry = ell_height * kHalf;
+                float const cx = static_cast<float>(r.left) + rx;
+                float const cy = static_cast<float>(r.top) + ry;
+
+                // Precompute inner-hole geometry for outlined ellipses
+                bool inner_valid = false;
+                float inner_rx = 0.0f;
+                float inner_ry = 0.0f;
+                float inner_cx = 0.0f;
+                float inner_cy = 0.0f;
+                if (!ellipse.filled) {
+                    int32_t const inset = std::max<int32_t>(StrokeStyle::kMinWidthPx,
+                                                            ellipse.style.width_px);
+                    RectPx const inner_r =
+                        RectPx::From_ltrb(r.left + inset, r.top + inset,
+                                          r.right - inset, r.bottom - inset);
+                    if (!inner_r.Is_empty()) {
+                        inner_rx = static_cast<float>(inner_r.Width()) * kHalf;
+                        inner_ry = static_cast<float>(inner_r.Height()) * kHalf;
+                        inner_cx = static_cast<float>(inner_r.left) + inner_rx;
+                        inner_cy = static_cast<float>(inner_r.top) + inner_ry;
+                        inner_valid = true;
+                    }
+                }
+
+                for (int32_t y = clipped->top; y < clipped->bottom; ++y) {
+                    int32_t const target_y = y - target_bounds.top;
+                    size_t const row_offset =
+                        static_cast<size_t>(target_y) * static_cast<size_t>(row_bytes);
+
+                    for (int32_t x = clipped->left; x < clipped->right; ++x) {
+                        float const px = static_cast<float>(x) + kHalf;
+                        float const py = static_cast<float>(y) + kHalf;
+
+                        // Test outer ellipse
+                        float const dox = (px - cx) / rx;
+                        float const doy = (py - cy) / ry;
+                        if (dox * dox + doy * doy > 1.0f) {
+                            continue;
+                        }
+
+                        // Test inner hole (outlined ellipses only)
+                        if (inner_valid) {
+                            float const dix = (px - inner_cx) / inner_rx;
+                            float const diy = (py - inner_cy) / inner_ry;
+                            if (dix * dix + diy * diy <= 1.0f) {
+                                continue;
+                            }
+                        }
+
+                        int32_t const target_x = x - target_bounds.left;
+                        size_t const pixel_offset =
+                            row_offset + static_cast<size_t>(target_x) * 4;
+                        if (pixel_offset + 3 >= pixels.size()) {
+                            continue;
+                        }
+
+                        if (alpha == kFullOpacity) {
+                            pixels[pixel_offset] = blue;
+                            pixels[pixel_offset + 1] = green;
+                            pixels[pixel_offset + 2] = red;
+                            pixels[pixel_offset + 3] = kFullOpacity;
+                            continue;
+                        }
+
+                        pixels[pixel_offset] =
+                            Blend_channel(pixels[pixel_offset], blue, alpha);
+                        pixels[pixel_offset + 1] =
+                            Blend_channel(pixels[pixel_offset + 1], green, alpha);
+                        pixels[pixel_offset + 2] =
+                            Blend_channel(pixels[pixel_offset + 2], red, alpha);
+                        pixels[pixel_offset + 3] = kFullOpacity;
+                    }
+                }
             },
             [&](BubbleAnnotation const &bubble) noexcept {
                 Blend_bubble_annotation_onto_pixels(pixels, row_bytes, bubble,

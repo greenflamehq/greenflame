@@ -957,6 +957,32 @@ TEST(overlay_controller, AnnotationToolHotkey_TogglesFilledRectangle) {
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
+TEST(overlay_controller, AnnotationToolHotkey_TogglesEllipse) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'E'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Ellipse});
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'E'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+}
+
+TEST(overlay_controller, AnnotationToolHotkey_TogglesFilledEllipse) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'G'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::FilledEllipse});
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'G'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+}
+
 TEST(overlay_controller, AnnotationToolHotkey_TogglesText) {
     auto c = Make_controller();
     Press(c, {100, 100});
@@ -1263,11 +1289,32 @@ TEST(overlay_controller, ToolSizeAdjust_AppliesToRectangleTool) {
     EXPECT_EQ(c.Adjust_tool_size(-3), std::optional<int32_t>{1});
 }
 
+TEST(overlay_controller, ToolSizeAdjust_AppliesToEllipseTool) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'E'), OverlayAction::Repaint);
+
+    EXPECT_EQ(c.Tool_size_step(AnnotationToolId::Ellipse),
+              StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_tool_size(2), std::optional<int32_t>{4});
+    EXPECT_EQ(c.Adjust_tool_size(-3), std::optional<int32_t>{1});
+}
+
 TEST(overlay_controller, ToolSizeAdjust_IgnoresFilledRectangleTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'F'), OverlayAction::Repaint);
+
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
+}
+
+TEST(overlay_controller, ToolSizeAdjust_IgnoresFilledEllipseTool) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'G'), OverlayAction::Repaint);
 
     EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
 }

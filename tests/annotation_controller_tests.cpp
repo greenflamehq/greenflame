@@ -43,6 +43,18 @@ Annotation Make_rectangle(uint64_t id, RectPx outer_bounds, int32_t width_px,
     return annotation;
 }
 
+Annotation Make_ellipse(uint64_t id, RectPx outer_bounds, int32_t width_px,
+                        bool filled = false) {
+    Annotation annotation{};
+    annotation.id = id;
+    annotation.data = EllipseAnnotation{
+        .outer_bounds = outer_bounds,
+        .style = {.width_px = width_px},
+        .filled = filled,
+    };
+    return annotation;
+}
+
 Annotation Make_text(uint64_t id, PointPx origin, RectPx visual_bounds,
                      std::wstring text = L"abc") {
     Annotation annotation{};
@@ -90,7 +102,7 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     std::vector<AnnotationToolbarButtonView> const views =
         controller.Build_toolbar_button_views();
 
-    ASSERT_EQ(views.size(), 8u);
+    ASSERT_EQ(views.size(), 10u);
     EXPECT_EQ(views[0].id, AnnotationToolId::Freehand);
     EXPECT_EQ(views[0].label, L"B");
     EXPECT_EQ(views[0].tooltip, L"Brush tool");
@@ -121,16 +133,26 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     EXPECT_EQ(views[5].tooltip, L"Filled rectangle tool");
     EXPECT_EQ(views[5].glyph, AnnotationToolbarGlyph::FilledRectangle);
     EXPECT_FALSE(views[5].active);
-    EXPECT_EQ(views[6].id, AnnotationToolId::Text);
-    EXPECT_EQ(views[6].label, L"T");
-    EXPECT_EQ(views[6].tooltip, L"Text tool");
-    EXPECT_EQ(views[6].glyph, AnnotationToolbarGlyph::Text);
+    EXPECT_EQ(views[6].id, AnnotationToolId::Ellipse);
+    EXPECT_EQ(views[6].label, L"E");
+    EXPECT_EQ(views[6].tooltip, L"Ellipse tool");
+    EXPECT_EQ(views[6].glyph, AnnotationToolbarGlyph::Ellipse);
     EXPECT_FALSE(views[6].active);
-    EXPECT_EQ(views[7].id, AnnotationToolId::Bubble);
-    EXPECT_EQ(views[7].label, L"N");
-    EXPECT_EQ(views[7].tooltip, L"Bubble tool");
-    EXPECT_EQ(views[7].glyph, AnnotationToolbarGlyph::Bubble);
+    EXPECT_EQ(views[7].id, AnnotationToolId::FilledEllipse);
+    EXPECT_EQ(views[7].label, L"G");
+    EXPECT_EQ(views[7].tooltip, L"Filled ellipse tool");
+    EXPECT_EQ(views[7].glyph, AnnotationToolbarGlyph::FilledEllipse);
     EXPECT_FALSE(views[7].active);
+    EXPECT_EQ(views[8].id, AnnotationToolId::Text);
+    EXPECT_EQ(views[8].label, L"T");
+    EXPECT_EQ(views[8].tooltip, L"Text tool");
+    EXPECT_EQ(views[8].glyph, AnnotationToolbarGlyph::Text);
+    EXPECT_FALSE(views[8].active);
+    EXPECT_EQ(views[9].id, AnnotationToolId::Bubble);
+    EXPECT_EQ(views[9].label, L"N");
+    EXPECT_EQ(views[9].tooltip, L"Bubble tool");
+    EXPECT_EQ(views[9].glyph, AnnotationToolbarGlyph::Bubble);
+    EXPECT_FALSE(views[9].active);
 }
 
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFreehand) {
@@ -198,6 +220,26 @@ TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFilledRect
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::FilledRectangle});
     EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'f'));
+    EXPECT_EQ(controller.Active_tool(), std::nullopt);
+}
+
+TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesEllipse) {
+    AnnotationController controller;
+
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'E'));
+    EXPECT_EQ(controller.Active_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Ellipse});
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'e'));
+    EXPECT_EQ(controller.Active_tool(), std::nullopt);
+}
+
+TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFilledEllipse) {
+    AnnotationController controller;
+
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'G'));
+    EXPECT_EQ(controller.Active_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::FilledEllipse});
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'g'));
     EXPECT_EQ(controller.Active_tool(), std::nullopt);
 }
 
@@ -612,6 +654,44 @@ TEST(annotation_controller, FilledRectangleClickWithoutDrag_DoesNotCommitOrPushU
     EXPECT_EQ(undo_stack.Index(), 0);
 }
 
+TEST(annotation_controller, EllipseRelease_AddsAnnotationAndKeepsSelectionEmpty) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Ellipse));
+
+    EXPECT_TRUE(controller.On_primary_press({20, 30}));
+    EXPECT_TRUE(controller.On_pointer_move({35, 40}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
+    {
+        auto const &ellipse =
+            std::get<EllipseAnnotation>(controller.Annotations()[0].data);
+        EXPECT_FALSE(ellipse.filled);
+        EXPECT_EQ(ellipse.outer_bounds, (RectPx::From_ltrb(20, 30, 36, 41)));
+    }
+}
+
+TEST(annotation_controller, FilledEllipseRelease_AddsAnnotationAndKeepsSelectionEmpty) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::FilledEllipse));
+
+    EXPECT_TRUE(controller.On_primary_press({20, 30}));
+    EXPECT_TRUE(controller.On_pointer_move({35, 40}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Selected_annotation_id(), std::nullopt);
+    {
+        auto const &ellipse =
+            std::get<EllipseAnnotation>(controller.Annotations()[0].data);
+        EXPECT_TRUE(ellipse.filled);
+        EXPECT_EQ(ellipse.outer_bounds, (RectPx::From_ltrb(20, 30, 36, 41)));
+    }
+}
+
 TEST(annotation_controller, FreehandDraftPointsTrackActiveGesture) {
     AnnotationController controller;
     UndoStack undo_stack;
@@ -689,6 +769,27 @@ TEST(annotation_controller, RectangleDraftTracksActiveGesture) {
             std::get<RectangleAnnotation>(controller.Draft_annotation()->data);
         EXPECT_FALSE(draft_rect.filled);
         EXPECT_EQ(draft_rect.outer_bounds, (RectPx::From_ltrb(10, 10, 21, 21)));
+    }
+
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Draft_annotation(), nullptr);
+}
+
+TEST(annotation_controller, EllipseDraftTracksActiveGesture) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Ellipse));
+
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    EXPECT_TRUE(controller.On_pointer_move({20, 20}));
+
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(controller.Draft_annotation()->Kind(), AnnotationKind::Ellipse);
+    {
+        auto const &draft_ellipse =
+            std::get<EllipseAnnotation>(controller.Draft_annotation()->data);
+        EXPECT_FALSE(draft_ellipse.filled);
+        EXPECT_EQ(draft_ellipse.outer_bounds, (RectPx::From_ltrb(10, 10, 21, 21)));
     }
 
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
@@ -828,6 +929,27 @@ TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedRectangleStyle) {
         12);
 }
 
+TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedEllipseStyle) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Ellipse, 12));
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Ellipse));
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(
+        std::get<EllipseAnnotation>(controller.Draft_annotation()->data).style.width_px,
+        12);
+
+    EXPECT_TRUE(controller.On_pointer_move({20, 10}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(
+        std::get<EllipseAnnotation>(controller.Annotations()[0].data).style.width_px,
+        12);
+}
+
 TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedStrokeStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
@@ -955,6 +1077,30 @@ TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedFilledRectan
         green);
 }
 
+TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedFilledEllipse) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    COLORREF const green = RGB(0x12, 0xA4, 0x56);
+
+    EXPECT_TRUE(controller.Set_annotation_color(green));
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::FilledEllipse));
+    EXPECT_TRUE(controller.On_primary_press({10, 10}));
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    {
+        auto const &draft_ellipse =
+            std::get<EllipseAnnotation>(controller.Draft_annotation()->data);
+        EXPECT_EQ(draft_ellipse.style.color, green);
+        EXPECT_TRUE(draft_ellipse.filled);
+    }
+
+    EXPECT_TRUE(controller.On_pointer_move({20, 10}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(std::get<EllipseAnnotation>(controller.Annotations()[0].data).style.color,
+              green);
+}
+
 TEST(annotation_controller, CancelDuringFreehand_ClearsDraftWithoutCommit) {
     AnnotationController controller;
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
@@ -1037,7 +1183,22 @@ TEST(annotation_controller,
     EXPECT_EQ(controller.Annotation_edit_target_at({60, 40}),
               (std::optional<AnnotationEditTarget>{AnnotationEditTarget{
                   1, AnnotationEditTargetKind::RectangleTopHandle}}));
-    EXPECT_EQ(controller.Annotation_edit_target_at({48, 40}),
+    EXPECT_EQ(controller.Annotation_edit_target_at({50, 42}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{1, AnnotationEditTargetKind::Body}}));
+}
+
+TEST(annotation_controller,
+     AnnotationEditTargetAt_PrefersSelectedEllipseHandlesAndFallsBackToBody) {
+    AnnotationController controller;
+    controller.Insert_annotation_at(
+        0, Make_ellipse(1, RectPx::From_ltrb(40, 40, 81, 81), 4, true),
+        std::optional<uint64_t>{1});
+
+    EXPECT_EQ(controller.Annotation_edit_target_at({40, 40}),
+              (std::optional<AnnotationEditTarget>{AnnotationEditTarget{
+                  1, AnnotationEditTargetKind::RectangleTopLeftHandle}}));
+    EXPECT_EQ(controller.Annotation_edit_target_at({60, 60}),
               (std::optional<AnnotationEditTarget>{
                   AnnotationEditTarget{1, AnnotationEditTargetKind::Body}}));
 }
@@ -1247,6 +1408,37 @@ TEST(annotation_controller, RectangleHandleDragRelease_UpdatesBoundsAndIsUndoabl
     ASSERT_EQ(controller.Annotations().size(), 1u);
     EXPECT_EQ(
         std::get<RectangleAnnotation>(controller.Annotations()[0].data).outer_bounds,
+        (RectPx::From_ltrb(40, 40, 101, 81)));
+}
+
+TEST(annotation_controller, EllipseHandleDragRelease_UpdatesBoundsAndIsUndoable) {
+    AnnotationController controller;
+    UndoStack undo_stack;
+    Annotation const original = Make_ellipse(1, RectPx::From_ltrb(40, 40, 81, 81), 6);
+    controller.Insert_annotation_at(0, original, std::optional<uint64_t>{1});
+
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::RectangleRightHandle},
+        {80, 60}));
+    EXPECT_EQ(controller.Active_annotation_edit_handle(),
+              std::optional<AnnotationEditHandleKind>{
+                  AnnotationEditHandleKind::RectangleRight});
+    EXPECT_TRUE(controller.On_pointer_move({100, 60}));
+    EXPECT_EQ(
+        std::get<EllipseAnnotation>(controller.Annotations()[0].data).outer_bounds,
+        (RectPx::From_ltrb(40, 40, 101, 81)));
+
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_EQ(controller.Active_annotation_edit_handle(), std::nullopt);
+
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(controller.Annotations()[0], original);
+
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(
+        std::get<EllipseAnnotation>(controller.Annotations()[0].data).outer_bounds,
         (RectPx::From_ltrb(40, 40, 101, 81)));
 }
 

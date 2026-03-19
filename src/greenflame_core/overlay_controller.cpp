@@ -254,6 +254,7 @@ std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) 
     case AnnotationToolId::Line:
     case AnnotationToolId::Arrow:
     case AnnotationToolId::Rectangle:
+    case AnnotationToolId::Ellipse:
     case AnnotationToolId::Bubble:
         break;
     case AnnotationToolId::Text:
@@ -262,6 +263,7 @@ std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) 
         }
         break;
     case AnnotationToolId::FilledRectangle:
+    case AnnotationToolId::FilledEllipse:
         return std::nullopt;
     }
     int32_t const current_step = annotation_controller_.Tool_size_step(*active_tool);

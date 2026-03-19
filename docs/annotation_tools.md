@@ -59,6 +59,8 @@ The annotation system applies only to the interactive overlay flow.
   - `Arrow tool` hotkey `A`
   - `Rectangle tool` hotkey `R`
   - `Filled rectangle tool` hotkey `F`
+  - `Ellipse tool` hotkey `E`
+  - `Filled ellipse tool` hotkey `G`
 - The toolbar is anchored to the current selection border.
 - Toolbar buttons display a tool glyph when one is available.
 - Hovering a toolbar button shows a tooltip with the full tool name.
@@ -76,6 +78,10 @@ The annotation system applies only to the interactive overlay flow.
   or off.
 - Pressing `F` or clicking the `Filled rectangle tool` toolbar button toggles that
   tool on or off.
+- Pressing `E` or clicking the `Ellipse tool` toolbar button toggles that tool on or
+  off.
+- Pressing `G` or clicking the `Filled ellipse tool` toolbar button toggles that tool
+  on or off.
 - While an annotation tool is active, right-click opens that tool's color wheel
   centered on the cursor.
 - While the color wheel is visible:
@@ -83,10 +89,10 @@ The annotation system applies only to the interactive overlay flow.
   - left-clicking a slot selects that color for future annotations and closes the
     wheel
   - `Esc` closes the wheel without changing color
-- The Brush, Line, Arrow, Rectangle, and Filled rectangle tools use the
+- The Brush, Line, Arrow, Rectangle, Filled rectangle, Ellipse, and Filled ellipse tools use the
   configurable 8-slot annotation palette.
 - The Highlighter tool uses its own configurable 6-slot palette.
-- While the Brush, Highlighter, Line, Arrow, or Rectangle tool is active,
+- While the Brush, Highlighter, Line, Arrow, Rectangle, or Ellipse tool is active,
   mouse-wheel up/down or `Ctrl+=` / `Ctrl+-` increases or decreases stroke width
   within the `1..50` range.
 - While the Brush tool is active, the overlay draws an anti-aliased circular size
@@ -95,7 +101,9 @@ The annotation system applies only to the interactive overlay flow.
   axis-aligned square size preview around the cursor hotspot.
 - While the Line or Arrow tool is active, the overlay draws an anti-aliased square
   size preview around the cursor hotspot aligned to the current line direction.
-- The Rectangle and Filled rectangle tools do not draw a cursor size preview
+- While the Rectangle or Ellipse tool is active, the overlay draws an axis-aligned
+  square size preview around the cursor hotspot.
+- The Filled rectangle and Filled ellipse tools do not draw a cursor size preview
   overlay.
 - Stroke-width changes show a temporary centered size overlay inside the current
   selection using the same visual treatment as the center selection-size label.
@@ -126,6 +134,8 @@ The annotation system applies only to the interactive overlay flow.
 - Selected rectangle annotations are shown by drawing eight resize handles when
   space permits; corner handles take precedence over side handles when the bounds
   are too small to show all handles without overlap.
+- Selected ellipse annotations are shown by drawing eight resize handles using the
+  same bounding-rect handle layout as rectangles.
 - `Delete` removes the selected annotation.
 - Deletion is undoable and redoable.
 
@@ -175,6 +185,8 @@ The registry lives in core.
     - `LineAnnotationTool` configured for arrows
     - `RectangleAnnotationTool` configured for outlined rectangles
     - `RectangleAnnotationTool` configured for filled rectangles
+    - `EllipseAnnotationTool` configured for outlined ellipses
+    - `EllipseAnnotationTool` configured for filled ellipses
 
 Tools are objects so behavior remains encapsulated and future tools can be added
 without pushing per-tool logic into the Win32 layer.
@@ -189,7 +201,8 @@ without pushing per-tool logic into the Win32 layer.
 - `Annotation`
   - holds an `id` and an `AnnotationData` payload
   - `AnnotationData` is `std::variant<FreehandStrokeAnnotation, LineAnnotation,
-    RectangleAnnotation>`; all dispatch is done with `std::visit(Overloaded{...},
+    RectangleAnnotation, EllipseAnnotation>`; all dispatch is done with
+    `std::visit(Overloaded{...},
     annotation.data)`
   - `AnnotationKind` enum exists separately and is used only by
     `Annotation_shows_corner_brackets`; `Annotation::kind()` derives it from the
@@ -221,6 +234,14 @@ without pushing per-tool logic into the Win32 layer.
     exclusive right/bottom rect
   - stroke style and fill flag
   - outlined rectangles draw their border fully inward from the dragged outer edge
+  - cached raster coverage
+  - committed on mouse-up, then becomes undoable
+
+- `EllipseAnnotation`
+  - outer bounds in physical pixels using inclusive-dragged corners mapped to an
+    exclusive right/bottom rect
+  - stroke style and fill flag
+  - outlined ellipses draw their border inward from the dragged outer edge
   - cached raster coverage
   - committed on mouse-up, then becomes undoable
 
@@ -277,6 +298,14 @@ The Rectangle and Filled rectangle tools also reuse the committed core raster pa
 - the overlay composites that draft raster above committed annotations
 - hit-testing and save/copy still ignore the draft until mouse-up commits it
 
+### Draft ellipse preview
+
+The Ellipse and Filled ellipse tools also reuse the committed core raster path:
+
+- the draft ellipse is rasterized in core during the gesture
+- the overlay composites that draft raster above committed annotations
+- hit-testing and save/copy still ignore the draft until mouse-up commits it
+
 ## Freehand smoothing
 
 Smoothing is intentionally abstracted.
@@ -319,11 +348,13 @@ The overlay paint path draws in this order:
    - line and arrow previews are composited from the draft core raster
    - rectangle and filled-rectangle previews are composited from the draft core
      raster
+   - ellipse and filled-ellipse previews are composited from the draft core raster
 5. selection labels / crosshair / region handles
 6. selected-annotation markers
    - freehand uses bounding-box corners
    - line and arrow use endpoint handles
    - rectangle uses corner/side resize handles
+   - ellipse uses corner/side resize handles on its bounding rect
 7. toolbar buttons and tooltip
 8. color wheel, when visible
 

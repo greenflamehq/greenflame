@@ -11,6 +11,7 @@ enum class AnnotationKind : uint8_t {
     Freehand,
     Line,
     Rectangle,
+    Ellipse,
     Text,
     Bubble,
 };
@@ -63,9 +64,17 @@ struct RectangleAnnotation final {
     constexpr bool operator==(RectangleAnnotation const &) const noexcept = default;
 };
 
+struct EllipseAnnotation final {
+    RectPx outer_bounds = {};
+    StrokeStyle style = {};
+    bool filled = false;
+
+    constexpr bool operator==(EllipseAnnotation const &) const noexcept = default;
+};
+
 using AnnotationData =
     std::variant<FreehandStrokeAnnotation, LineAnnotation, RectangleAnnotation,
-                 TextAnnotation, BubbleAnnotation>;
+                 EllipseAnnotation, TextAnnotation, BubbleAnnotation>;
 
 template <class... Ts> struct Overloaded : Ts... {
     using Ts::operator()...;
