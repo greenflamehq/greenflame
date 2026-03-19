@@ -950,10 +950,10 @@ TEST(overlay_controller, AnnotationToolHotkey_TogglesFilledRectangle) {
     Release(c, {300, 300});
 
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'F'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'R', true), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::FilledRectangle});
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'F'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'R', true), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
@@ -976,10 +976,10 @@ TEST(overlay_controller, AnnotationToolHotkey_TogglesFilledEllipse) {
     Release(c, {300, 300});
 
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'G'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'E', true), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::FilledEllipse});
-    EXPECT_EQ(c.On_annotation_tool_hotkey(L'G'), OverlayAction::Repaint);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'E', true), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
@@ -1305,7 +1305,7 @@ TEST(overlay_controller, ToolSizeAdjust_IgnoresFilledRectangleTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'F'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'R', true), OverlayAction::Repaint);
 
     EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
 }
@@ -1314,7 +1314,7 @@ TEST(overlay_controller, ToolSizeAdjust_IgnoresFilledEllipseTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
-    ASSERT_EQ(c.On_annotation_tool_hotkey(L'G'), OverlayAction::Repaint);
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'E', true), OverlayAction::Repaint);
 
     EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
 }

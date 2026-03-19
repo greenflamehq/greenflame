@@ -129,7 +129,7 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     EXPECT_EQ(views[4].glyph, AnnotationToolbarGlyph::Rectangle);
     EXPECT_FALSE(views[4].active);
     EXPECT_EQ(views[5].id, AnnotationToolId::FilledRectangle);
-    EXPECT_EQ(views[5].label, L"F");
+    EXPECT_EQ(views[5].label, L"\u21e7R");
     EXPECT_EQ(views[5].tooltip, L"Filled rectangle tool");
     EXPECT_EQ(views[5].glyph, AnnotationToolbarGlyph::FilledRectangle);
     EXPECT_FALSE(views[5].active);
@@ -139,7 +139,7 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     EXPECT_EQ(views[6].glyph, AnnotationToolbarGlyph::Ellipse);
     EXPECT_FALSE(views[6].active);
     EXPECT_EQ(views[7].id, AnnotationToolId::FilledEllipse);
-    EXPECT_EQ(views[7].label, L"G");
+    EXPECT_EQ(views[7].label, L"\u21e7E");
     EXPECT_EQ(views[7].tooltip, L"Filled ellipse tool");
     EXPECT_EQ(views[7].glyph, AnnotationToolbarGlyph::FilledEllipse);
     EXPECT_FALSE(views[7].active);
@@ -216,10 +216,10 @@ TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesRectangle)
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFilledRectangle) {
     AnnotationController controller;
 
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'F'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'R', true));
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::FilledRectangle});
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'f'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'r', true));
     EXPECT_EQ(controller.Active_tool(), std::nullopt);
 }
 
@@ -236,10 +236,10 @@ TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesEllipse) {
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFilledEllipse) {
     AnnotationController controller;
 
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'G'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'E', true));
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::FilledEllipse});
-    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'g'));
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'e', true));
     EXPECT_EQ(controller.Active_tool(), std::nullopt);
 }
 

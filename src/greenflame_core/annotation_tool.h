@@ -39,6 +39,7 @@ struct AnnotationToolDescriptor final {
     wchar_t hotkey = L'\0';
     std::wstring toolbar_label = {};
     AnnotationToolbarGlyph toolbar_glyph = AnnotationToolbarGlyph::None;
+    bool requires_shift = false;
 };
 
 struct AnnotationToolbarButtonView final {

@@ -27,8 +27,11 @@ namespace {
 
 [[nodiscard]] AnnotationToolDescriptor Filled_rectangle_tool_descriptor() {
     return AnnotationToolDescriptor{AnnotationToolId::FilledRectangle,
-                                    L"Filled rectangle tool", L'F', L"F",
-                                    AnnotationToolbarGlyph::FilledRectangle};
+                                    L"Filled rectangle tool",
+                                    L'R',
+                                    L"\u21e7R",
+                                    AnnotationToolbarGlyph::FilledRectangle,
+                                    true};
 }
 
 [[nodiscard]] AnnotationToolDescriptor Ellipse_tool_descriptor() {
@@ -38,8 +41,11 @@ namespace {
 
 [[nodiscard]] AnnotationToolDescriptor Filled_ellipse_tool_descriptor() {
     return AnnotationToolDescriptor{AnnotationToolId::FilledEllipse,
-                                    L"Filled ellipse tool", L'G', L"G",
-                                    AnnotationToolbarGlyph::FilledEllipse};
+                                    L"Filled ellipse tool",
+                                    L'E',
+                                    L"\u21e7E",
+                                    AnnotationToolbarGlyph::FilledEllipse,
+                                    true};
 }
 
 class RecordingAnnotationToolHost final : public IAnnotationToolHost {

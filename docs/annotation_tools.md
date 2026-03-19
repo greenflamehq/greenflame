@@ -58,9 +58,9 @@ The annotation system applies only to the interactive overlay flow.
   - `Line tool` hotkey `L`
   - `Arrow tool` hotkey `A`
   - `Rectangle tool` hotkey `R`
-  - `Filled rectangle tool` hotkey `F`
+  - `Filled rectangle tool` hotkey `Shift+R`
   - `Ellipse tool` hotkey `E`
-  - `Filled ellipse tool` hotkey `G`
+  - `Filled ellipse tool` hotkey `Shift+E`
 - The toolbar is anchored to the current selection border.
 - Toolbar buttons display a tool glyph when one is available.
 - Hovering a toolbar button shows a tooltip with the full tool name.
@@ -76,12 +76,12 @@ The annotation system applies only to the interactive overlay flow.
   off.
 - Pressing `R` or clicking the `Rectangle tool` toolbar button toggles that tool on
   or off.
-- Pressing `F` or clicking the `Filled rectangle tool` toolbar button toggles that
-  tool on or off.
+- Pressing `Shift+R` or clicking the `Filled rectangle tool` toolbar button toggles
+  that tool on or off.
 - Pressing `E` or clicking the `Ellipse tool` toolbar button toggles that tool on or
   off.
-- Pressing `G` or clicking the `Filled ellipse tool` toolbar button toggles that tool
-  on or off.
+- Pressing `Shift+E` or clicking the `Filled ellipse tool` toolbar button toggles that
+  tool on or off.
 - While an annotation tool is active, right-click opens that tool's color wheel
   centered on the cursor.
 - While the color wheel is visible:

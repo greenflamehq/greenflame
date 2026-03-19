@@ -38,9 +38,9 @@ Once a region is selected:
 - Press **L** or use the toolbar to toggle the **Line tool** on or off.
 - Press **A** or use the toolbar to toggle the **Arrow tool** on or off.
 - Press **R** or use the toolbar to toggle the **Rectangle tool** on or off.
-- Press **F** or use the toolbar to toggle the **Filled Rectangle tool** on or off.
+- Press **Shift+R** or use the toolbar to toggle the **Filled Rectangle tool** on or off.
 - Press **E** or use the toolbar to toggle the **Ellipse tool** on or off.
-- Press **G** or use the toolbar to toggle the **Filled Ellipse tool** on or off.
+- Press **Shift+E** or use the toolbar to toggle the **Filled Ellipse tool** on or off.
 - Press **T** or use the toolbar to toggle the **Text tool** on or off.
 - Press **N** or use the toolbar to toggle the **Bubble tool** on or off.
 - With an annotation tool active, **right-click** anywhere to open the active tool's **color wheel** at the cursor. **Left-click** a segment to select that color, or press **Escape** to dismiss the wheel.

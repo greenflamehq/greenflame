@@ -44,11 +44,11 @@ class AnnotationController final : public IAnnotationToolHost,
         return active_tool_.has_value();
     }
     [[nodiscard]] bool Toggle_tool(AnnotationToolId id);
-    [[nodiscard]] bool Toggle_tool_by_hotkey(wchar_t hotkey);
+    [[nodiscard]] bool Toggle_tool_by_hotkey(wchar_t hotkey, bool shift = false);
     [[nodiscard]] std::vector<AnnotationToolbarButtonView>
     Build_toolbar_button_views() const;
     [[nodiscard]] std::optional<AnnotationToolId>
-    Tool_id_from_hotkey(wchar_t hotkey) const;
+    Tool_id_from_hotkey(wchar_t hotkey, bool shift = false) const;
     [[nodiscard]] int32_t Tool_size_step(AnnotationToolId tool) const noexcept;
     [[nodiscard]] int32_t Tool_physical_size(AnnotationToolId tool) const noexcept;
     [[nodiscard]] bool Set_tool_size_step(AnnotationToolId tool, int32_t step) noexcept;

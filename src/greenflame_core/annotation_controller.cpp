@@ -110,8 +110,8 @@ bool AnnotationController::Toggle_tool(AnnotationToolId id) {
     return true;
 }
 
-bool AnnotationController::Toggle_tool_by_hotkey(wchar_t hotkey) {
-    IAnnotationTool *const tool = registry_.Find_by_hotkey(hotkey);
+bool AnnotationController::Toggle_tool_by_hotkey(wchar_t hotkey, bool shift) {
+    IAnnotationTool *const tool = registry_.Find_by_hotkey(hotkey, shift);
     if (tool == nullptr) {
         return false;
     }
@@ -124,8 +124,8 @@ AnnotationController::Build_toolbar_button_views() const {
 }
 
 std::optional<AnnotationToolId>
-AnnotationController::Tool_id_from_hotkey(wchar_t hotkey) const {
-    IAnnotationTool const *const tool = registry_.Find_by_hotkey(hotkey);
+AnnotationController::Tool_id_from_hotkey(wchar_t hotkey, bool shift) const {
+    IAnnotationTool const *const tool = registry_.Find_by_hotkey(hotkey, shift);
     if (tool == nullptr) {
         return std::nullopt;
     }

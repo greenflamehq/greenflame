@@ -112,7 +112,8 @@ class OverlayController final {
     void Undo();
     void Redo();
 
-    [[nodiscard]] OverlayAction On_annotation_tool_hotkey(wchar_t hotkey);
+    [[nodiscard]] OverlayAction On_annotation_tool_hotkey(wchar_t hotkey,
+                                                          bool shift = false);
     [[nodiscard]] OverlayAction On_select_annotation_tool(AnnotationToolId id);
     [[nodiscard]] OverlayAction On_delete_selected_annotation();
     [[nodiscard]] std::vector<AnnotationToolbarButtonView>

@@ -1608,8 +1608,8 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     if (!eff_ctrl && !eff_alt) {
-        core::OverlayAction const action =
-            controller_.On_annotation_tool_hotkey(static_cast<wchar_t>(wparam));
+        core::OverlayAction const action = controller_.On_annotation_tool_hotkey(
+            static_cast<wchar_t>(wparam), eff_shift);
         if (action != core::OverlayAction::None) {
             Clear_transient_center_label(false);
             Apply_action(action);

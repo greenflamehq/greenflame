@@ -75,12 +75,13 @@ void OverlayController::Undo() { undo_stack_.Undo(); }
 
 void OverlayController::Redo() { undo_stack_.Redo(); }
 
-OverlayAction OverlayController::On_annotation_tool_hotkey(wchar_t hotkey) {
+OverlayAction OverlayController::On_annotation_tool_hotkey(wchar_t hotkey, bool shift) {
     if (state_.final_selection.Is_empty()) {
         return OverlayAction::None;
     }
-    return annotation_controller_.Toggle_tool_by_hotkey(hotkey) ? OverlayAction::Repaint
-                                                                : OverlayAction::None;
+    return annotation_controller_.Toggle_tool_by_hotkey(hotkey, shift)
+               ? OverlayAction::Repaint
+               : OverlayAction::None;
 }
 
 OverlayAction OverlayController::On_select_annotation_tool(AnnotationToolId id) {

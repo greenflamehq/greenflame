@@ -37,8 +37,8 @@ AnnotationToolRegistry::AnnotationToolRegistry() {
         false));
     tools_.push_back(std::make_unique<RectangleAnnotationTool>(
         AnnotationToolDescriptor{AnnotationToolId::FilledRectangle,
-                                 L"Filled rectangle tool", L'F', L"F",
-                                 AnnotationToolbarGlyph::FilledRectangle},
+                                 L"Filled rectangle tool", L'R', L"\u21e7R",
+                                 AnnotationToolbarGlyph::FilledRectangle, true},
         true));
     tools_.push_back(std::make_unique<EllipseAnnotationTool>(
         AnnotationToolDescriptor{AnnotationToolId::Ellipse, L"Ellipse tool", L'E', L"E",
@@ -46,8 +46,8 @@ AnnotationToolRegistry::AnnotationToolRegistry() {
         false));
     tools_.push_back(std::make_unique<EllipseAnnotationTool>(
         AnnotationToolDescriptor{AnnotationToolId::FilledEllipse,
-                                 L"Filled ellipse tool", L'G', L"G",
-                                 AnnotationToolbarGlyph::FilledEllipse},
+                                 L"Filled ellipse tool", L'E', L"\u21e7E",
+                                 AnnotationToolbarGlyph::FilledEllipse, true},
         true));
     tools_.push_back(std::make_unique<TextAnnotationTool>());
     tools_.push_back(std::make_unique<BubbleAnnotationTool>());
@@ -69,19 +69,23 @@ IAnnotationTool *AnnotationToolRegistry::Find_by_id(AnnotationToolId id) noexcep
 }
 
 IAnnotationTool const *
-AnnotationToolRegistry::Find_by_hotkey(wchar_t hotkey) const noexcept {
+AnnotationToolRegistry::Find_by_hotkey(wchar_t hotkey, bool shift) const noexcept {
     wchar_t const normalized = Normalize_hotkey(hotkey);
     for (auto const &tool : tools_) {
-        if (Normalize_hotkey(tool->Descriptor().hotkey) == normalized) {
+        AnnotationToolDescriptor const &desc = tool->Descriptor();
+        if (Normalize_hotkey(desc.hotkey) == normalized &&
+            desc.requires_shift == shift) {
             return tool.get();
         }
     }
     return nullptr;
 }
 
-IAnnotationTool *AnnotationToolRegistry::Find_by_hotkey(wchar_t hotkey) noexcept {
+IAnnotationTool *AnnotationToolRegistry::Find_by_hotkey(wchar_t hotkey,
+                                                        bool shift) noexcept {
     return const_cast<IAnnotationTool *>(
-        static_cast<AnnotationToolRegistry const *>(this)->Find_by_hotkey(hotkey));
+        static_cast<AnnotationToolRegistry const *>(this)->Find_by_hotkey(hotkey,
+                                                                          shift));
 }
 
 std::vector<AnnotationToolbarButtonView>
