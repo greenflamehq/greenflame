@@ -63,7 +63,8 @@ The annotation system applies only to the interactive overlay flow.
   - `Filled ellipse tool` hotkey `Shift+E`
 - The toolbar is anchored to the current selection border.
 - Toolbar buttons display a tool glyph when one is available.
-- Hovering a toolbar button shows a tooltip with the full tool name.
+- Hovering a toolbar button shows an opaque tooltip with the tool or help name and
+  its associated hotkey in parentheses.
 - The last toolbar button on the right opens the keyboard-shortcuts help overlay on
   button release and does not toggle any tool state.
 - Pressing `B` or clicking the `Brush tool` toolbar button toggles that tool on or

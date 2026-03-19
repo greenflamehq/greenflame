@@ -15,6 +15,34 @@ namespace {
     return static_cast<wchar_t>(std::towupper(hotkey));
 }
 
+[[nodiscard]] std::wstring Tooltip_label_for_name(std::wstring_view name) {
+    constexpr std::wstring_view k_tool_suffix = L" tool";
+    if (name.size() >= k_tool_suffix.size() &&
+        name.substr(name.size() - k_tool_suffix.size()) == k_tool_suffix) {
+        return std::wstring(name.substr(0, name.size() - k_tool_suffix.size()));
+    }
+    return std::wstring(name);
+}
+
+[[nodiscard]] std::wstring
+Tooltip_hotkey_text(AnnotationToolDescriptor const &descriptor) {
+    std::wstring hotkey;
+    if (descriptor.requires_shift) {
+        hotkey = L"Shift+";
+    }
+    hotkey.push_back(Normalize_hotkey(descriptor.hotkey));
+    return hotkey;
+}
+
+[[nodiscard]] std::wstring
+Build_toolbar_tooltip(AnnotationToolDescriptor const &descriptor) {
+    std::wstring tooltip = Tooltip_label_for_name(descriptor.name);
+    tooltip += L" (";
+    tooltip += Tooltip_hotkey_text(descriptor);
+    tooltip += L")";
+    return tooltip;
+}
+
 } // namespace
 
 AnnotationToolRegistry::AnnotationToolRegistry() {
@@ -96,7 +124,7 @@ AnnotationToolRegistry::Build_toolbar_button_views(
     for (auto const &tool : tools_) {
         AnnotationToolDescriptor const &descriptor = tool->Descriptor();
         views.push_back(AnnotationToolbarButtonView{
-            descriptor.id, descriptor.toolbar_label, descriptor.name,
+            descriptor.id, descriptor.toolbar_label, Build_toolbar_tooltip(descriptor),
             descriptor.toolbar_glyph,
             active_tool.has_value() && descriptor.id == *active_tool});
     }

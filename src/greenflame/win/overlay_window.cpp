@@ -700,7 +700,7 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
         ToolbarButtonModel help_model{};
         help_model.action = ToolbarButtonAction::ShowHelp;
         help_model.glyph = OverlayToolbarGlyphId::Help;
-        help_model.tooltip = L"Help";
+        help_model.tooltip = L"Help (Ctrl+H)";
         help_model.label = L"?";
         layout_items.push_back(
             ToolbarLayoutItem{ToolbarLayoutItemKind::Button, std::move(help_model)});

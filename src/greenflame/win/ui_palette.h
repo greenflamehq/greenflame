@@ -16,7 +16,7 @@ inline constexpr D2D1_COLOR_F kBorderColor =
 inline constexpr D2D1_COLOR_F kCoordTooltipBg = Make_d2d_color(217, 240, 227);
 inline constexpr D2D1_COLOR_F kCoordTooltipText =
     Make_d2d_color(26, 121, 6); // Tooltip text + border
-inline constexpr float kCoordTooltipAlpha = 200.f / 255.f;
+inline constexpr float kCoordTooltipAlpha = 1.f;
 inline constexpr D2D1_COLOR_F kOverlayButtonFillColor = kCoordTooltipBg;
 inline constexpr D2D1_COLOR_F kOverlayButtonOutlineColor = kCoordTooltipText;
 inline constexpr D2D1_COLOR_F kMagnifierCheckerDark = Make_d2d_color(168, 168, 168);

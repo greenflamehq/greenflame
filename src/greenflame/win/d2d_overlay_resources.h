@@ -42,7 +42,7 @@ struct D2DOverlayResources final {
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> dashed_style;    // selection border
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle>
         crosshair_style;                                   // 1-on/1-off for crosshair
-    Microsoft::WRL::ComPtr<IDWriteTextFormat> text_dim;    // 14pt Segoe UI
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> text_dim;    // 12pt Segoe UI
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_center; // 36pt Segoe UI Black
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_hint;   // 16pt Segoe UI
     Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> text_wheel_hue_brush;

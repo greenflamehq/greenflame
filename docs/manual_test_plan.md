@@ -350,7 +350,10 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The toolbar stays attached to the selection and remains visible on-screen.
   - The `Help` button stays last on the right and is visually separated from the
     annotation tools by one reserved button slot of space.
-  - Hovering shows the full tool name.
+  - Hovering shows an opaque tooltip for each button.
+  - Tool button tooltips include the tool name followed by its hotkey in
+    parentheses, such as `Brush (B)`.
+  - The help button tooltip includes the help hotkey in parentheses.
   - Hovering any visible toolbar button shows the standard pointer cursor.
   - Button state tracks the active tool correctly.
 

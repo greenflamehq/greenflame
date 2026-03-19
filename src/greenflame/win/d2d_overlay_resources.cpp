@@ -6,7 +6,7 @@ namespace {
 
 constexpr float kDefaultDpi = 96.f;
 constexpr float kStrokeMiterLimit = 10.f;
-constexpr float kDimTextFormatSizePt = 10.f;
+constexpr float kDimTextFormatSizePt = 12.f;
 constexpr float kCenterTextFormatSizePt = 27.f;
 constexpr float kHintTextFormatSizePt = 12.f;
 constexpr size_t kTextWheelHueStopCount = 7;
