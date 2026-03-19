@@ -2,9 +2,15 @@
 
 using namespace greenflame::core;
 
-TEST(app_config, Normalize_ClampsBrushWidthAndOverlayDuration) {
+TEST(app_config, Normalize_ClampsToolSizesToMinimum) {
     AppConfig config{};
-    config.brush_width_px = 0;
+    config.freehand_size = 0;
+    config.line_size = 0;
+    config.arrow_size = 0;
+    config.rect_size = 0;
+    config.highlighter_size = 0;
+    config.bubble_size = 0;
+    config.text_size = 0;
     config.current_annotation_color_index = -4;
     config.current_highlighter_color_index = -3;
     config.highlighter_opacity_percent = -10;
@@ -12,16 +18,28 @@ TEST(app_config, Normalize_ClampsBrushWidthAndOverlayDuration) {
 
     config.Normalize();
 
-    EXPECT_EQ(config.brush_width_px, 1);
+    EXPECT_EQ(config.freehand_size, 1);
+    EXPECT_EQ(config.line_size, 1);
+    EXPECT_EQ(config.arrow_size, 1);
+    EXPECT_EQ(config.rect_size, 1);
+    EXPECT_EQ(config.highlighter_size, 1);
+    EXPECT_EQ(config.bubble_size, 1);
+    EXPECT_EQ(config.text_size, 1);
     EXPECT_EQ(config.current_annotation_color_index, 0);
     EXPECT_EQ(config.current_highlighter_color_index, 0);
     EXPECT_EQ(config.highlighter_opacity_percent, 0);
     EXPECT_EQ(config.tool_size_overlay_duration_ms, 0);
 }
 
-TEST(app_config, Normalize_ClampsBrushWidthToMaximum) {
+TEST(app_config, Normalize_ClampsToolSizesToMaximum) {
     AppConfig config{};
-    config.brush_width_px = 500;
+    config.freehand_size = 500;
+    config.line_size = 500;
+    config.arrow_size = 500;
+    config.rect_size = 500;
+    config.highlighter_size = 500;
+    config.bubble_size = 500;
+    config.text_size = 500;
     config.current_annotation_color_index = 400;
     config.current_highlighter_color_index = 400;
     config.highlighter_opacity_percent = 400;
@@ -29,7 +47,13 @@ TEST(app_config, Normalize_ClampsBrushWidthToMaximum) {
 
     config.Normalize();
 
-    EXPECT_EQ(config.brush_width_px, 50);
+    EXPECT_EQ(config.freehand_size, 50);
+    EXPECT_EQ(config.line_size, 50);
+    EXPECT_EQ(config.arrow_size, 50);
+    EXPECT_EQ(config.rect_size, 50);
+    EXPECT_EQ(config.highlighter_size, 50);
+    EXPECT_EQ(config.bubble_size, 50);
+    EXPECT_EQ(config.text_size, 50);
     EXPECT_EQ(config.current_annotation_color_index, 7);
     EXPECT_EQ(config.current_highlighter_color_index, 5);
     EXPECT_EQ(config.highlighter_opacity_percent, 100);
@@ -46,13 +70,15 @@ TEST(app_config, Defaults_UseBlackFirstPaletteEntryAndCurrentSlotZero) {
     EXPECT_EQ(config.highlighter_opacity_percent, kDefaultHighlighterOpacityPercent);
 }
 
-TEST(app_config, Normalize_ClampsTextSizeToNearestAllowedValue) {
+TEST(app_config, Normalize_ClampsTextSizeStep) {
     AppConfig config{};
-    config.text_size_points = 13;
-
+    config.text_size = 0;
     config.Normalize();
+    EXPECT_EQ(config.text_size, 1);
 
-    EXPECT_EQ(config.text_size_points, 12);
+    config.text_size = 51;
+    config.Normalize();
+    EXPECT_EQ(config.text_size, 50);
 }
 
 TEST(app_config, Normalize_ResetsInvalidCurrentTextFontChoice) {

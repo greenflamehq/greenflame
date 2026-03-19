@@ -131,8 +131,6 @@ class OverlayController final {
     [[nodiscard]] bool Has_active_text_edit() const noexcept;
     [[nodiscard]] TextEditController *Active_text_edit() noexcept;
     [[nodiscard]] int32_t Text_point_size() const noexcept;
-    void Set_text_point_size(int32_t point_size) noexcept;
-    [[nodiscard]] bool Step_text_size(int delta_steps);
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
     void Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
@@ -142,17 +140,18 @@ class OverlayController final {
     [[nodiscard]] bool Has_active_annotation_edit() const noexcept;
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_annotation_edit_handle() const noexcept;
-    [[nodiscard]] int32_t Brush_width_px() const noexcept;
     [[nodiscard]] COLORREF Annotation_color() const noexcept;
     [[nodiscard]] COLORREF Brush_annotation_color() const noexcept;
     [[nodiscard]] COLORREF Highlighter_color() const noexcept;
     [[nodiscard]] int32_t Highlighter_opacity_percent() const noexcept;
-    void Set_brush_width_px(int32_t width_px) noexcept;
+    void Set_tool_size_step(AnnotationToolId tool, int32_t step) noexcept;
+    [[nodiscard]] int32_t Tool_size_step(AnnotationToolId tool) const noexcept;
+    [[nodiscard]] int32_t Tool_physical_size(AnnotationToolId tool) const noexcept;
     void Set_annotation_color(COLORREF color) noexcept;
     void Set_brush_annotation_color(COLORREF color) noexcept;
     void Set_highlighter_color(COLORREF color) noexcept;
     void Set_highlighter_opacity_percent(int32_t opacity_percent) noexcept;
-    [[nodiscard]] std::optional<int32_t> Adjust_brush_width(int32_t delta_steps);
+    [[nodiscard]] std::optional<int32_t> Adjust_tool_size(int32_t delta_steps);
     [[nodiscard]] bool Should_show_annotation_toolbar() const noexcept;
     [[nodiscard]] bool Can_interact_with_annotation_toolbar() const noexcept;
     [[nodiscard]] bool Should_show_selected_annotation_handles() const noexcept;

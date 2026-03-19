@@ -218,7 +218,7 @@ TEST(annotation_controller, BeginTextDraft_CapturesCurrentColorFontAndPointSize)
 
     controller.Set_text_layout_engine(&engine);
     EXPECT_TRUE(controller.Set_annotation_color(green));
-    EXPECT_TRUE(controller.Step_text_size(2));
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Text, 12));
     controller.Set_text_current_font(TextFontChoice::Mono);
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Text));
 
@@ -695,20 +695,33 @@ TEST(annotation_controller, RectangleDraftTracksActiveGesture) {
     EXPECT_EQ(controller.Draft_annotation(), nullptr);
 }
 
-TEST(annotation_controller, BrushWidth_ClampsToSupportedRange) {
+TEST(annotation_controller, ToolSize_ClampsToSupportedRange) {
     AnnotationController controller;
 
-    EXPECT_TRUE(controller.Set_brush_width_px(0));
-    EXPECT_EQ(controller.Brush_width_px(), StrokeStyle::kMinWidthPx);
-    EXPECT_TRUE(controller.Set_brush_width_px(500));
-    EXPECT_EQ(controller.Brush_width_px(), StrokeStyle::kMaxWidthPx);
+    // Freehand: step = physical px
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Freehand, 0));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Freehand), 1);
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Freehand, 500));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Freehand), 50);
+
+    // Highlighter: physical = step + 10
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Highlighter, 0));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Highlighter), 11);
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Highlighter, 500));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Highlighter), 60);
+
+    // Bubble: physical = step + 20
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Bubble, 0));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Bubble), 21);
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Bubble, 500));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Bubble), 70);
 }
 
-TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedStrokeStyle) {
+TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedFreehandStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
 
-    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Freehand, 12));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
     ASSERT_TRUE(controller.Draft_freehand_style().has_value());
@@ -723,11 +736,11 @@ TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedStrokeStyle) {
               12);
 }
 
-TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedLineStyle) {
+TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedLineStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
 
-    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Line, 12));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Line));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
     ASSERT_NE(controller.Draft_annotation(), nullptr);
@@ -743,11 +756,11 @@ TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedLineStyle) {
               12);
 }
 
-TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedArrowStyle) {
+TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedArrowStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
 
-    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Arrow, 12));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Arrow));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
     ASSERT_NE(controller.Draft_annotation(), nullptr);
@@ -769,11 +782,12 @@ TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedArrowStyle) {
     }
 }
 
-TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedHighlighterStyle) {
+TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedHighlighterStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
 
-    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    // Highlighter physical = step + 10; step 2 → 12 px
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Highlighter, 2));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Highlighter));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
     ASSERT_TRUE(controller.Draft_freehand_style().has_value());
@@ -793,11 +807,11 @@ TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedHighlighterStyle)
               controller.Highlighter_opacity_percent());
 }
 
-TEST(annotation_controller, BrushWidth_AffectsDraftAndCommittedRectangleStyle) {
+TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedRectangleStyle) {
     AnnotationController controller;
     UndoStack undo_stack;
 
-    EXPECT_TRUE(controller.Set_brush_width_px(12));
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Rectangle, 12));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Rectangle));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
     ASSERT_NE(controller.Draft_annotation(), nullptr);

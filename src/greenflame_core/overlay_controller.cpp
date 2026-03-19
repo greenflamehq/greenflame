@@ -156,21 +156,6 @@ int32_t OverlayController::Text_point_size() const noexcept {
     return annotation_controller_.Text_point_size();
 }
 
-void OverlayController::Set_text_point_size(int32_t point_size) noexcept {
-    annotation_controller_.Set_text_point_size(point_size);
-}
-
-bool OverlayController::Step_text_size(int delta_steps) {
-    std::optional<AnnotationToolId> const active_tool =
-        annotation_controller_.Active_tool();
-    if (delta_steps == 0 || state_.final_selection.Is_empty() ||
-        !active_tool.has_value() || *active_tool != AnnotationToolId::Text ||
-        annotation_controller_.Has_active_text_edit()) {
-        return false;
-    }
-    return annotation_controller_.Step_text_size(delta_steps);
-}
-
 TextFontChoice OverlayController::Text_current_font() const noexcept {
     return annotation_controller_.Text_current_font();
 }
@@ -210,10 +195,6 @@ OverlayController::Active_annotation_edit_handle() const noexcept {
     return annotation_controller_.Active_annotation_edit_handle();
 }
 
-int32_t OverlayController::Brush_width_px() const noexcept {
-    return annotation_controller_.Brush_width_px();
-}
-
 COLORREF OverlayController::Annotation_color() const noexcept {
     return annotation_controller_.Annotation_color();
 }
@@ -230,8 +211,17 @@ int32_t OverlayController::Highlighter_opacity_percent() const noexcept {
     return annotation_controller_.Highlighter_opacity_percent();
 }
 
-void OverlayController::Set_brush_width_px(int32_t width_px) noexcept {
-    (void)annotation_controller_.Set_brush_width_px(width_px);
+void OverlayController::Set_tool_size_step(AnnotationToolId tool,
+                                           int32_t step) noexcept {
+    (void)annotation_controller_.Set_tool_size_step(tool, step);
+}
+
+int32_t OverlayController::Tool_size_step(AnnotationToolId tool) const noexcept {
+    return annotation_controller_.Tool_size_step(tool);
+}
+
+int32_t OverlayController::Tool_physical_size(AnnotationToolId tool) const noexcept {
+    return annotation_controller_.Tool_physical_size(tool);
 }
 
 void OverlayController::Set_annotation_color(COLORREF color) noexcept {
@@ -251,24 +241,35 @@ void OverlayController::Set_highlighter_opacity_percent(
     (void)annotation_controller_.Set_highlighter_opacity_percent(opacity_percent);
 }
 
-std::optional<int32_t> OverlayController::Adjust_brush_width(int32_t delta_steps) {
+std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) {
     std::optional<AnnotationToolId> const active_tool =
         annotation_controller_.Active_tool();
     if (delta_steps == 0 || state_.final_selection.Is_empty() ||
-        !active_tool.has_value() ||
-        (*active_tool != AnnotationToolId::Freehand &&
-         *active_tool != AnnotationToolId::Highlighter &&
-         *active_tool != AnnotationToolId::Line &&
-         *active_tool != AnnotationToolId::Arrow &&
-         *active_tool != AnnotationToolId::Rectangle &&
-         *active_tool != AnnotationToolId::Bubble)) {
+        !active_tool.has_value()) {
         return std::nullopt;
     }
-    int32_t const updated_width = annotation_controller_.Brush_width_px() + delta_steps;
-    if (!annotation_controller_.Set_brush_width_px(updated_width)) {
+    switch (*active_tool) {
+    case AnnotationToolId::Freehand:
+    case AnnotationToolId::Highlighter:
+    case AnnotationToolId::Line:
+    case AnnotationToolId::Arrow:
+    case AnnotationToolId::Rectangle:
+    case AnnotationToolId::Bubble:
+        break;
+    case AnnotationToolId::Text:
+        if (annotation_controller_.Has_active_text_edit()) {
+            return std::nullopt;
+        }
+        break;
+    case AnnotationToolId::FilledRectangle:
         return std::nullopt;
     }
-    return annotation_controller_.Brush_width_px();
+    int32_t const current_step = annotation_controller_.Tool_size_step(*active_tool);
+    if (!annotation_controller_.Set_tool_size_step(*active_tool,
+                                                   current_step + delta_steps)) {
+        return std::nullopt;
+    }
+    return annotation_controller_.Tool_physical_size(*active_tool);
 }
 
 bool OverlayController::Should_show_annotation_toolbar() const noexcept {

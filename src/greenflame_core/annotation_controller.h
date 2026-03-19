@@ -49,17 +49,16 @@ class AnnotationController final : public IAnnotationToolHost,
     Build_toolbar_button_views() const;
     [[nodiscard]] std::optional<AnnotationToolId>
     Tool_id_from_hotkey(wchar_t hotkey) const;
-    [[nodiscard]] int32_t Brush_width_px() const noexcept {
-        return brush_style_.width_px;
-    }
-    [[nodiscard]] bool Set_brush_width_px(int32_t width_px) noexcept;
+    [[nodiscard]] int32_t Tool_size_step(AnnotationToolId tool) const noexcept;
+    [[nodiscard]] int32_t Tool_physical_size(AnnotationToolId tool) const noexcept;
+    [[nodiscard]] bool Set_tool_size_step(AnnotationToolId tool, int32_t step) noexcept;
     [[nodiscard]] COLORREF Annotation_color() const noexcept {
         return Active_tool() == AnnotationToolId::Highlighter ? highlighter_style_.color
-                                                              : brush_style_.color;
+                                                              : freehand_style_.color;
     }
     [[nodiscard]] bool Set_annotation_color(COLORREF color) noexcept;
     [[nodiscard]] COLORREF Brush_annotation_color() const noexcept {
-        return brush_style_.color;
+        return freehand_style_.color;
     }
     [[nodiscard]] bool Set_brush_annotation_color(COLORREF color) noexcept;
     [[nodiscard]] COLORREF Highlighter_color() const noexcept {
@@ -96,8 +95,6 @@ class AnnotationController final : public IAnnotationToolHost,
     void Commit_text_annotation(UndoStack &undo_stack, TextAnnotation annotation);
     void Cancel_text_draft();
     [[nodiscard]] int32_t Text_point_size() const noexcept;
-    void Set_text_point_size(int32_t point_size) noexcept;
-    [[nodiscard]] bool Step_text_size(int delta_steps);
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
     void Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
@@ -167,12 +164,16 @@ class AnnotationController final : public IAnnotationToolHost,
     AnnotationToolRegistry registry_ = {};
     PassthroughStrokeSmoother smoother_ = {};
     std::optional<AnnotationToolId> active_tool_ = std::nullopt;
-    StrokeStyle brush_style_ = {};
+    StrokeStyle freehand_style_ = {};
+    StrokeStyle line_style_ = {};
+    StrokeStyle arrow_style_ = {};
+    StrokeStyle rect_style_ = {};
     StrokeStyle highlighter_style_ = {};
+    int32_t bubble_size_step_ = 10;
+    int32_t text_size_step_ = 10;
     std::unique_ptr<IAnnotationEditInteraction> active_edit_interaction_ = {};
     ITextLayoutEngine *text_layout_engine_ = nullptr;
     std::optional<TextEditController> text_edit_ctrl_ = std::nullopt;
-    int32_t text_size_points_ = kDefaultTextAnnotationPointSize;
     TextFontChoice text_current_font_ = TextFontChoice::Sans;
     int32_t bubble_counter_ = 1;
     TextFontChoice bubble_current_font_ = TextFontChoice::Sans;

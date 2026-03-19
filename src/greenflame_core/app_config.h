@@ -6,9 +6,14 @@
 namespace greenflame::core {
 
 struct AppConfig final {
-    static constexpr int32_t kDefaultBrushWidthPx = 2;
+    static constexpr int32_t kDefaultFreehandSize = 2;
+    static constexpr int32_t kDefaultLineSize = 2;
+    static constexpr int32_t kDefaultArrowSize = 2;
+    static constexpr int32_t kDefaultRectSize = 2;
+    static constexpr int32_t kDefaultHighlighterSize = 10;
+    static constexpr int32_t kDefaultBubbleSize = 10;
+    static constexpr int32_t kDefaultTextSize = 10;
     static constexpr int32_t kDefaultToolSizeOverlayDurationMs = 800;
-    static constexpr int32_t kDefaultTextPointSize = kDefaultTextAnnotationPointSize;
     static constexpr int32_t kDefaultHighlighterPauseStraightenMs = 800;
 
     std::wstring default_save_dir = {};
@@ -18,7 +23,13 @@ struct AppConfig final {
     std::wstring filename_pattern_monitor = {};
     std::wstring filename_pattern_window = {};
     std::wstring default_save_format = {}; // "png" (default), "jpg"/"jpeg", or "bmp".
-    int32_t brush_width_px = kDefaultBrushWidthPx;
+    int32_t freehand_size = kDefaultFreehandSize;
+    int32_t line_size = kDefaultLineSize;
+    int32_t arrow_size = kDefaultArrowSize;
+    int32_t rect_size = kDefaultRectSize;
+    int32_t highlighter_size = kDefaultHighlighterSize;
+    int32_t bubble_size = kDefaultBubbleSize;
+    int32_t text_size = kDefaultTextSize;
     AnnotationColorPalette annotation_colors = kDefaultAnnotationColorPalette;
     int32_t current_annotation_color_index = kDefaultAnnotationColorIndex;
     HighlighterColorPalette highlighter_colors = kDefaultHighlighterColorPalette;
@@ -26,7 +37,6 @@ struct AppConfig final {
     int32_t highlighter_opacity_percent = kDefaultHighlighterOpacityPercent;
     int32_t highlighter_pause_straighten_ms = kDefaultHighlighterPauseStraightenMs;
     int32_t highlighter_pause_straighten_deadzone_px = 0;
-    int32_t text_size_points = kDefaultTextPointSize;
     TextFontChoice text_current_font = TextFontChoice::Sans;
     TextFontChoice bubble_current_font = TextFontChoice::Sans;
     std::wstring text_font_sans = L"Arial";

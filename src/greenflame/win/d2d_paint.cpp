@@ -478,7 +478,8 @@ struct TextBoxResult {
 
 void Draw_text_box(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                    IDWriteTextFormat *fmt, std::wstring_view text, float box_left,
-                   float box_top, float box_w, float box_h, float margin) {
+                   float box_top, float box_w, float box_h, float margin,
+                   DWRITE_TEXT_ALIGNMENT text_align = DWRITE_TEXT_ALIGNMENT_CENTER) {
     if (!rt || !fmt || text.empty()) {
         return;
     }
@@ -502,7 +503,7 @@ void Draw_text_box(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         !layout) {
         return;
     }
-    layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    layout->SetTextAlignment(text_align);
     layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     res.solid_brush->SetColor(kCoordTooltipText);
     rt->DrawTextLayout(D2D1::Point2F(box_left + margin, box_top + margin), layout.Get(),
@@ -1076,11 +1077,13 @@ void Draw_transient_center_label(ID2D1RenderTarget *rt, D2DOverlayResources &res
     if (!rt || !res.text_center || sel.Is_empty() || text.empty()) {
         return;
     }
-    float cw = 0.f, ch = 0.f;
-    if (!Measure_text(res, res.text_center.Get(), text, cw, ch)) {
+    // Use the widest possible label ("50") to fix the box width regardless of content.
+    // Add 4× margin (two on each side) so the layout width has slack and never wraps.
+    float fixed_w = 0.f, ch = 0.f;
+    if (!Measure_text(res, res.text_center.Get(), L"50", fixed_w, ch)) {
         return;
     }
-    float cbox_w = cw + 2.f * kDimMarginF;
+    float cbox_w = fixed_w + 4.f * kDimMarginF;
     float cbox_h = ch + 2.f * kDimMarginF;
     int const sel_w = sel.Width();
     int const sel_h = sel.Height();

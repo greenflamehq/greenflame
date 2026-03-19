@@ -42,10 +42,10 @@ Once a region is selected:
 - Press **T** or use the toolbar to toggle the **Text tool** on or off.
 - Press **N** or use the toolbar to toggle the **Bubble tool** on or off.
 - With an annotation tool active, **right-click** anywhere to open the active tool's **color wheel** at the cursor. **Left-click** a segment to select that color, or press **Escape** to dismiss the wheel.
-- With the **Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, or **Bubble** tool active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change stroke width from **1** to **50**.
+- With any stroke or size tool active (**Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Bubble**, or **Text**), use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent size step that is persisted separately.
 - With the **Text tool** active and no draft open, **left-click inside the selection** to start a text annotation at the click point.
 - With the **Text tool** active and no draft open, **right-click** opens a **12-segment text style wheel**: 8 annotation-color slots on the left half and 4 font choices on the right half.
-- With the **Text tool** active and no draft open, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change text point size. The chosen size is persisted.
+- With the **Text tool** active and no draft open, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change text size step (1–50, mapped to 5–288 pt). The chosen step is persisted.
 - With the **Bubble tool** active, **left-click inside the selection** to place a numbered circle. The number auto-increments with each placement and decrements on undo. **Right-click** opens a **12-segment style wheel**: 8 annotation-color slots on the left half and 4 font choices on the right half. The number color is chosen automatically for contrast (black on light fills, white on dark fills).
 - With the **Brush** or **Bubble tool** active, the overlay shows an anti-aliased circular size preview around the cursor hotspot.
 - With the **Highlighter tool** active, the overlay shows an anti-aliased axis-aligned square size preview around the cursor hotspot.
@@ -170,20 +170,25 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `ui.show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
 | `ui.show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
 | `ui.tool_size_overlay_duration_ms` | `800` | How long the centered tool-size overlay stays visible after a stroke-width change. `0` disables it. |
-| `tools.current_size` | `2` | Shared stroke width for Brush, Highlighter, Line, Arrow, Rectangle, Bubble (diameter for Bubble) in physical pixels. Runtime adjustments are clamped to `1..50` and persisted here. Filled rectangles ignore it. |
+| `tools.freehand.size` | `2` | Brush tool size step (1–50). Physical stroke width = step px. |
+| `tools.line.size` | `2` | Line tool size step (1–50). Physical stroke width = step px. |
+| `tools.arrow.size` | `2` | Arrow tool size step (1–50). Physical stroke width = step px. |
+| `tools.rect.size` | `2` | Rectangle tool size step (1–50). Physical stroke width = step px. |
 | `tools.colors` | Object with slot index keys (e.g. `{"4": "#ff00ff"}`) | Annotation color wheel slots (indices 0–7). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
 | `tools.font.sans` | `Arial` | Font family for the `sans` slot (shared by Text and Bubble tools). |
 | `tools.font.serif` | `Times New Roman` | Font family for the `serif` slot. |
 | `tools.font.mono` | `Courier New` | Font family for the `mono` slot. |
 | `tools.font.art` | `Comic Sans MS` | Font family for the `art` slot. |
+| `tools.highlighter.size` | `10` | Highlighter size step (1–50). Physical stroke width = step + 10 px (11–60 px). |
 | `tools.highlighter.colors` | Object with slot index keys (e.g. `{"2": "#ffb44d"}`) | Highlighter color wheel slots (indices 0–5). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.highlighter.current_color` | `0` | Current Highlighter color slot index, clamped to `0..5`. |
 | `tools.highlighter.opacity_percent` | `50` | Default Highlighter opacity for live preview, save output, and clipboard output. Values are clamped to `0..100`. |
 | `tools.highlighter.pause_straighten_ms` | `800` | After the mouse is still for this many milliseconds during a highlighter stroke, the stroke snaps to a straight bar (start to cursor). `0` means always straight. |
 | `tools.highlighter.pause_straighten_deadzone_px` | `0` | Mouse must move more than this many physical pixels from the last timer-reset position before the pause timer resets. `0` means any movement resets the timer. |
-| `tools.text.size_points` | `12` | Default Text tool point size. Values are normalized to the nearest supported preset (`5, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72, 84, 96, 108, 144, 192, 216, 288`). Runtime adjustments are persisted here. |
+| `tools.text.size` | `10` | Text tool size step (1–50), mapped to point sizes 5–288 pt via a quasi-logarithmic table. Default step 10 = 14 pt. |
 | `tools.text.current_font` | `sans` | Active font slot for the Text tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
+| `tools.bubble.size` | `10` | Bubble size step (1–50). Physical circle diameter = step + 20 px (21–70 px). |
 | `tools.bubble.current_font` | `sans` | Active font slot for the Bubble tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
 | `save.default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
 | `save.last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |

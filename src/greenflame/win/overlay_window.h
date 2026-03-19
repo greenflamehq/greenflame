@@ -108,10 +108,8 @@ class OverlayWindow final {
     LRESULT On_set_cursor(WPARAM wparam, LPARAM lparam);
     void Refresh_cursor();
     bool Refresh_hover_handle();
-    [[nodiscard]] bool Handle_brush_width_delta(int32_t delta_steps);
-    [[nodiscard]] bool Handle_text_size_delta(int32_t delta_steps);
-    void Show_brush_size_overlay(int32_t width_px);
-    void Show_text_size_overlay(int32_t size_pt);
+    [[nodiscard]] bool Handle_tool_size_delta(int32_t delta_steps);
+    void Show_tool_size_overlay(int32_t step);
     void Clear_transient_center_label(bool repaint);
     [[nodiscard]] bool Read_clipboard_text(std::wstring &out) const;
     void Write_clipboard_text(std::wstring_view text) const;
@@ -181,7 +179,6 @@ class OverlayWindow final {
     OverlayHelpOverlay hotkey_help_overlay_ = {};
     bool testing_toolbar_ = false;
     int mouse_wheel_delta_remainder_ = 0;
-    int text_wheel_delta_remainder_ = 0;
     std::wstring transient_center_label_text_ = {};
     bool caret_blink_visible_ = true;
     bool suppress_next_lbutton_up_ = false;

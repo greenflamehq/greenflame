@@ -352,10 +352,40 @@ core::AppConfig Load_app_config() {
 
         if (root.has_key("tools")) {
             easyjson::JSON const &tools = root["tools"];
-            if (tools.has_key("current_size")) {
-                int32_t parsed = 0;
-                if (Read_int_from_json(tools["current_size"], parsed)) {
-                    config.brush_width_px = parsed;
+            if (tools.has_key("freehand")) {
+                easyjson::JSON const &freehand = tools["freehand"];
+                if (freehand.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(freehand["size"], parsed)) {
+                        config.freehand_size = parsed;
+                    }
+                }
+            }
+            if (tools.has_key("line")) {
+                easyjson::JSON const &line = tools["line"];
+                if (line.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(line["size"], parsed)) {
+                        config.line_size = parsed;
+                    }
+                }
+            }
+            if (tools.has_key("arrow")) {
+                easyjson::JSON const &arrow = tools["arrow"];
+                if (arrow.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(arrow["size"], parsed)) {
+                        config.arrow_size = parsed;
+                    }
+                }
+            }
+            if (tools.has_key("rect")) {
+                easyjson::JSON const &rect = tools["rect"];
+                if (rect.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(rect["size"], parsed)) {
+                        config.rect_size = parsed;
+                    }
                 }
             }
             if (tools.has_key("current_color")) {
@@ -385,6 +415,12 @@ core::AppConfig Load_app_config() {
             }
             if (tools.has_key("highlighter")) {
                 easyjson::JSON const &hl = tools["highlighter"];
+                if (hl.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(hl["size"], parsed)) {
+                        config.highlighter_size = parsed;
+                    }
+                }
                 if (hl.has_key("current_color")) {
                     int32_t parsed = 0;
                     if (Read_int_from_json(hl["current_color"], parsed)) {
@@ -417,10 +453,10 @@ core::AppConfig Load_app_config() {
             }
             if (tools.has_key("text")) {
                 easyjson::JSON const &text = tools["text"];
-                if (text.has_key("size_points")) {
+                if (text.has_key("size")) {
                     int32_t parsed = 0;
-                    if (Read_int_from_json(text["size_points"], parsed)) {
-                        config.text_size_points = parsed;
+                    if (Read_int_from_json(text["size"], parsed)) {
+                        config.text_size = parsed;
                     }
                 }
                 if (text.has_key("current_font")) {
@@ -430,6 +466,12 @@ core::AppConfig Load_app_config() {
             }
             if (tools.has_key("bubble")) {
                 easyjson::JSON const &bubble = tools["bubble"];
+                if (bubble.has_key("size")) {
+                    int32_t parsed = 0;
+                    if (Read_int_from_json(bubble["size"], parsed)) {
+                        config.bubble_size = parsed;
+                    }
+                }
                 if (bubble.has_key("current_font")) {
                     config.bubble_current_font =
                         Parse_text_font_choice(bubble["current_font"].to_string());
@@ -494,7 +536,13 @@ bool Save_app_config(core::AppConfig const &config) {
             }
         }
 
-        bool wrote_tools = config.brush_width_px != defaults.brush_width_px ||
+        bool wrote_tools = config.freehand_size != defaults.freehand_size ||
+                           config.line_size != defaults.line_size ||
+                           config.arrow_size != defaults.arrow_size ||
+                           config.rect_size != defaults.rect_size ||
+                           config.highlighter_size != defaults.highlighter_size ||
+                           config.bubble_size != defaults.bubble_size ||
+                           config.text_size != defaults.text_size ||
                            config.current_annotation_color_index !=
                                defaults.current_annotation_color_index ||
                            config.annotation_colors != defaults.annotation_colors ||
@@ -507,7 +555,6 @@ bool Save_app_config(core::AppConfig const &config) {
                            config.highlighter_pause_straighten_deadzone_px !=
                                defaults.highlighter_pause_straighten_deadzone_px ||
                            config.highlighter_colors != defaults.highlighter_colors ||
-                           config.text_size_points != defaults.text_size_points ||
                            config.text_current_font != defaults.text_current_font ||
                            config.bubble_current_font != defaults.bubble_current_font ||
                            config.text_font_sans != defaults.text_font_sans ||
@@ -517,8 +564,17 @@ bool Save_app_config(core::AppConfig const &config) {
 
         if (wrote_tools) {
             root["tools"] = easyjson::object();
-            if (config.brush_width_px != defaults.brush_width_px) {
-                root["tools"]["current_size"] = config.brush_width_px;
+            if (config.freehand_size != defaults.freehand_size) {
+                root["tools"]["freehand"]["size"] = config.freehand_size;
+            }
+            if (config.line_size != defaults.line_size) {
+                root["tools"]["line"]["size"] = config.line_size;
+            }
+            if (config.arrow_size != defaults.arrow_size) {
+                root["tools"]["arrow"]["size"] = config.arrow_size;
+            }
+            if (config.rect_size != defaults.rect_size) {
+                root["tools"]["rect"]["size"] = config.rect_size;
             }
             if (config.annotation_colors != defaults.annotation_colors) {
                 easyjson::JSON colors_obj = easyjson::object();
@@ -544,7 +600,8 @@ bool Save_app_config(core::AppConfig const &config) {
                 root["tools"]["font"]["mono"] = To_utf8(config.text_font_mono);
                 root["tools"]["font"]["art"] = To_utf8(config.text_font_art);
             }
-            if (config.highlighter_colors != defaults.highlighter_colors ||
+            if (config.highlighter_size != defaults.highlighter_size ||
+                config.highlighter_colors != defaults.highlighter_colors ||
                 config.current_highlighter_color_index !=
                     defaults.current_highlighter_color_index ||
                 config.highlighter_opacity_percent !=
@@ -554,6 +611,9 @@ bool Save_app_config(core::AppConfig const &config) {
                 config.highlighter_pause_straighten_deadzone_px !=
                     defaults.highlighter_pause_straighten_deadzone_px) {
                 root["tools"]["highlighter"] = easyjson::object();
+                if (config.highlighter_size != defaults.highlighter_size) {
+                    root["tools"]["highlighter"]["size"] = config.highlighter_size;
+                }
                 if (config.highlighter_colors != defaults.highlighter_colors) {
                     easyjson::JSON hl_colors = easyjson::object();
                     for (size_t i = 0; i < core::kHighlighterColorSlotCount; ++i) {
@@ -586,21 +646,27 @@ bool Save_app_config(core::AppConfig const &config) {
                         config.highlighter_pause_straighten_deadzone_px;
                 }
             }
-            if (config.text_size_points != defaults.text_size_points ||
+            if (config.text_size != defaults.text_size ||
                 config.text_current_font != defaults.text_current_font) {
                 root["tools"]["text"] = easyjson::object();
-                if (config.text_size_points != defaults.text_size_points) {
-                    root["tools"]["text"]["size_points"] = config.text_size_points;
+                if (config.text_size != defaults.text_size) {
+                    root["tools"]["text"]["size"] = config.text_size;
                 }
                 if (config.text_current_font != defaults.text_current_font) {
                     root["tools"]["text"]["current_font"] =
                         std::string(Text_font_choice_token(config.text_current_font));
                 }
             }
-            if (config.bubble_current_font != defaults.bubble_current_font) {
+            if (config.bubble_size != defaults.bubble_size ||
+                config.bubble_current_font != defaults.bubble_current_font) {
                 root["tools"]["bubble"] = easyjson::object();
-                root["tools"]["bubble"]["current_font"] =
-                    std::string(Text_font_choice_token(config.bubble_current_font));
+                if (config.bubble_size != defaults.bubble_size) {
+                    root["tools"]["bubble"]["size"] = config.bubble_size;
+                }
+                if (config.bubble_current_font != defaults.bubble_current_font) {
+                    root["tools"]["bubble"]["current_font"] =
+                        std::string(Text_font_choice_token(config.bubble_current_font));
+                }
             }
         }
 

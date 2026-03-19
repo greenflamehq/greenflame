@@ -1034,25 +1034,25 @@ TEST(overlay_controller, AnnotationToolbar_TextDraftStaysVisibleButNonInteractiv
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
 }
 
-TEST(overlay_controller, TextSizeStep_OnlyChangesWhileTextToolIsArmed) {
+TEST(overlay_controller, ToolSizeAdjust_OnlyChangesTextSizeWhileTextToolIsArmed) {
     auto c = Make_controller();
     FakeTextLayoutEngine engine;
     c.Set_text_layout_engine(&engine);
 
-    EXPECT_FALSE(c.Step_text_size(1));
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
     Press(c, {100, 100});
     Release(c, {300, 300});
-    EXPECT_FALSE(c.Step_text_size(1));
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
 
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'T'), OverlayAction::Repaint);
-    EXPECT_EQ(c.Text_point_size(), 12);
-    EXPECT_TRUE(c.Step_text_size(1));
-    EXPECT_EQ(c.Text_point_size(), 14);
+    EXPECT_EQ(c.Text_point_size(), 14); // default step 10 = 14 pt
+    EXPECT_EQ(c.Adjust_tool_size(1), std::optional<int32_t>{15}); // step 11 = 15 pt
+    EXPECT_EQ(c.Text_point_size(), 15);
 
     ASSERT_EQ(Press(c, {150, 150}), OverlayAction::Repaint);
     ASSERT_TRUE(c.Has_active_text_edit());
-    EXPECT_FALSE(c.Step_text_size(1));
-    EXPECT_EQ(c.Text_point_size(), 14);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
+    EXPECT_EQ(c.Text_point_size(), 15);
 }
 
 TEST(overlay_controller, DraftLocalUndoRedo_DoesNotPushOverlayUndoStack) {
@@ -1094,15 +1094,14 @@ TEST(overlay_controller, DraftLocalUndoRedo_DoesNotPushOverlayUndoStack) {
               L"seed");
 }
 
-TEST(overlay_controller, SetTextPointSize_UpdatesPendingTextDefaultWithoutArmingTool) {
+TEST(overlay_controller, SetToolSizeStep_UpdatesTextSizeWithoutArmingTool) {
     auto c = Make_controller();
 
-    EXPECT_EQ(c.Text_point_size(), 12);
-    c.Set_text_point_size(13);
-    EXPECT_EQ(c.Text_point_size(), 12);
-
-    c.Set_text_point_size(70);
-    EXPECT_EQ(c.Text_point_size(), 72);
+    EXPECT_EQ(c.Text_point_size(), 14); // default step 10 = 14 pt
+    c.Set_tool_size_step(AnnotationToolId::Text, 12);
+    EXPECT_EQ(c.Text_point_size(), 16); // step 12 = 16 pt
+    c.Set_tool_size_step(AnnotationToolId::Text, 50);
+    EXPECT_EQ(c.Text_point_size(), 288); // step 50 = 288 pt
 }
 
 TEST(overlay_controller, TextTool_OutsideClickOnEmptyDraftStartsNewDraftWithoutCommit) {
@@ -1194,99 +1193,105 @@ TEST(overlay_controller, TextTool_BorderClickOnNonEmptyDraftCommitsAndStartsNewD
               (PointPx{111, 170}));
 }
 
-TEST(overlay_controller, BrushWidthAdjust_IgnoresInactiveBrushTool) {
+TEST(overlay_controller, ToolSizeAdjust_IgnoresWhenNoToolArmed) {
     auto c = Make_controller();
 
-    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
     Press(c, {100, 100});
     Release(c, {300, 300});
-    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
 }
 
-TEST(overlay_controller, BrushWidthAdjust_ClampsAndReturnsUpdatedWidth) {
+TEST(overlay_controller, ToolSizeAdjust_ClampsAndReturnsFreehandPhysicalPx) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
-    EXPECT_EQ(c.Adjust_brush_width(1), std::optional<int32_t>{3});
-    EXPECT_EQ(c.Adjust_brush_width(100), std::optional<int32_t>{50});
-    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
-    EXPECT_EQ(c.Adjust_brush_width(-100), std::optional<int32_t>{1});
+    // default step 2 = 2 px for freehand
+    EXPECT_EQ(c.Tool_size_step(AnnotationToolId::Freehand),
+              StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::optional<int32_t>{3});
+    EXPECT_EQ(c.Adjust_tool_size(100), std::optional<int32_t>{50});
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
+    EXPECT_EQ(c.Adjust_tool_size(-100), std::optional<int32_t>{1});
 }
 
-TEST(overlay_controller, BrushWidthAdjust_AppliesToHighlighterTool) {
+TEST(overlay_controller, ToolSizeAdjust_AppliesToHighlighterTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'H'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
-    EXPECT_EQ(c.Adjust_brush_width(1), std::optional<int32_t>{3});
-    EXPECT_EQ(c.Adjust_brush_width(-2), std::optional<int32_t>{1});
+    // default step 10, physical = step + 10 = 20 px
+    EXPECT_EQ(c.Tool_physical_size(AnnotationToolId::Highlighter), 20);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::optional<int32_t>{21});
+    EXPECT_EQ(c.Adjust_tool_size(-2), std::optional<int32_t>{19});
 }
 
-TEST(overlay_controller, BrushWidthAdjust_AppliesToLineTool) {
+TEST(overlay_controller, ToolSizeAdjust_AppliesToLineTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
-    EXPECT_EQ(c.Adjust_brush_width(1), std::optional<int32_t>{3});
-    EXPECT_EQ(c.Adjust_brush_width(-2), std::optional<int32_t>{1});
+    EXPECT_EQ(c.Tool_size_step(AnnotationToolId::Line), StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::optional<int32_t>{3});
+    EXPECT_EQ(c.Adjust_tool_size(-2), std::optional<int32_t>{1});
 }
 
-TEST(overlay_controller, BrushWidthAdjust_AppliesToArrowTool) {
+TEST(overlay_controller, ToolSizeAdjust_AppliesToArrowTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'A'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
-    EXPECT_EQ(c.Adjust_brush_width(2), std::optional<int32_t>{4});
-    EXPECT_EQ(c.Adjust_brush_width(-3), std::optional<int32_t>{1});
+    EXPECT_EQ(c.Tool_size_step(AnnotationToolId::Arrow), StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_tool_size(2), std::optional<int32_t>{4});
+    EXPECT_EQ(c.Adjust_tool_size(-3), std::optional<int32_t>{1});
 }
 
-TEST(overlay_controller, BrushWidthAdjust_AppliesToRectangleTool) {
+TEST(overlay_controller, ToolSizeAdjust_AppliesToRectangleTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
-    EXPECT_EQ(c.Adjust_brush_width(2), std::optional<int32_t>{4});
-    EXPECT_EQ(c.Adjust_brush_width(-3), std::optional<int32_t>{1});
+    EXPECT_EQ(c.Tool_size_step(AnnotationToolId::Rectangle),
+              StrokeStyle::kDefaultWidthPx);
+    EXPECT_EQ(c.Adjust_tool_size(2), std::optional<int32_t>{4});
+    EXPECT_EQ(c.Adjust_tool_size(-3), std::optional<int32_t>{1});
 }
 
-TEST(overlay_controller, BrushWidthAdjust_IgnoresFilledRectangleTool) {
+TEST(overlay_controller, ToolSizeAdjust_IgnoresFilledRectangleTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'F'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
 }
 
-TEST(overlay_controller, BrushWidthAdjust_IgnoresTextTool) {
+TEST(overlay_controller, ToolSizeAdjust_ChangesTextSizeWhenTextToolArmed) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'T'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Adjust_brush_width(1), std::nullopt);
+    // default step 10 = 14 pt; +1 → step 11 = 15 pt
+    EXPECT_EQ(c.Adjust_tool_size(1), std::optional<int32_t>{15});
 }
 
-TEST(overlay_controller, BrushWidthAdjust_AppliesToBubbleTool) {
+TEST(overlay_controller, ToolSizeAdjust_AppliesToBubbleTool) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
     ASSERT_EQ(c.On_annotation_tool_hotkey(L'N'), OverlayAction::Repaint);
 
-    EXPECT_EQ(c.Brush_width_px(), StrokeStyle::kDefaultWidthPx);
-    EXPECT_EQ(c.Adjust_brush_width(2), std::optional<int32_t>{4});
-    EXPECT_EQ(c.Adjust_brush_width(-3), std::optional<int32_t>{1});
+    // default step 10, physical = step + 20 = 30 px
+    EXPECT_EQ(c.Tool_physical_size(AnnotationToolId::Bubble), 30);
+    EXPECT_EQ(c.Adjust_tool_size(2), std::optional<int32_t>{32});
+    EXPECT_EQ(c.Adjust_tool_size(-3), std::optional<int32_t>{29});
 }
 
 TEST(overlay_controller,

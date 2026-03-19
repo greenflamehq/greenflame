@@ -750,7 +750,6 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     hinstance_ = hinstance;
     resources_->Reset();
     mouse_wheel_delta_remainder_ = 0;
-    text_wheel_delta_remainder_ = 0;
     transient_center_label_text_.clear();
     caret_blink_visible_ = true;
     suppress_next_lbutton_up_ = false;
@@ -797,9 +796,28 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     controller_.Set_text_layout_engine(text_layout_engine_.get());
     controller_.Refresh_snap_edges(Collect_visible_snap_edges(), bounds.left,
                                    bounds.top);
-    controller_.Set_brush_width_px(config_ != nullptr
-                                       ? config_->brush_width_px
-                                       : core::StrokeStyle::kDefaultWidthPx);
+    auto const tool_step = [&](core::AnnotationToolId tool, int32_t step) {
+        controller_.Set_tool_size_step(tool, step);
+    };
+    if (config_ != nullptr) {
+        tool_step(core::AnnotationToolId::Freehand, config_->freehand_size);
+        tool_step(core::AnnotationToolId::Line, config_->line_size);
+        tool_step(core::AnnotationToolId::Arrow, config_->arrow_size);
+        tool_step(core::AnnotationToolId::Rectangle, config_->rect_size);
+        tool_step(core::AnnotationToolId::Highlighter, config_->highlighter_size);
+        tool_step(core::AnnotationToolId::Bubble, config_->bubble_size);
+        tool_step(core::AnnotationToolId::Text, config_->text_size);
+    } else {
+        tool_step(core::AnnotationToolId::Freehand,
+                  core::AppConfig::kDefaultFreehandSize);
+        tool_step(core::AnnotationToolId::Line, core::AppConfig::kDefaultLineSize);
+        tool_step(core::AnnotationToolId::Arrow, core::AppConfig::kDefaultArrowSize);
+        tool_step(core::AnnotationToolId::Rectangle, core::AppConfig::kDefaultRectSize);
+        tool_step(core::AnnotationToolId::Highlighter,
+                  core::AppConfig::kDefaultHighlighterSize);
+        tool_step(core::AnnotationToolId::Bubble, core::AppConfig::kDefaultBubbleSize);
+        tool_step(core::AnnotationToolId::Text, core::AppConfig::kDefaultTextSize);
+    }
     controller_.Set_brush_annotation_color(
         config_ != nullptr ? config_->annotation_colors[static_cast<size_t>(
                                  core::Clamp_annotation_color_index(
@@ -815,9 +833,6 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     controller_.Set_highlighter_opacity_percent(
         config_ != nullptr ? config_->highlighter_opacity_percent
                            : core::kDefaultHighlighterOpacityPercent);
-    controller_.Set_text_point_size(config_ != nullptr
-                                        ? config_->text_size_points
-                                        : core::AppConfig::kDefaultTextPointSize);
     controller_.Set_text_current_font(config_ != nullptr ? config_->text_current_font
                                                          : core::TextFontChoice::Sans);
     controller_.Set_bubble_current_font(
@@ -856,34 +871,56 @@ core::SnapEdges OverlayWindow::Collect_visible_snap_edges() const {
     return snap_edges;
 }
 
-bool OverlayWindow::Handle_brush_width_delta(int32_t delta_steps) {
-    std::optional<int32_t> const width = controller_.Adjust_brush_width(delta_steps);
-    if (!width.has_value()) {
+bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
+    std::optional<core::AnnotationToolId> const active_tool =
+        controller_.Active_annotation_tool();
+    if (!active_tool.has_value()) {
         return false;
     }
-    if (config_ != nullptr) {
-        config_->brush_width_px = *width;
+    int32_t const step = controller_.Tool_size_step(*active_tool);
+    // step == 0 means this tool (FilledRectangle) does not have a size.
+    // Also skip when there's no selection or a text edit is blocking input.
+    if (step == 0 || controller_.State().final_selection.Is_empty() ||
+        (*active_tool == core::AnnotationToolId::Text &&
+         controller_.Has_active_text_edit())) {
+        return false;
+    }
+    bool const changed = controller_.Adjust_tool_size(delta_steps).has_value();
+    if (changed && config_ != nullptr) {
+        int32_t const new_step = controller_.Tool_size_step(*active_tool);
+        switch (*active_tool) {
+        case core::AnnotationToolId::Freehand:
+            config_->freehand_size = new_step;
+            break;
+        case core::AnnotationToolId::Line:
+            config_->line_size = new_step;
+            break;
+        case core::AnnotationToolId::Arrow:
+            config_->arrow_size = new_step;
+            break;
+        case core::AnnotationToolId::Rectangle:
+            config_->rect_size = new_step;
+            break;
+        case core::AnnotationToolId::Highlighter:
+            config_->highlighter_size = new_step;
+            break;
+        case core::AnnotationToolId::Bubble:
+            config_->bubble_size = new_step;
+            break;
+        case core::AnnotationToolId::Text:
+            config_->text_size = new_step;
+            break;
+        case core::AnnotationToolId::FilledRectangle:
+            break;
+        }
         config_->Normalize();
         (void)Save_app_config(*config_);
     }
-    Show_brush_size_overlay(*width);
+    Show_tool_size_overlay(controller_.Tool_size_step(*active_tool));
     return true;
 }
 
-bool OverlayWindow::Handle_text_size_delta(int32_t delta_steps) {
-    if (!controller_.Step_text_size(delta_steps)) {
-        return false;
-    }
-    if (config_ != nullptr) {
-        config_->text_size_points = controller_.Text_point_size();
-        config_->Normalize();
-        (void)Save_app_config(*config_);
-    }
-    Show_text_size_overlay(controller_.Text_point_size());
-    return true;
-}
-
-void OverlayWindow::Show_brush_size_overlay(int32_t width_px) {
+void OverlayWindow::Show_tool_size_overlay(int32_t step) {
     int32_t const duration_ms =
         (config_ != nullptr) ? config_->tool_size_overlay_duration_ms
                              : core::AppConfig::kDefaultToolSizeOverlayDurationMs;
@@ -892,24 +929,7 @@ void OverlayWindow::Show_brush_size_overlay(int32_t width_px) {
         return;
     }
 
-    transient_center_label_text_ = std::to_wstring(width_px);
-    transient_center_label_text_ += L" px";
-    (void)SetTimer(hwnd_, kBrushSizeOverlayTimerId, static_cast<UINT>(duration_ms),
-                   nullptr);
-    InvalidateRect(hwnd_, nullptr, FALSE);
-}
-
-void OverlayWindow::Show_text_size_overlay(int32_t size_pt) {
-    int32_t const duration_ms =
-        (config_ != nullptr) ? config_->tool_size_overlay_duration_ms
-                             : core::AppConfig::kDefaultToolSizeOverlayDurationMs;
-    if (duration_ms <= 0) {
-        Clear_transient_center_label(true);
-        return;
-    }
-
-    transient_center_label_text_ = std::to_wstring(size_pt);
-    transient_center_label_text_ += L" pt";
+    transient_center_label_text_ = std::to_wstring(step);
     (void)SetTimer(hwnd_, kBrushSizeOverlayTimerId, static_cast<UINT>(duration_ms),
                    nullptr);
     InvalidateRect(hwnd_, nullptr, FALSE);
@@ -1081,6 +1101,7 @@ void OverlayWindow::Show_color_wheel(core::PointPx center) {
     if (!Can_show_color_wheel()) {
         return;
     }
+    Clear_transient_center_label(false);
     color_wheel_.visible = true;
     color_wheel_.center = center;
     color_wheel_.hovered_segment = std::nullopt;
@@ -1561,11 +1582,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
     if (eff_ctrl && !eff_alt) {
         if (std::optional<int32_t> const delta = Brush_width_delta_for_key(wparam);
             delta.has_value()) {
-            if (controller_.Active_annotation_tool() == core::AnnotationToolId::Text) {
-                (void)Handle_text_size_delta(*delta);
-            } else {
-                (void)Handle_brush_width_delta(*delta);
-            }
+            (void)Handle_tool_size_delta(*delta);
             return 0;
         }
     }
@@ -1577,6 +1594,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         core::OverlayAction const action =
             controller_.On_annotation_tool_hotkey(static_cast<wchar_t>(wparam));
         if (action != core::OverlayAction::None) {
+            Clear_transient_center_label(false);
             Apply_action(action);
             (void)Refresh_hover_handle();
             Refresh_cursor();
@@ -1713,6 +1731,9 @@ LRESULT OverlayWindow::On_l_button_down() {
         Hide_help_overlay(true);
         return 0;
     }
+    if (!transient_center_label_text_.empty()) {
+        Clear_transient_center_label(false);
+    }
     // Route click to any toolbar button under the cursor (consume — do not start
     // dragging).
     if (!toolbar_buttons_.empty()) {
@@ -1791,6 +1812,10 @@ LRESULT OverlayWindow::On_l_button_down() {
         controller_.On_primary_press(mods, cursor_client, cursor_screen, win_handle,
                                      monitor_idx, std::optional<core::RectPx>{}, vdesk,
                                      Collect_visible_snap_edges(), wr.left, wr.top));
+    if (controller_.Has_active_annotation_gesture() ||
+        controller_.Has_active_text_edit()) {
+        Clear_transient_center_label(false);
+    }
     if (controller_.Active_annotation_tool() == core::AnnotationToolId::Highlighter &&
         controller_.Has_active_annotation_gesture()) {
         int32_t const pause_ms =
@@ -1938,41 +1963,6 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
         controller_.Active_annotation_tool();
     if (!active_tool.has_value()) {
         mouse_wheel_delta_remainder_ = 0;
-        text_wheel_delta_remainder_ = 0;
-        return 0;
-    }
-
-    if (*active_tool == core::AnnotationToolId::Text) {
-        mouse_wheel_delta_remainder_ = 0;
-        if (controller_.Has_active_text_edit()) {
-            text_wheel_delta_remainder_ = 0;
-            return 0;
-        }
-
-        text_wheel_delta_remainder_ += GET_WHEEL_DELTA_WPARAM(wparam);
-        int32_t delta_steps = 0;
-        while (text_wheel_delta_remainder_ >= WHEEL_DELTA) {
-            ++delta_steps;
-            text_wheel_delta_remainder_ -= WHEEL_DELTA;
-        }
-        while (text_wheel_delta_remainder_ <= -WHEEL_DELTA) {
-            --delta_steps;
-            text_wheel_delta_remainder_ += WHEEL_DELTA;
-        }
-        if (delta_steps != 0) {
-            (void)Handle_text_size_delta(delta_steps);
-        }
-        return 0;
-    }
-
-    text_wheel_delta_remainder_ = 0;
-    if (*active_tool != core::AnnotationToolId::Freehand &&
-        *active_tool != core::AnnotationToolId::Highlighter &&
-        *active_tool != core::AnnotationToolId::Line &&
-        *active_tool != core::AnnotationToolId::Arrow &&
-        *active_tool != core::AnnotationToolId::Rectangle &&
-        *active_tool != core::AnnotationToolId::Bubble) {
-        mouse_wheel_delta_remainder_ = 0;
         return 0;
     }
 
@@ -1987,7 +1977,7 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
         mouse_wheel_delta_remainder_ += WHEEL_DELTA;
     }
     if (delta_steps != 0) {
-        (void)Handle_brush_width_delta(delta_steps);
+        (void)Handle_tool_size_delta(delta_steps);
     }
     return 0;
 }
@@ -2013,6 +2003,7 @@ LRESULT OverlayWindow::On_l_button_up() {
                 if (btn.action == ToolbarButtonAction::SelectAnnotationTool &&
                     btn.tool_id.has_value()) {
                     action = controller_.On_select_annotation_tool(*btn.tool_id);
+                    Clear_transient_center_label(false);
                     Apply_action(action);
                 } else if (btn.action == ToolbarButtonAction::ShowHelp) {
                     Show_help_overlay_at_cursor();
@@ -2684,13 +2675,16 @@ LRESULT OverlayWindow::On_paint() {
             input.highlight_handle = last_hover_handle_;
         }
         if (Should_show_brush_cursor_preview()) {
-            input.brush_cursor_preview_width_px = controller_.Brush_width_px();
+            input.brush_cursor_preview_width_px =
+                controller_.Tool_physical_size(*controller_.Active_annotation_tool());
         }
         if (Should_show_square_cursor_preview()) {
             if (controller_.Active_annotation_tool() == core::AnnotationToolId::Arrow) {
-                input.arrow_cursor_preview_width_px = controller_.Brush_width_px();
+                input.arrow_cursor_preview_width_px = controller_.Tool_physical_size(
+                    *controller_.Active_annotation_tool());
             } else {
-                input.square_cursor_preview_width_px = controller_.Brush_width_px();
+                input.square_cursor_preview_width_px = controller_.Tool_physical_size(
+                    *controller_.Active_annotation_tool());
             }
         }
         if (!color_wheel_.visible && !s.final_selection.Is_empty() && !s.dragging &&
@@ -2764,7 +2758,6 @@ LRESULT OverlayWindow::On_destroy() {
     (void)KillTimer(hwnd_, kCaretBlinkTimerId);
     Cancel_highlighter_straighten_pending();
     mouse_wheel_delta_remainder_ = 0;
-    text_wheel_delta_remainder_ = 0;
     suppress_next_lbutton_up_ = false;
     color_wheel_ = {};
     toolbar_buttons_.clear();

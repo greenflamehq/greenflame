@@ -7,28 +7,9 @@ namespace {
 
 constexpr size_t kMaxWindowsPathChars = 260;
 constexpr size_t kMaxConfigPathChars = kMaxWindowsPathChars - 1;
-constexpr int32_t kMinBrushWidthPx = 1;
-constexpr int32_t kMaxBrushWidthPx = 50;
+constexpr int32_t kMinToolSize = 1;
+constexpr int32_t kMaxToolSize = 50;
 constexpr size_t kMaxTextFontFamilyChars = 128;
-constexpr std::array<int32_t, 24> kAllowedTextPointSizes = {{
-    5,  8,  9,  10, 11, 12, 14, 16,  18,  20,  22,  24,
-    26, 28, 36, 48, 72, 84, 96, 108, 144, 192, 216, 288,
-}};
-
-[[nodiscard]] int32_t Normalize_text_point_size(int32_t point_size) noexcept {
-    int32_t nearest = kAllowedTextPointSizes.front();
-    int64_t nearest_distance =
-        std::abs(static_cast<int64_t>(point_size) - static_cast<int64_t>(nearest));
-    for (int32_t const allowed_size : kAllowedTextPointSizes) {
-        int64_t const distance = std::abs(static_cast<int64_t>(point_size) -
-                                          static_cast<int64_t>(allowed_size));
-        if (distance < nearest_distance) {
-            nearest = allowed_size;
-            nearest_distance = distance;
-        }
-    }
-    return nearest;
-}
 
 [[nodiscard]] TextFontChoice
 Normalize_text_font_choice(TextFontChoice choice) noexcept {
@@ -95,7 +76,13 @@ void AppConfig::Normalize() {
     clamp_pattern(filename_pattern_desktop);
     clamp_pattern(filename_pattern_monitor);
     clamp_pattern(filename_pattern_window);
-    brush_width_px = std::clamp(brush_width_px, kMinBrushWidthPx, kMaxBrushWidthPx);
+    freehand_size = std::clamp(freehand_size, kMinToolSize, kMaxToolSize);
+    line_size = std::clamp(line_size, kMinToolSize, kMaxToolSize);
+    arrow_size = std::clamp(arrow_size, kMinToolSize, kMaxToolSize);
+    rect_size = std::clamp(rect_size, kMinToolSize, kMaxToolSize);
+    highlighter_size = std::clamp(highlighter_size, kMinToolSize, kMaxToolSize);
+    bubble_size = std::clamp(bubble_size, kMinToolSize, kMaxToolSize);
+    text_size = std::clamp(text_size, kMinToolSize, kMaxToolSize);
     current_annotation_color_index =
         Clamp_annotation_color_index(current_annotation_color_index);
     current_highlighter_color_index =
@@ -106,7 +93,6 @@ void AppConfig::Normalize() {
     highlighter_pause_straighten_ms = std::max(highlighter_pause_straighten_ms, 0);
     highlighter_pause_straighten_deadzone_px =
         std::max(highlighter_pause_straighten_deadzone_px, 0);
-    text_size_points = Normalize_text_point_size(text_size_points);
     text_current_font = Normalize_text_font_choice(text_current_font);
     bubble_current_font = Normalize_text_font_choice(bubble_current_font);
     Normalize_text_font_family(text_font_sans, TextFontChoice::Sans);
