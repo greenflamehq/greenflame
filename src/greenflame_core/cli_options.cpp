@@ -8,17 +8,18 @@ namespace {
 enum class CliOptionId : uint8_t {
     Region = 0,
     Window = 1,
-    Monitor = 2,
-    Desktop = 3,
-    Help = 4,
-    Version = 5,
-    Output = 6,
-    Format = 7,
-    Padding = 8,
-    PaddingColor = 9,
-    Overwrite = 10,
+    WindowHwnd = 2,
+    Monitor = 3,
+    Desktop = 4,
+    Help = 5,
+    Version = 6,
+    Output = 7,
+    Format = 8,
+    Padding = 9,
+    PaddingColor = 10,
+    Overwrite = 11,
 #ifdef DEBUG
-    Testing12 = 11,
+    Testing12 = 12,
 #endif
 };
 
@@ -61,9 +62,20 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     {
         L"window",
         L"<name>",
-        L"Capture a visible top-level window matching title text.",
+        L"Capture a visible top-level window by title text. A unique exact-title "
+        L"match wins over broader substring matches.",
         L'w',
         CliOptionId::Window,
+        CliOptionValueKind::String,
+        CliOptionGroup::Exclusive,
+        false,
+    },
+    {
+        L"window-hwnd",
+        L"<hex>",
+        L"Capture a visible top-level window by exact HWND in hex.",
+        L'\0',
+        CliOptionId::WindowHwnd,
         CliOptionValueKind::String,
         CliOptionGroup::Exclusive,
         false,
@@ -357,6 +369,41 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     return true;
 }
 
+[[nodiscard]] bool Try_parse_hex_uintptr(std::wstring_view value,
+                                         std::uintptr_t &out) noexcept {
+    std::wstring_view const trimmed = Trim_wspace(value);
+    if (trimmed.empty()) {
+        return false;
+    }
+
+    std::wstring_view digits = trimmed;
+    if (digits.size() >= 2 && digits[0] == L'0' &&
+        (digits[1] == L'x' || digits[1] == L'X')) {
+        digits.remove_prefix(2);
+    }
+    if (digits.empty()) {
+        return false;
+    }
+
+    std::uintptr_t parsed = 0;
+    constexpr std::uintptr_t k_max_before_shift =
+        (std::numeric_limits<std::uintptr_t>::max)() >> 4u;
+    for (wchar_t const ch : digits) {
+        uint8_t nibble = 0;
+        if (!Try_parse_hex_digit(ch, nibble) || parsed > k_max_before_shift) {
+            return false;
+        }
+        parsed = static_cast<std::uintptr_t>((parsed << 4u) |
+                                             static_cast<std::uintptr_t>(nibble));
+    }
+    if (parsed == 0) {
+        return false;
+    }
+
+    out = parsed;
+    return true;
+}
+
 [[nodiscard]] bool Try_parse_padding_color(std::wstring_view value,
                                            COLORREF &color) noexcept {
     constexpr size_t k_hex_color_length = 7;
@@ -532,6 +579,18 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         }
         options.window_name = value;
         return CliParseResult{{}, options, true};
+    case CliOptionId::WindowHwnd: {
+        std::uintptr_t hwnd = 0;
+        if (!Try_parse_hex_uintptr(value, hwnd)) {
+            return Make_error(L"--window-hwnd expects a non-zero hex HWND, optionally "
+                              L"prefixed with 0x.");
+        }
+        if (!Try_set_capture_mode(options, CliCaptureMode::Window, error_message)) {
+            return Make_error(error_message);
+        }
+        options.window_hwnd = hwnd;
+        return CliParseResult{{}, options, true};
+    }
     case CliOptionId::Monitor: {
         int32_t monitor_id = 0;
         if (!Try_parse_int32(value, monitor_id) || monitor_id < 1) {
@@ -639,8 +698,9 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         !options.region_px.has_value()) {
         return Make_error(L"--region value is missing.");
     }
-    if (options.capture_mode == CliCaptureMode::Window && options.window_name.empty()) {
-        return Make_error(L"--window value is missing.");
+    if (options.capture_mode == CliCaptureMode::Window && options.window_name.empty() &&
+        !options.window_hwnd.has_value()) {
+        return Make_error(L"--window or --window-hwnd value is missing.");
     }
     if (options.capture_mode == CliCaptureMode::Monitor && options.monitor_id <= 0) {
         return Make_error(L"--monitor value is missing.");

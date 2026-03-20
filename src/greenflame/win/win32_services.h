@@ -16,6 +16,8 @@ class Win32DisplayQueries final : public IDisplayQueries {
 class Win32WindowInspector final : public IWindowInspector {
   public:
     [[nodiscard]] std::optional<core::RectPx> Get_window_rect(HWND hwnd) const override;
+    [[nodiscard]] std::optional<core::WindowCandidateInfo>
+    Get_window_info(HWND hwnd) const override;
     [[nodiscard]] bool Is_window_valid(HWND hwnd) const override;
     [[nodiscard]] bool Is_window_minimized(HWND hwnd) const override;
     [[nodiscard]] WindowObscuration Get_window_obscuration(HWND hwnd) const override;

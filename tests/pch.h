@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>

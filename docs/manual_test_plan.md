@@ -933,11 +933,15 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Run on: `ENV-A`
 - Steps:
   1. Run `greenflame.exe --window "<unique-title>" --output <file>` against one visible window.
-  2. Open two visible Notepad windows with matching titles and run the command again.
-  3. Minimize the target window and run the command again.
+  2. Create one window titled exactly `Codex` and another whose title merely contains `Codex`, then run `greenflame.exe --window "Codex" --output <file>`.
+  3. Open two visible windows with the same exact title and run `greenflame.exe --window "<title>" --output <file>`.
+  4. Copy one reported `hwnd` from the ambiguity output and rerun with `greenflame.exe --window-hwnd <hex> --output <file>`.
+  5. Minimize the exact target window and rerun the appropriate command.
 - Expected:
   - The single-match case succeeds and saves the target window.
-  - The ambiguous case exits with code `7` and lists matching candidates.
+  - When one exact-title match exists among broader substring matches, `--window "<name>"` selects the exact-title window automatically.
+  - The truly ambiguous case exits with code `7` and lists each candidate with `hwnd`, class, and rect.
+  - `--window-hwnd <hex>` selects the exact reported window even when titles are identical.
   - The minimized case exits with code `13`.
 
 ### GF-MAN-CLI-004 - Window Obscuration And Off-Screen Warnings

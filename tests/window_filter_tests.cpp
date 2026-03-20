@@ -10,6 +10,7 @@ WindowCandidateInfo Make_candidate(std::wstring const &title,
     candidate.title = title;
     candidate.class_name = class_name;
     candidate.rect = RectPx::From_ltrb(left, 20, left + 300, 220);
+    candidate.hwnd_value = static_cast<std::uintptr_t>(left) + 0x1000u;
     return candidate;
 }
 
@@ -59,7 +60,10 @@ TEST(window_filter, Filter_cli_invocation_window_RemovesOnlyInvocationWindows) {
 TEST(window_filter, Format_window_candidate_line_FormatsRectAndIndex) {
     WindowCandidateInfo candidate{};
     candidate.title = L"Notepad";
+    candidate.class_name = L"Notepad";
     candidate.rect = RectPx::From_ltrb(10, 20, 310, 220);
+    candidate.hwnd_value = static_cast<std::uintptr_t>(0x5151u);
     EXPECT_EQ(Format_window_candidate_line(candidate, 1),
-              L"  [2] \"Notepad\" (x=10, y=20, w=300, h=200)");
+              L"  [2] hwnd=0x5151 class=\"Notepad\" title=\"Notepad\" "
+              L"(x=10, y=20, w=300, h=200)");
 }

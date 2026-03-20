@@ -42,6 +42,25 @@ Before considering any task complete:
 
 ---
 
+## Commit Messages
+
+All commits must have a prefix type. Refuse to commit without one — no exceptions.
+
+The four allowed types (all lowercase):
+
+- `fix: one-liner` — bug fix
+- `change: one-liner` — behavioral change
+- `internal: one-liner` — refactor / internal work
+- `feat: short description\n\nbody` — new feature; body explaining the change is required unless the feature is very simple and a one-liner is explicitly requested
+
+`fix`, `change`, and `internal` are one-liners by default; a body is only added if explicitly requested.
+
+If asked to commit as anything other than these four types, ask for clarification unless the user has already explained why.
+
+When asked to commit, the build rules do not apply
+
+---
+
 ## Repository Structure (authoritative)
 
 - `src/greenflame/`
@@ -115,3 +134,4 @@ Breaking these rules is a correctness bug.
 - Keep process/CLI exit codes in a single enum with globally unique numeric values. If codes change, update the README exit-code table.
 - Debug root causes first; avoid adding new abstractions or code paths without clear need.
 - Clang warning hygiene guidance lives in `docs/build.md`.
+

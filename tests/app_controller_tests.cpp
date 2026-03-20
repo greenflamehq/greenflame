@@ -41,6 +41,8 @@ class MockWindowInspector : public IWindowInspector {
 
     MOCK_METHOD(std::optional<core::RectPx>, Get_window_rect, (HWND),
                 (const, override));
+    MOCK_METHOD(std::optional<core::WindowCandidateInfo>, Get_window_info, (HWND),
+                (const, override));
     MOCK_METHOD(bool, Is_window_valid, (HWND), (const, override));
     MOCK_METHOD(bool, Is_window_minimized, (HWND), (const, override));
     MOCK_METHOD(WindowObscuration, Get_window_obscuration, (HWND), (const, override));
@@ -117,6 +119,18 @@ Make_save_request(core::RectPx source_rect, core::InsetsPx padding = {},
     request.fill_color = fill_color;
     request.preserve_source_extent = preserve_source_extent;
     return request;
+}
+
+[[nodiscard]] WindowMatch Make_window_match(HWND hwnd, std::wstring_view title,
+                                            std::wstring_view class_name,
+                                            core::RectPx rect) {
+    WindowMatch match{};
+    match.hwnd = hwnd;
+    match.info.title = std::wstring(title);
+    match.info.class_name = std::wstring(class_name);
+    match.info.rect = rect;
+    match.info.hwnd_value = reinterpret_cast<std::uintptr_t>(hwnd);
+    return match;
 }
 
 } // namespace
@@ -279,6 +293,139 @@ TEST(app_controller, cli_window_mode_filters_invocation_window_and_saves) {
     EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
     EXPECT_THAT(result.stdout_message, HasSubstr(L"Saved: C:\\shots\\note.png"));
     EXPECT_TRUE(result.stderr_message.empty());
+}
+
+TEST(app_controller, cli_window_mode_prefers_unique_exact_title_match) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_name = L"Codex";
+    options.output_path = L"C:\\shots\\codex.png";
+    options.overwrite_output = true;
+
+    HWND const exact_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x5151));
+    HWND const broader_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x6262));
+    RectPx const exact_rect = RectPx::From_ltrb(10, 20, 210, 220);
+    RectPx const broader_rect = RectPx::From_ltrb(40, 50, 340, 260);
+    WindowMatch const broader = Make_window_match(
+        broader_hwnd, L"*screenshot-2026-03-20_141317-Codex.png - Paint.NET 5.1.12",
+        L"PaintDotNet", broader_rect);
+    WindowMatch const exact =
+        Make_window_match(exact_hwnd, L"Codex", L"Chrome_WidgetWin_1", exact_rect);
+
+    EXPECT_CALL(fixture.windows, Find_windows_by_title(Eq(std::wstring_view{L"Codex"})))
+        .WillOnce(Return(std::vector<WindowMatch>{broader, exact}));
+    EXPECT_CALL(fixture.windows, Is_window_valid(exact_hwnd)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.windows, Is_window_minimized(exact_hwnd))
+        .WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_window_rect(exact_hwnd))
+        .WillOnce(Return(exact_rect));
+    EXPECT_CALL(fixture.windows, Get_window_obscuration(exact_hwnd))
+        .WillOnce(Return(WindowObscuration::None));
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(RectPx::From_ltrb(0, 0, 1920, 1080)));
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\codex.png"})))
+        .WillOnce(Return(L"C:\\shots\\codex.png"));
+    EXPECT_CALL(fixture.capture,
+                Save_rect_to_file(Make_save_request(exact_rect),
+                                  Eq(std::wstring_view{L"C:\\shots\\codex.png"}),
+                                  ImageSaveFormat::Png))
+        .WillOnce(Return(true));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_TRUE(result.stderr_message.empty());
+}
+
+TEST(app_controller, cli_window_mode_ambiguous_output_includes_hwnd_class_and_rect) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_name = L"Codex";
+
+    WindowMatch const match_a = Make_window_match(
+        reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1111)), L"Codex",
+        L"Chrome_WidgetWin_1", RectPx::From_ltrb(10, 20, 210, 220));
+    WindowMatch const match_b =
+        Make_window_match(reinterpret_cast<HWND>(static_cast<uintptr_t>(0x2222)),
+                          L"Codex", L"Notepad", RectPx::From_ltrb(30, 40, 330, 240));
+
+    EXPECT_CALL(fixture.windows, Find_windows_by_title(Eq(std::wstring_view{L"Codex"})))
+        .WillOnce(Return(std::vector<WindowMatch>{match_a, match_b}));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowAmbiguous);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"hwnd=0x1111"));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"class=\"Chrome_WidgetWin_1\""));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"(x=10, y=20, w=200, h=200)"));
+}
+
+TEST(app_controller, cli_window_hwnd_mode_selects_exact_window) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_hwnd = static_cast<std::uintptr_t>(0x5151u);
+    options.output_path = L"C:\\shots\\hwnd.png";
+    options.overwrite_output = true;
+
+    HWND const hwnd = reinterpret_cast<HWND>(*options.window_hwnd);
+    RectPx const rect = RectPx::From_ltrb(10, 20, 210, 220);
+    core::WindowCandidateInfo info{};
+    info.title = L"Codex";
+    info.class_name = L"Chrome_WidgetWin_1";
+    info.rect = rect;
+    info.hwnd_value = *options.window_hwnd;
+
+    EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_window_info(hwnd)).WillOnce(Return(info));
+    EXPECT_CALL(fixture.windows, Get_window_obscuration(hwnd))
+        .WillOnce(Return(WindowObscuration::None));
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\hwnd.png"})))
+        .WillOnce(Return(L"C:\\shots\\hwnd.png"));
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(RectPx::From_ltrb(0, 0, 1920, 1080)));
+    EXPECT_CALL(fixture.capture,
+                Save_rect_to_file(Make_save_request(rect),
+                                  Eq(std::wstring_view{L"C:\\shots\\hwnd.png"}),
+                                  ImageSaveFormat::Png))
+        .WillOnce(Return(true));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_TRUE(result.stderr_message.empty());
+}
+
+TEST(app_controller, cli_window_hwnd_mode_fails_when_handle_invalid) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_hwnd = static_cast<std::uintptr_t>(0xDEADu);
+
+    HWND const hwnd = reinterpret_cast<HWND>(*options.window_hwnd);
+    EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(false));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowUnavailable);
+    EXPECT_FALSE(result.stderr_message.empty());
+}
+
+TEST(app_controller, cli_window_hwnd_mode_fails_when_not_visible_toplevel) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_hwnd = static_cast<std::uintptr_t>(0xDEADu);
+
+    HWND const hwnd = reinterpret_cast<HWND>(*options.window_hwnd);
+    EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_window_info(hwnd)).WillOnce(Return(std::nullopt));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowUnavailable);
+    EXPECT_FALSE(result.stderr_message.empty());
 }
 
 TEST(app_controller,

@@ -40,6 +40,8 @@ class IWindowInspector {
     virtual ~IWindowInspector() = default;
     [[nodiscard]] virtual std::optional<core::RectPx>
     Get_window_rect(HWND hwnd) const = 0;
+    [[nodiscard]] virtual std::optional<core::WindowCandidateInfo>
+    Get_window_info(HWND hwnd) const = 0;
     [[nodiscard]] virtual bool Is_window_valid(HWND hwnd) const = 0;
     [[nodiscard]] virtual bool Is_window_minimized(HWND hwnd) const = 0;
     [[nodiscard]] virtual WindowObscuration Get_window_obscuration(HWND hwnd) const = 0;

@@ -10,6 +10,7 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
     EXPECT_EQ(result.options.action, CliAction::None);
     EXPECT_FALSE(result.options.region_px.has_value());
+    EXPECT_FALSE(result.options.window_hwnd.has_value());
     EXPECT_FALSE(result.options.padding_px.has_value());
     EXPECT_FALSE(result.options.padding_color_override.has_value());
     EXPECT_TRUE(result.options.output_path.empty());
@@ -73,6 +74,28 @@ TEST(cli_options, CLI_parser_AcceptsWindowAndOutput) {
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::Window);
     EXPECT_EQ(result.options.window_name, L"Notepad");
     EXPECT_EQ(result.options.output_path, L"C:\\tmp\\shot");
+}
+
+TEST(cli_options, CLI_parser_AcceptsWindowHwnd) {
+    std::vector<std::wstring> args = {L"--window-hwnd", L"0x1234ABCD"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.options.capture_mode, CliCaptureMode::Window);
+    ASSERT_TRUE(result.options.window_hwnd.has_value());
+    EXPECT_EQ(*result.options.window_hwnd, static_cast<std::uintptr_t>(0x1234ABCDu));
+    EXPECT_TRUE(result.options.window_name.empty());
+}
+
+TEST(cli_options, CLI_parser_RejectsInvalidWindowHwnd) {
+    for (std::vector<std::wstring> const &args :
+         {std::vector<std::wstring>{L"--window-hwnd", L"0"},
+          std::vector<std::wstring>{L"--window-hwnd", L"xyz"},
+          std::vector<std::wstring>{L"--window-hwnd", L"0x"}}) {
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"--window-hwnd expects"),
+                  std::wstring::npos);
+    }
 }
 
 TEST(cli_options, CLI_parser_AcceptsPaddingSingleValue) {
@@ -256,10 +279,14 @@ TEST(cli_options, CLI_parser_AcceptsOverwrite) {
 }
 
 TEST(cli_options, CLI_parser_RejectsMutuallyExclusiveModes) {
-    std::vector<std::wstring> args = {L"--desktop", L"--monitor", L"1"};
-    CliParseResult const result = Parse_cli_arguments(args, false);
-    EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"Only one mode"), std::wstring::npos);
+    for (std::vector<std::wstring> const &args :
+         {std::vector<std::wstring>{L"--desktop", L"--monitor", L"1"},
+          std::vector<std::wstring>{L"--window", L"Notepad", L"--window-hwnd",
+                                    L"0x1234"}}) {
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"Only one mode"), std::wstring::npos);
+    }
 }
 
 TEST(cli_options, CLI_parser_AcceptsHelp) {
@@ -305,6 +332,7 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     std::wstring const help_release = Build_cli_help_text(false);
     EXPECT_NE(help_release.find(L"--region"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--window"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--window-hwnd"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--monitor"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--desktop"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--help"), std::wstring::npos);

@@ -35,6 +35,7 @@ struct CliOptions final {
     std::optional<RectPx> region_px = std::nullopt;
     std::optional<InsetsPx> padding_px = std::nullopt;
     std::optional<COLORREF> padding_color_override = std::nullopt;
+    std::optional<std::uintptr_t> window_hwnd = std::nullopt;
     int32_t monitor_id = 0; // 1-based.
     std::optional<CliOutputFormat> output_format = std::nullopt;
     CliAction action = CliAction::None;

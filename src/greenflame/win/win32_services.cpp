@@ -14,6 +14,46 @@ struct WindowSearchState {
     bool had_exception = false;
 };
 
+[[nodiscard]] std::optional<greenflame::core::WindowCandidateInfo>
+Try_get_window_candidate_info(HWND hwnd, greenflame::IWindowQuery const &window_query) {
+    if (IsWindow(hwnd) == 0 || IsWindowVisible(hwnd) == 0 ||
+        GetParent(hwnd) != nullptr) {
+        return std::nullopt;
+    }
+
+    std::optional<greenflame::core::RectPx> const rect =
+        window_query.Get_window_rect(hwnd);
+    if (!rect.has_value()) {
+        return std::nullopt;
+    }
+
+    int const title_len = GetWindowTextLengthW(hwnd);
+    std::wstring title = {};
+    if (title_len > 0) {
+        title.resize(static_cast<size_t>(title_len) + 1u);
+        int const copied =
+            GetWindowTextW(hwnd, title.data(), static_cast<int>(title.size()));
+        if (copied <= 0) {
+            return std::nullopt;
+        }
+        title.resize(static_cast<size_t>(copied));
+    }
+
+    wchar_t class_name_buffer[256] = {};
+    int const class_name_len = GetClassNameW(hwnd, class_name_buffer, 256);
+    std::wstring class_name = {};
+    if (class_name_len > 0) {
+        class_name.assign(class_name_buffer, static_cast<size_t>(class_name_len));
+    }
+
+    greenflame::core::WindowCandidateInfo info{};
+    info.title = std::move(title);
+    info.class_name = std::move(class_name);
+    info.rect = *rect;
+    info.hwnd_value = reinterpret_cast<std::uintptr_t>(hwnd);
+    return info;
+}
+
 BOOL CALLBACK Enum_windows_by_title_proc(HWND hwnd, LPARAM lparam) noexcept {
     auto *state = reinterpret_cast<WindowSearchState *>(lparam);
     if (state == nullptr) {
@@ -25,46 +65,22 @@ BOOL CALLBACK Enum_windows_by_title_proc(HWND hwnd, LPARAM lparam) noexcept {
             return TRUE;
         }
 
-        int const title_len = GetWindowTextLengthW(hwnd);
-        if (title_len <= 0) {
-            return TRUE;
-        }
-
-        std::wstring title(static_cast<size_t>(title_len) + 1, L'\0');
-        int const copied =
-            GetWindowTextW(hwnd, title.data(), static_cast<int>(title.size()));
-        if (copied <= 0) {
-            return TRUE;
-        }
-        title.resize(static_cast<size_t>(copied));
-
-        if (!greenflame::core::Contains_no_case(title, state->needle)) {
-            return TRUE;
-        }
-
-        wchar_t class_name_buffer[256] = {};
-        int const class_name_len = GetClassNameW(hwnd, class_name_buffer, 256);
-        std::wstring class_name = {};
-        if (class_name_len > 0) {
-            class_name.assign(class_name_buffer, static_cast<size_t>(class_name_len));
-        }
-
         if (state->window_query == nullptr) {
             return FALSE;
         }
 
-        std::optional<greenflame::core::RectPx> const rect =
-            state->window_query->Get_window_rect(hwnd);
-        if (!rect.has_value()) {
+        std::optional<greenflame::core::WindowCandidateInfo> const info =
+            Try_get_window_candidate_info(hwnd, *state->window_query);
+        if (!info.has_value() || info->title.empty()) {
             return TRUE;
         }
 
-        greenflame::core::WindowCandidateInfo info{};
-        info.title = title;
-        info.class_name = class_name;
-        info.rect = *rect;
+        std::wstring const &title = info->title;
+        if (!greenflame::core::Contains_no_case(title, state->needle)) {
+            return TRUE;
+        }
 
-        state->matches.push_back(greenflame::WindowMatch{info, hwnd});
+        state->matches.push_back(greenflame::WindowMatch{*info, hwnd});
         return TRUE;
     } catch (...) {
         state->had_exception = true;
@@ -122,6 +138,11 @@ Win32DisplayQueries::Get_monitors_with_bounds() const {
 
 std::optional<core::RectPx> Win32WindowInspector::Get_window_rect(HWND hwnd) const {
     return window_query_.Get_window_rect(hwnd);
+}
+
+std::optional<core::WindowCandidateInfo>
+Win32WindowInspector::Get_window_info(HWND hwnd) const {
+    return Try_get_window_candidate_info(hwnd, window_query_);
 }
 
 bool Win32WindowInspector::Is_window_valid(HWND hwnd) const {

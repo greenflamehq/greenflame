@@ -21,6 +21,8 @@ A selection scheme inspired by [Greenshot](https://greenshot.org/)
 
 Press the **Print Screen** key, or **left-click** the tray icon to start an interactive capture. Alternatively, **right-click** the tray icon and choose a capture mode from the context menu.
 
+---
+
 ### Selecting a region
 
 In interactive mode, the screen is captured and a region is selected:
@@ -40,6 +42,8 @@ With **no annotation tool selected** (the default mode):
 - **Click and drag an annotation** to **select** and **move** it.
 - A **selected line or arrow annotation** shows draggable endpoint handles you can drag to reshape it.
 - A **selected rectangle annotation** shows draggable resize handles on the corners and sides.
+
+---
 
 ### Annotation tools
 
@@ -150,7 +154,8 @@ You can also run one-shot command-line modes (at most one mode per invocation):
 | Option | Meaning |
 |---|---|
 | `-r, --region <x,y,w,h>` | Capture an explicit physical-pixel region |
-| `-w, --window <name>` | Capture a visible top-level window whose title matches `<name>` (case-insensitive contains) |
+| `-w, --window <name>` | Capture a visible top-level window by title text; a unique exact-title match wins over broader substring matches |
+| `--window-hwnd <hex>` | Capture a visible top-level window by exact hex HWND |
 | `-m, --monitor <id>` | Capture monitor by 1-based id |
 | `-d, --desktop` | Capture the full virtual desktop |
 | `-h, --help` | Show help and exit |
@@ -177,6 +182,7 @@ greenflame.exe --desktop --padding 12
 greenflame.exe --monitor 2 --output "D:\shots\monitor2.png"
 greenflame.exe --monitor 2 --padding 24,12 --padding-color "#ffffff"
 greenflame.exe --window "Notepad" --output "D:\shots\note" --format jpg
+greenflame.exe --window-hwnd 0x0000000000123456 --output "D:\shots\exact-window.png"
 greenflame.exe --window "Notepad" --output "D:\shots\note.jpg" --overwrite
 greenflame.exe --window="Notepad" --output "D:\shots\note"
 greenflame.exe --region 1200,100,800,600
@@ -196,7 +202,15 @@ greenflame.exe --region 1200,100,800,600 --padding 8,16,24,32
   2. `save.padding_color` from config
   3. default black (`#000000`)
 
-**A few notes on output format resolution**
+**Window matching**
+
+- `--window <name>` still starts with a case-insensitive substring search.
+- If that search finds exactly one case-insensitive exact-title match, Greenflame
+  captures that exact-title window automatically.
+- If multiple windows still remain ambiguous, the error output lists each candidate
+  with its `hwnd`, window class, and rect so you can rerun with `--window-hwnd`.
+
+**Output format**
 
 1. If `--output` has a supported extension (`.png`, `.jpg`, `.jpeg`, `.bmp`), that extension defines the format.
 2. Otherwise, if `--format` is provided, `--format` defines the format.

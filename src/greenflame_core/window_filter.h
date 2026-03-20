@@ -8,6 +8,7 @@ struct WindowCandidateInfo final {
     std::wstring title = {};
     std::wstring class_name = {};
     RectPx rect = {};
+    std::uintptr_t hwnd_value = 0;
 };
 
 [[nodiscard]] bool Is_terminal_window_class(std::wstring_view class_name) noexcept;

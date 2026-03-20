@@ -88,6 +88,22 @@ Try_compute_padded_output_size(greenflame::core::RectPx const &source_rect,
     return padding.Try_expand_size(source_width, source_height, width, height);
 }
 
+[[nodiscard]] std::optional<size_t>
+Find_unique_exact_title_match(std::vector<greenflame::WindowMatch> const &matches,
+                              std::wstring_view query) noexcept {
+    std::optional<size_t> exact_match_index = std::nullopt;
+    for (size_t i = 0; i < matches.size(); ++i) {
+        if (!greenflame::core::Equals_no_case(matches[i].info.title, query)) {
+            continue;
+        }
+        if (exact_match_index.has_value()) {
+            return std::nullopt;
+        }
+        exact_match_index = i;
+    }
+    return exact_match_index;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -287,6 +303,39 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         source = core::SaveSelectionSource::Region;
         break;
     case core::CliCaptureMode::Window: {
+        if (cli_options.window_hwnd.has_value()) {
+            HWND const requested_hwnd =
+                reinterpret_cast<HWND>(*cli_options.window_hwnd);
+            if (!window_inspector_.Is_window_valid(requested_hwnd)) {
+                return Make_cli_error(
+                    ProcessExitCode::CliWindowUnavailable,
+                    L"Error: Specified window handle is not available. Try again.");
+            }
+            if (window_inspector_.Is_window_minimized(requested_hwnd)) {
+                return Make_cli_error(
+                    ProcessExitCode::CliWindowMinimized,
+                    L"Error: Specified window handle is minimized. Restore it and "
+                    L"try again.");
+            }
+
+            std::optional<core::WindowCandidateInfo> const window_info =
+                window_inspector_.Get_window_info(requested_hwnd);
+            if (!window_info.has_value()) {
+                return Make_cli_error(
+                    ProcessExitCode::CliWindowUnavailable,
+                    L"Error: Specified window handle is not a visible top-level "
+                    L"window. Try again.");
+            }
+
+            captured_window = requested_hwnd;
+            target_rect = window_info->rect;
+            window_title = window_info->title;
+            source = core::SaveSelectionSource::Window;
+            window_obscuration =
+                window_inspector_.Get_window_obscuration(*captured_window);
+            break;
+        }
+
         std::vector<WindowMatch> const raw_matches =
             window_inspector_.Find_windows_by_title(cli_options.window_name);
 
@@ -303,20 +352,28 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
             message += cli_options.window_name;
             return Make_cli_error(ProcessExitCode::CliWindowNotFound, message);
         }
+
+        size_t selected_match_index = 0;
         if (matches.size() > 1) {
-            std::wstring stderr_text = L"Error: Window name is ambiguous (";
-            stderr_text += std::to_wstring(matches.size());
-            stderr_text += L" matches): ";
-            stderr_text += cli_options.window_name;
-            Append_line(stderr_text, L"Matching windows:");
-            for (size_t i = 0; i < matches.size(); ++i) {
-                Append_line(stderr_text,
-                            core::Format_window_candidate_line(matches[i].info, i));
+            std::optional<size_t> const exact_match_index =
+                Find_unique_exact_title_match(matches, cli_options.window_name);
+            if (exact_match_index.has_value()) {
+                selected_match_index = *exact_match_index;
+            } else {
+                std::wstring stderr_text = L"Error: Window name is ambiguous (";
+                stderr_text += std::to_wstring(matches.size());
+                stderr_text += L" matches): ";
+                stderr_text += cli_options.window_name;
+                Append_line(stderr_text, L"Matching windows:");
+                for (size_t i = 0; i < matches.size(); ++i) {
+                    Append_line(stderr_text,
+                                core::Format_window_candidate_line(matches[i].info, i));
+                }
+                return Make_cli_error(ProcessExitCode::CliWindowAmbiguous, stderr_text);
             }
-            return Make_cli_error(ProcessExitCode::CliWindowAmbiguous, stderr_text);
         }
 
-        captured_window = matches.front().hwnd;
+        captured_window = matches[selected_match_index].hwnd;
         if (!window_inspector_.Is_window_valid(*captured_window)) {
             return Make_cli_error(
                 ProcessExitCode::CliWindowUnavailable,
@@ -337,7 +394,7 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         }
 
         target_rect = *current_rect;
-        window_title = matches.front().info.title;
+        window_title = matches[selected_match_index].info.title;
         source = core::SaveSelectionSource::Window;
         window_obscuration = window_inspector_.Get_window_obscuration(*captured_window);
         break;
