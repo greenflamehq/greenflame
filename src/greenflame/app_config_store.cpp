@@ -352,12 +352,12 @@ core::AppConfig Load_app_config() {
 
         if (root.has_key("tools")) {
             easyjson::JSON const &tools = root["tools"];
-            if (tools.has_key("freehand")) {
-                easyjson::JSON const &freehand = tools["freehand"];
+            if (tools.has_key("brush")) {
+                easyjson::JSON const &freehand = tools["brush"];
                 if (freehand.has_key("size")) {
                     int32_t parsed = 0;
                     if (Read_int_from_json(freehand["size"], parsed)) {
-                        config.freehand_size = parsed;
+                        config.brush_size = parsed;
                     }
                 }
             }
@@ -545,7 +545,7 @@ bool Save_app_config(core::AppConfig const &config) {
             }
         }
 
-        bool wrote_tools = config.freehand_size != defaults.freehand_size ||
+        bool wrote_tools = config.brush_size != defaults.brush_size ||
                            config.line_size != defaults.line_size ||
                            config.arrow_size != defaults.arrow_size ||
                            config.rect_size != defaults.rect_size ||
@@ -574,8 +574,8 @@ bool Save_app_config(core::AppConfig const &config) {
 
         if (wrote_tools) {
             root["tools"] = easyjson::object();
-            if (config.freehand_size != defaults.freehand_size) {
-                root["tools"]["freehand"]["size"] = config.freehand_size;
+            if (config.brush_size != defaults.brush_size) {
+                root["tools"]["brush"]["size"] = config.brush_size;
             }
             if (config.line_size != defaults.line_size) {
                 root["tools"]["line"]["size"] = config.line_size;

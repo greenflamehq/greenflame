@@ -809,7 +809,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         controller_.Set_tool_size_step(tool, step);
     };
     if (config_ != nullptr) {
-        tool_step(core::AnnotationToolId::Freehand, config_->freehand_size);
+        tool_step(core::AnnotationToolId::Freehand, config_->brush_size);
         tool_step(core::AnnotationToolId::Line, config_->line_size);
         tool_step(core::AnnotationToolId::Arrow, config_->arrow_size);
         tool_step(core::AnnotationToolId::Rectangle, config_->rect_size);
@@ -818,8 +818,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         tool_step(core::AnnotationToolId::Bubble, config_->bubble_size);
         tool_step(core::AnnotationToolId::Text, config_->text_size);
     } else {
-        tool_step(core::AnnotationToolId::Freehand,
-                  core::AppConfig::kDefaultFreehandSize);
+        tool_step(core::AnnotationToolId::Freehand, core::AppConfig::kDefaultBrushSize);
         tool_step(core::AnnotationToolId::Line, core::AppConfig::kDefaultLineSize);
         tool_step(core::AnnotationToolId::Arrow, core::AppConfig::kDefaultArrowSize);
         tool_step(core::AnnotationToolId::Rectangle, core::AppConfig::kDefaultRectSize);
@@ -902,7 +901,7 @@ bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
         int32_t const new_step = controller_.Tool_size_step(*active_tool);
         switch (*active_tool) {
         case core::AnnotationToolId::Freehand:
-            config_->freehand_size = new_step;
+            config_->brush_size = new_step;
             break;
         case core::AnnotationToolId::Line:
             config_->line_size = new_step;

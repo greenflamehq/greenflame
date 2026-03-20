@@ -178,7 +178,7 @@ greenflame.exe --window="Notepad" --output "D:\shots\note"
 greenflame.exe --region 1200,100,800,600
 ```
 
-**A note on output format resolution**
+**A few notes on output format resolution**
 
 1. If `--output` has a supported extension (`.png`, `.jpg`, `.jpeg`, `.bmp`), that extension defines the format.
 2. Otherwise, if `--format` is provided, `--format` defines the format.
@@ -228,10 +228,11 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 
 | Key | Default | Meaning |
 |---|---|---|
-| `tools.freehand.size` | `2` | Brush tool size step (1–50). |
+| `tools.brush.size` | `2` | Brush tool size step (1–50). |
 | `tools.line.size` | `2` | Line tool size step (1–50). |
 | `tools.arrow.size` | `2` | Arrow tool size step (1–50). |
-| `tools.rect.size` | `2` | Rectangle and Ellipse tool size step (1–50). |
+| `tools.rect.size` | `2` | Rectangle tool size step (1–50). |
+| `tools.ellipse.size` | `2` | Ellipse tool size step (1–50). |
 | `tools.colors` | Object with slot index keys (e.g. `{"4": "#ff00ff"}`) | Annotation color wheel slots (indices 0–7). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
 | `tools.font.sans` | `Arial` | Font family for the `sans` slot (shared by Text and Bubble tools). |
@@ -272,7 +273,6 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
     "tool_size_overlay_duration_ms": 800
   },
   "tools": {
-    "current_size": 2,
     "font": {
       "sans": "Arial",
       "serif": "Times New Roman",
@@ -289,7 +289,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
       "pause_straighten_deadzone_px": 0
     },
     "text": {
-      "size_points": 12,
+      "size": 14,
       "current_font": "sans"
     },
     "bubble": {

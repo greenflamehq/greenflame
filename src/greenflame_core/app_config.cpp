@@ -76,7 +76,7 @@ void AppConfig::Normalize() {
     clamp_pattern(filename_pattern_desktop);
     clamp_pattern(filename_pattern_monitor);
     clamp_pattern(filename_pattern_window);
-    freehand_size = std::clamp(freehand_size, kMinToolSize, kMaxToolSize);
+    brush_size = std::clamp(brush_size, kMinToolSize, kMaxToolSize);
     line_size = std::clamp(line_size, kMinToolSize, kMaxToolSize);
     arrow_size = std::clamp(arrow_size, kMinToolSize, kMaxToolSize);
     rect_size = std::clamp(rect_size, kMinToolSize, kMaxToolSize);

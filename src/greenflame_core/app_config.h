@@ -6,7 +6,7 @@
 namespace greenflame::core {
 
 struct AppConfig final {
-    static constexpr int32_t kDefaultFreehandSize = 2;
+    static constexpr int32_t kDefaultBrushSize = 2;
     static constexpr int32_t kDefaultLineSize = 2;
     static constexpr int32_t kDefaultArrowSize = 2;
     static constexpr int32_t kDefaultRectSize = 2;
@@ -24,7 +24,7 @@ struct AppConfig final {
     std::wstring filename_pattern_monitor = {};
     std::wstring filename_pattern_window = {};
     std::wstring default_save_format = {}; // "png" (default), "jpg"/"jpeg", or "bmp".
-    int32_t freehand_size = kDefaultFreehandSize;
+    int32_t brush_size = kDefaultBrushSize;
     int32_t line_size = kDefaultLineSize;
     int32_t arrow_size = kDefaultArrowSize;
     int32_t rect_size = kDefaultRectSize;

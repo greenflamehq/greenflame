@@ -4,7 +4,7 @@ using namespace greenflame::core;
 
 TEST(app_config, Normalize_ClampsToolSizesToMinimum) {
     AppConfig config{};
-    config.freehand_size = 0;
+    config.brush_size = 0;
     config.line_size = 0;
     config.arrow_size = 0;
     config.rect_size = 0;
@@ -18,7 +18,7 @@ TEST(app_config, Normalize_ClampsToolSizesToMinimum) {
 
     config.Normalize();
 
-    EXPECT_EQ(config.freehand_size, 1);
+    EXPECT_EQ(config.brush_size, 1);
     EXPECT_EQ(config.line_size, 1);
     EXPECT_EQ(config.arrow_size, 1);
     EXPECT_EQ(config.rect_size, 1);
@@ -33,7 +33,7 @@ TEST(app_config, Normalize_ClampsToolSizesToMinimum) {
 
 TEST(app_config, Normalize_ClampsToolSizesToMaximum) {
     AppConfig config{};
-    config.freehand_size = 500;
+    config.brush_size = 500;
     config.line_size = 500;
     config.arrow_size = 500;
     config.rect_size = 500;
@@ -47,7 +47,7 @@ TEST(app_config, Normalize_ClampsToolSizesToMaximum) {
 
     config.Normalize();
 
-    EXPECT_EQ(config.freehand_size, 50);
+    EXPECT_EQ(config.brush_size, 50);
     EXPECT_EQ(config.line_size, 50);
     EXPECT_EQ(config.arrow_size, 50);
     EXPECT_EQ(config.rect_size, 50);
