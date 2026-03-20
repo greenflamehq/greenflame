@@ -15,9 +15,13 @@ A selection scheme inspired by [Greenshot](https://greenshot.org/)
 
 ## Usage
 
+### Starting a capture
+
 **Run** `greenflame.exe`. The executable sits in the tray.
 
 Press the **Print Screen** key, or **left-click** the tray icon to start an interactive capture. Alternatively, **right-click** the tray icon and choose a capture mode from the context menu.
+
+### Selecting a region
 
 In interactive mode, the screen is captured and a region is selected:
 
@@ -29,47 +33,94 @@ In interactive mode, the screen is captured and a region is selected:
 Once a region is selected:
 
 - **Drag the handles** on the selection to resize (hold **Alt** to disable snapping).
-- With **no annotation tool selected** (the default mode), **click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
-- With **no annotation tool selected**, **click and drag an annotation** to **select** and **move** it.
-- With **no annotation tool selected**, a **selected line or arrow annotation** shows draggable endpoint handles you can drag to reshape it.
-- With **no annotation tool selected**, a **selected rectangle annotation** shows draggable resize handles on the corners and sides.
-- Press **B** or use the toolbar to toggle the **Brush tool** on or off.
-- Press **H** or use the toolbar to toggle the **Highlighter tool** on or off.
-- Press **L** or use the toolbar to toggle the **Line tool** on or off.
-- Press **A** or use the toolbar to toggle the **Arrow tool** on or off.
-- Press **R** or use the toolbar to toggle the **Rectangle tool** on or off.
-- Press **Shift+R** or use the toolbar to toggle the **Filled Rectangle tool** on or off.
-- Press **E** or use the toolbar to toggle the **Ellipse tool** on or off.
-- Press **Shift+E** or use the toolbar to toggle the **Filled Ellipse tool** on or off.
-- Press **T** or use the toolbar to toggle the **Text tool** on or off.
-- Press **N** or use the toolbar to toggle the **Bubble tool** on or off.
-- With an annotation tool active, **right-click** anywhere to open the active tool's **color wheel** at the cursor. **Left-click** a segment to select that color, or press **Escape** to dismiss the wheel.
-- With any stroke or size tool active (**Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Ellipse**, **Bubble**, or **Text**), use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent size step that is persisted separately.
-- With the **Text tool** active and no draft open, **left-click inside the selection** to start a text annotation at the click point.
-- With the **Text tool** active and no draft open, **right-click** opens a **12-segment text style wheel**: 8 annotation-color slots on the left half and 4 font choices on the right half.
-- With the **Text tool** active and no draft open, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change text size step (1–50, mapped to 5–288 pt). The chosen step is persisted.
-- With the **Bubble tool** active, **left-click inside the selection** to place a numbered circle. The number auto-increments with each placement and decrements on undo. **Right-click** opens a **12-segment style wheel**: 8 annotation-color slots on the left half and 4 font choices on the right half. The number color is chosen automatically for contrast (black on light fills, white on dark fills).
-- With the **Brush** or **Bubble tool** active, the overlay shows an anti-aliased circular size preview around the cursor hotspot.
-- With the **Highlighter tool** active, the overlay shows an anti-aliased axis-aligned square size preview around the cursor hotspot.
-- While drawing a **Highlighter** stroke, holding the mouse still for `tools.highlighter.pause_straighten_ms` milliseconds (default 800 ms) snaps the stroke to a straight bar from the start point to the cursor. After snapping, the end of the bar tracks the mouse live until release. The snap is one-way — it cannot be reverted to freehand. Setting `pause_straighten_ms` to `0` makes every stroke start as a straight bar immediately.
-- With the **Line** or **Arrow** tool active, the overlay shows an anti-aliased square size preview around the cursor hotspot aligned to the current line direction.
-- The **Rectangle**, **Filled Rectangle**, **Ellipse**, and **Filled Ellipse** tools do not draw a cursor size preview overlay.
-- While editing text, **Ctrl+A / Ctrl+C / Ctrl+X / Ctrl+V** work on the active draft, and **Ctrl-Z / Ctrl-Shift-Z** affect only that draft.
-- While editing text, **Ctrl+B**, **Ctrl+I**, **Ctrl+U**, and **Alt+Shift+5** toggle bold, italic, underline, and strikethrough.
-- While editing text, **Insert** toggles insert/overwrite mode, **Ctrl+Enter** inserts a newline, **Enter** commits the draft, and **Escape** cancels the draft while keeping the Text tool armed.
-- Clicking outside a text draft commits it if it has text, otherwise discards it. Clicking a toolbar button behaves the same way before applying the button action.
-- Committed text annotations can be selected, moved, and deleted, but they are not re-editable as live text.
-- **Delete** ➜ remove the selected annotation.
-- **Ctrl-Z** ➜ undo the last region or annotation change.
-- **Ctrl-Shift-Z** ➜ redo the last undone region or annotation change.
-- **Ctrl-S** ➜ save directly (no dialog) to the configured default save folder as the configured format (default PNG), then close.
-- **Ctrl-Shift-S** ➜ open **Save As** dialog, then save and close.
-- **Ctrl-Alt-S** ➜ save directly (no dialog), copy the saved file to the clipboard, then close.
-- **Ctrl-Shift-Alt-S** ➜ open **Save As** dialog, save, copy the saved file to the clipboard, then close.
-- **Ctrl-C** ➜ copy the selection to the clipboard, then close.
-- **Escape** ➜ cancel or go back.
+
+With **no annotation tool selected** (the default mode):
+
+- **Click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
+- **Click and drag an annotation** to **select** and **move** it.
+- A **selected line or arrow annotation** shows draggable endpoint handles you can drag to reshape it.
+- A **selected rectangle annotation** shows draggable resize handles on the corners and sides.
+
+### Annotation tools
+
+Press a hotkey or use the toolbar to toggle a tool on or off.
+
+| Hotkey | Tool |
+|--------|------|
+| **B** | Brush |
+| **H** | Highlighter |
+| **L** | Line |
+| **A** | Arrow |
+| **R** | Rectangle |
+| **Shift+R** | Filled Rectangle |
+| **E** | Ellipse |
+| **Shift+E** | Filled Ellipse |
+| **T** | Text |
+| **N** | Bubble |
+
+**Bubble:** Left-click inside the selection to place a numbered circle. The number auto-increments with each placement and decrements on undo. Right-click opens a style wheel; a central hub switches it between 8 color slots and 4 font choices. The number color is chosen automatically for contrast (black on light fills, white on dark fills).
+
+**Highlighter:** While drawing, holding the mouse still for 800 ms snaps the stroke to a straight bar from the start point to the cursor. After snapping, the end of the bar tracks the mouse live until release — the snap is one-way and cannot be reverted to freehand. The wait time is configurable via `tools.highlighter.pause_straighten_ms` (see [Configuration](#configuration)); setting it to `0` makes every stroke start as a straight bar immediately.
+
+### Tool options
+
+**Color:** With an annotation tool active, **right-click** anywhere to open that tool's **color wheel** at the cursor. Left-click a segment to select a color, or press **Escape** to dismiss. For Text and Bubble, the wheel has a central hub that switches between 8 color slots and 4 font choices.
+
+**Size:** With any stroke tool active (**Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Ellipse**, **Bubble**, or **Text**), use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent size step, persisted separately.
+
+**Cursor previews:**
+
+- **Brush** and **Bubble** — anti-aliased circular preview around the cursor hotspot.
+- **Highlighter**, **Line**, **Rectangle**, and **Ellipse** — anti-aliased axis-aligned square preview around the cursor hotspot.
+- **Arrow** — anti-aliased square preview aligned to the current arrow direction.
+- **Text** — the letter "A" in the current font and size, shown beside the cursor hotspot.
+- **Filled Rectangle** and **Filled Ellipse** — no cursor preview.
+
+### Text tool
+
+With the Text tool active and no draft open:
+
+- **Left-click inside the selection** to start a text annotation at the click point.
+- **Right-click** to open a style wheel. A central hub switches between 8 annotation-color slots and 4 font choices.
+- **Mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change text size step (1–50, mapped to 5–288 pt). The chosen step is persisted.
+
+While editing a draft:
+
+| Shortcut | Action |
+|----------|--------|
+| **Ctrl+A / C / X / V** | Clipboard operations on the draft |
+| **Ctrl-Z / Ctrl-Shift-Z** | Undo / redo within the draft |
+| **Ctrl+B / I / U** | Bold / italic / underline |
+| **Alt+Shift+5** | Strikethrough |
+| **Insert** | Toggle insert / overwrite mode |
+| **Ctrl+Enter** | Insert a newline |
+| **Enter** | Commit the draft |
+| **Escape** | Cancel the draft, keep Text tool armed |
+
+Clicking outside a draft commits it if it has text, otherwise discards it. Clicking a toolbar button does the same before applying the button action.
+
+Committed text annotations can be selected, moved, and deleted, but are not re-editable as live text.
+
+### Saving and copying
+
+| Shortcut | Action |
+|----------|--------|
+| **Ctrl-S** | Save directly to the configured default save folder in the configured format, then close |
+| **Ctrl-Shift-S** | Open **Save As** dialog, then save and close |
+| **Ctrl-Alt-S** | Save directly in the configured format, copy the saved file to the clipboard, then close |
+| **Ctrl-Shift-Alt-S** | Open **Save As** dialog, save, copy the saved file to the clipboard, then close |
+| **Ctrl-C** | Copy the selection to the clipboard, then close |
 
 **Save As** supports **PNG**, **JPEG**, and **BMP**.
+
+### Other shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| **Delete** | Remove the selected annotation |
+| **Ctrl-Z** | Undo the last region or annotation change |
+| **Ctrl-Shift-Z** | Redo the last undone region or annotation change |
+| **Escape** | Cancel or go back |
 
 ---
 
@@ -164,7 +215,7 @@ codes are unique and not reused.
 
 Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.config\greenflame\greenflame.json`).
 
-### All config keys
+### UI settings (`ui.*`)
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -172,26 +223,36 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `ui.show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
 | `ui.show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
 | `ui.tool_size_overlay_duration_ms` | `800` | How long the centered tool-size overlay stays visible after a stroke-width change. `0` disables it. |
-| `tools.freehand.size` | `2` | Brush tool size step (1–50). Physical stroke width = step px. |
-| `tools.line.size` | `2` | Line tool size step (1–50). Physical stroke width = step px. |
-| `tools.arrow.size` | `2` | Arrow tool size step (1–50). Physical stroke width = step px. |
-| `tools.rect.size` | `2` | Rectangle and Ellipse tool size step (1–50). Physical stroke width = step px. |
+
+### Tool settings (`tools.*`)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `tools.freehand.size` | `2` | Brush tool size step (1–50). |
+| `tools.line.size` | `2` | Line tool size step (1–50). |
+| `tools.arrow.size` | `2` | Arrow tool size step (1–50). |
+| `tools.rect.size` | `2` | Rectangle and Ellipse tool size step (1–50). |
 | `tools.colors` | Object with slot index keys (e.g. `{"4": "#ff00ff"}`) | Annotation color wheel slots (indices 0–7). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.current_color` | `0` | Current annotation color slot index, clamped to `0..7`. |
 | `tools.font.sans` | `Arial` | Font family for the `sans` slot (shared by Text and Bubble tools). |
 | `tools.font.serif` | `Times New Roman` | Font family for the `serif` slot. |
 | `tools.font.mono` | `Courier New` | Font family for the `mono` slot. |
 | `tools.font.art` | `Comic Sans MS` | Font family for the `art` slot. |
-| `tools.highlighter.size` | `10` | Highlighter size step (1–50). Physical stroke width = step + 10 px (11–60 px). |
+| `tools.highlighter.size` | `10` | Highlighter size step (1–50). |
 | `tools.highlighter.colors` | Object with slot index keys (e.g. `{"2": "#ffb44d"}`) | Highlighter color wheel slots (indices 0–5). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.highlighter.current_color` | `0` | Current Highlighter color slot index, clamped to `0..5`. |
 | `tools.highlighter.opacity_percent` | `50` | Default Highlighter opacity for live preview, save output, and clipboard output. Values are clamped to `0..100`. |
 | `tools.highlighter.pause_straighten_ms` | `800` | After the mouse is still for this many milliseconds during a highlighter stroke, the stroke snaps to a straight bar (start to cursor). `0` means always straight. |
 | `tools.highlighter.pause_straighten_deadzone_px` | `0` | Mouse must move more than this many physical pixels from the last timer-reset position before the pause timer resets. `0` means any movement resets the timer. |
-| `tools.text.size` | `10` | Text tool size step (1–50), mapped to point sizes 5–288 pt via a quasi-logarithmic table. Default step 10 = 14 pt. |
+| `tools.text.size` | `10` | Text tool size step (1–50). |
 | `tools.text.current_font` | `sans` | Active font slot for the Text tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
-| `tools.bubble.size` | `10` | Bubble size step (1–50). Physical circle diameter = step + 20 px (21–70 px). |
+| `tools.bubble.size` | `10` | Bubble size step (1–50). |
 | `tools.bubble.current_font` | `sans` | Active font slot for the Bubble tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
+
+### Save settings (`save.*`)
+
+| Key | Default | Meaning |
+|---|---|---|
 | `save.default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
 | `save.last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
 | `save.default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
@@ -200,7 +261,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `save.filename_pattern_monitor` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}` | Default filename pattern for monitor captures. |
 | `save.filename_pattern_window` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-${title}` | Default filename pattern for window captures. |
 
-Example:
+### Example
 
 ```json
 {
@@ -251,9 +312,7 @@ Example:
 
 Saved files use one pattern per capture type and Greenshot-style `${VARIABLE}` placeholders.
 
-#### Filename patterns
-
-##### Supported variables
+#### Supported variables
 
 | Variable | Expansion | Example |
 |----------|-----------|---------|
@@ -268,7 +327,7 @@ Saved files use one pattern per capture type and Greenshot-style `${VARIABLE}` p
 | `${monitor}` | 1-based monitor number | `2` |
 | `${num}` | Incrementing counter (6-digit, zero-padded, next available by directory scan) | `000042` |
 
-##### Default patterns
+#### Default patterns
 
 | Capture type | Default pattern | Example output |
 |---|---|---|
@@ -283,7 +342,6 @@ Saved files use one pattern per capture type and Greenshot-style `${VARIABLE}` p
 
 - Build instructions: [docs/build.md](docs/build.md)
 - Test instructions: [docs/testing.md](docs/testing.md)
-- Agent-specific repository rules: [AGENTS.md](AGENTS.md)
 
 ---
 
