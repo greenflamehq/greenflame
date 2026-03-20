@@ -32,6 +32,16 @@ bool Save_capture_to_bmp(GdiCaptureResult const &capture, wchar_t const *path);
 bool Crop_capture(GdiCaptureResult const &source, int left, int top, int width,
                   int height, GdiCaptureResult &out);
 
+// Creates a 32bpp top-down DIB of the requested size and fills it with a solid color.
+// Caller must call out.Free() when done.
+bool Create_solid_capture(int width, int height, COLORREF fill_color,
+                          GdiCaptureResult &out);
+
+// Copies a rectangular region from source into dest using SRCCOPY.
+// Returns false if either rect is empty or out of bounds.
+bool Blit_capture(GdiCaptureResult const &source, int src_left, int src_top, int width,
+                  int height, GdiCaptureResult &dest, int dst_left, int dst_top);
+
 // Copies a 32bpp capture to clipboard using CF_DIB. Returns true on success.
 // If owner_window is null, the current task owns the clipboard while open.
 bool Copy_capture_to_clipboard(GdiCaptureResult const &capture, HWND owner_window);

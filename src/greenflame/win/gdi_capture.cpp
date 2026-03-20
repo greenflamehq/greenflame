@@ -168,6 +168,94 @@ bool Crop_capture(GdiCaptureResult const &source, int left, int top, int width,
     return ok;
 }
 
+bool Create_solid_capture(int width, int height, COLORREF fill_color,
+                          GdiCaptureResult &out) {
+    out.Free();
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    HDC const dc = GetDC(nullptr);
+    if (!dc) {
+        return false;
+    }
+
+    bool ok = false;
+    HBITMAP dib = nullptr;
+    HDC const mem_dc = CreateCompatibleDC(dc);
+    if (mem_dc) {
+        BITMAPINFOHEADER bmi;
+        Fill_bmi32_top_down(bmi, width, height);
+        void *bits = nullptr;
+        dib = CreateDIBSection(dc, reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS,
+                               &bits, nullptr, 0);
+        if (dib && bits) {
+            HGDIOBJ const old = SelectObject(mem_dc, dib);
+            if (old && old != HGDI_ERROR) {
+                HBRUSH const brush = CreateSolidBrush(fill_color);
+                if (brush != nullptr) {
+                    RECT const rect = {0, 0, width, height};
+                    ok = FillRect(mem_dc, &rect, brush) != 0;
+                    DeleteObject(brush);
+                }
+                SelectObject(mem_dc, old);
+            }
+        }
+        DeleteDC(mem_dc);
+    }
+    ReleaseDC(nullptr, dc);
+
+    if (ok) {
+        out.bitmap = dib;
+        out.width = width;
+        out.height = height;
+    } else if (dib) {
+        DeleteObject(dib);
+    }
+    return ok;
+}
+
+bool Blit_capture(GdiCaptureResult const &source, int src_left, int src_top, int width,
+                  int height, GdiCaptureResult &dest, int dst_left, int dst_top) {
+    if (!source.Is_valid() || !dest.Is_valid() || width <= 0 || height <= 0 ||
+        src_left < 0 || src_top < 0 || dst_left < 0 || dst_top < 0 ||
+        src_left + width > source.width || src_top + height > source.height ||
+        dst_left + width > dest.width || dst_top + height > dest.height) {
+        return false;
+    }
+
+    HDC const dc = GetDC(nullptr);
+    if (!dc) {
+        return false;
+    }
+
+    bool ok = false;
+    HDC const src_dc = CreateCompatibleDC(dc);
+    HDC const dst_dc = CreateCompatibleDC(dc);
+    if (src_dc && dst_dc) {
+        HGDIOBJ const old_src = SelectObject(src_dc, source.bitmap);
+        HGDIOBJ const old_dst = SelectObject(dst_dc, dest.bitmap);
+        if (old_src && old_src != HGDI_ERROR && old_dst && old_dst != HGDI_ERROR) {
+            ok = BitBlt(dst_dc, dst_left, dst_top, width, height, src_dc, src_left,
+                        src_top, SRCCOPY) != 0;
+        }
+        if (old_dst && old_dst != HGDI_ERROR) {
+            SelectObject(dst_dc, old_dst);
+        }
+        if (old_src && old_src != HGDI_ERROR) {
+            SelectObject(src_dc, old_src);
+        }
+    }
+    if (dst_dc) {
+        DeleteDC(dst_dc);
+    }
+    if (src_dc) {
+        DeleteDC(src_dc);
+    }
+    ReleaseDC(nullptr, dc);
+    return ok;
+}
+
 bool Copy_capture_to_clipboard(GdiCaptureResult const &capture, HWND owner_window) {
     if (!capture.Is_valid()) {
         return false;

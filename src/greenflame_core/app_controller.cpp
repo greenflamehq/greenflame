@@ -42,6 +42,15 @@ Pattern_for_source(greenflame::core::AppConfig const &config,
     return greenflame::core::ImageSaveFormat::Png;
 }
 
+[[nodiscard]] COLORREF
+Resolve_padding_color(greenflame::core::AppConfig const &config,
+                      greenflame::core::CliOptions const &cli_options) noexcept {
+    if (cli_options.padding_color_override.has_value()) {
+        return *cli_options.padding_color_override;
+    }
+    return config.padding_color;
+}
+
 void Update_default_save_dir_from_path(greenflame::core::AppConfig &config,
                                        std::wstring_view full_path) {
     size_t const slash = full_path.find_last_of(L"\\/");
@@ -65,6 +74,18 @@ void Append_line(std::wstring &text, std::wstring_view line) {
     result.exit_code = code;
     result.stderr_message = std::wstring(message);
     return result;
+}
+
+[[nodiscard]] bool
+Try_compute_padded_output_size(greenflame::core::RectPx const &source_rect,
+                               greenflame::core::InsetsPx padding, int32_t &width,
+                               int32_t &height) noexcept {
+    int32_t source_width = 0;
+    int32_t source_height = 0;
+    if (!source_rect.Try_get_size(source_width, source_height)) {
+        return false;
+    }
+    return padding.Try_expand_size(source_width, source_height, width, height);
 }
 
 } // namespace
@@ -252,6 +273,9 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
     std::optional<HWND> captured_window = std::nullopt;
     WindowObscuration window_obscuration = WindowObscuration::None;
     bool window_partially_out_of_bounds = false;
+    bool const has_padding = cli_options.padding_px.has_value();
+    core::InsetsPx const padding_px = cli_options.padding_px.value_or(core::InsetsPx{});
+    COLORREF const padding_color = Resolve_padding_color(config_, cli_options);
 
     switch (cli_options.capture_mode) {
     case core::CliCaptureMode::Region:
@@ -316,13 +340,6 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         window_title = matches.front().info.title;
         source = core::SaveSelectionSource::Window;
         window_obscuration = window_inspector_.Get_window_obscuration(*captured_window);
-
-        core::RectPx const virtual_bounds =
-            display_queries_.Get_virtual_desktop_bounds_px();
-        std::optional<core::RectPx> const clipped_to_virtual =
-            core::RectPx::Clip(target_rect, virtual_bounds);
-        window_partially_out_of_bounds =
-            clipped_to_virtual.has_value() && *clipped_to_virtual != target_rect;
         break;
     }
     case core::CliCaptureMode::Monitor: {
@@ -350,6 +367,16 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         break;
     case core::CliCaptureMode::None:
         return {};
+    }
+
+    [[maybe_unused]] int32_t padded_output_width = 0;
+    [[maybe_unused]] int32_t padded_output_height = 0;
+    if (has_padding &&
+        !Try_compute_padded_output_size(target_rect, padding_px, padded_output_width,
+                                        padded_output_height)) {
+        return Make_cli_error(
+            ProcessExitCode::CliCaptureSaveFailed,
+            L"Error: Requested padded output dimensions are invalid or too large.");
     }
 
     core::ImageSaveFormat const default_format =
@@ -408,30 +435,11 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
     }
 
     std::wstring stderr_text = {};
-    if (window_obscuration == WindowObscuration::Full) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is fully obscured by other windows. "
-                    L"The saved image may not show that window.");
-    } else if (window_obscuration == WindowObscuration::Partial &&
-               window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially obscured and partially "
-                    L"outside visible desktop bounds. The saved image may include "
-                    L"other windows and may clip the target window.");
-    } else if (window_obscuration == WindowObscuration::Partial) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially obscured by other "
-                    L"windows. The saved image may include those windows.");
-    } else if (window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially outside visible desktop "
-                    L"bounds. The saved image may clip the target window.");
-    }
-
     core::RectPx const virtual_bounds =
         display_queries_.Get_virtual_desktop_bounds_px();
     std::optional<core::RectPx> const clipped =
         core::RectPx::Clip(target_rect, virtual_bounds);
+    window_partially_out_of_bounds = clipped.has_value() && *clipped != target_rect;
     if (!clipped.has_value()) {
         if (delete_output_path_on_failure) {
             file_system_service_.Delete_file_if_exists(output_path);
@@ -448,7 +456,38 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         return CliResult{{}, stderr_text, ProcessExitCode::CliCaptureSaveFailed};
     }
 
-    if (!capture_service_.Save_rect_to_file(target_rect, output_path, output_format)) {
+    if (window_obscuration == WindowObscuration::Full) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is fully obscured by other windows. "
+                    L"The saved image may not show that window.");
+    } else if (!has_padding && window_obscuration == WindowObscuration::Partial &&
+               window_partially_out_of_bounds) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is partially obscured and partially "
+                    L"outside visible desktop bounds. The saved image may include "
+                    L"other windows and may clip the target window.");
+    } else if (window_obscuration == WindowObscuration::Partial) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is partially obscured by other "
+                    L"windows. The saved image may include those windows.");
+    } else if (!has_padding && window_partially_out_of_bounds) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is partially outside visible desktop "
+                    L"bounds. The saved image may clip the target window.");
+    }
+    if (has_padding && window_partially_out_of_bounds) {
+        Append_line(stderr_text,
+                    L"Warning: Requested capture area extends outside the virtual "
+                    L"desktop. Uncovered areas were filled with the padding color.");
+    }
+
+    core::CaptureSaveRequest save_request{};
+    save_request.source_rect_screen = target_rect;
+    save_request.padding_px = padding_px;
+    save_request.fill_color = padding_color;
+    save_request.preserve_source_extent = has_padding;
+
+    if (!capture_service_.Save_rect_to_file(save_request, output_path, output_format)) {
         if (delete_output_path_on_failure) {
             file_system_service_.Delete_file_if_exists(output_path);
         }

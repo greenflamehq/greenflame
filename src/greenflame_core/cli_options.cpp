@@ -1,4 +1,5 @@
 #include "greenflame_core/cli_options.h"
+#include "greenflame_core/color_wheel.h"
 
 namespace greenflame::core {
 
@@ -13,9 +14,11 @@ enum class CliOptionId : uint8_t {
     Version = 5,
     Output = 6,
     Format = 7,
-    Overwrite = 8,
+    Padding = 8,
+    PaddingColor = 9,
+    Overwrite = 10,
 #ifdef DEBUG
-    Testing12 = 9,
+    Testing12 = 11,
 #endif
 };
 
@@ -121,6 +124,27 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
         L"Output image format. Accepts png, jpg/jpeg, or bmp.",
         L't',
         CliOptionId::Format,
+        CliOptionValueKind::String,
+        CliOptionGroup::Optional,
+        false,
+    },
+    {
+        L"padding",
+        L"<n|h,v|l,t,r,b>",
+        L"Add synthetic padding around the captured image in physical pixels.",
+        L'p',
+        CliOptionId::Padding,
+        CliOptionValueKind::String,
+        CliOptionGroup::Optional,
+        false,
+    },
+    {
+        L"padding-color",
+        L"<#rrggbb>",
+        L"Override the padding color for this invocation only. Valid only with "
+        L"--padding.",
+        L'\0',
+        CliOptionId::PaddingColor,
         CliOptionValueKind::String,
         CliOptionGroup::Optional,
         false,
@@ -249,6 +273,113 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
 
     region = RectPx::From_ltrb(x, y, static_cast<int32_t>(right64),
                                static_cast<int32_t>(bottom64));
+    return true;
+}
+
+[[nodiscard]] bool Try_parse_padding(std::wstring_view value,
+                                     InsetsPx &padding) noexcept {
+    std::array<std::wstring_view, 4> parts = {};
+    size_t part_count = 0;
+    size_t segment_start = 0;
+
+    for (size_t i = 0; i <= value.size(); ++i) {
+        if (i != value.size() && value[i] != L',') {
+            continue;
+        }
+        if (part_count >= parts.size()) {
+            return false;
+        }
+        parts[part_count++] =
+            Trim_wspace(value.substr(segment_start, i - segment_start));
+        segment_start = i + 1;
+    }
+
+    if (part_count != 1 && part_count != 2 && part_count != 4) {
+        return false;
+    }
+
+    std::array<int32_t, 4> parsed = {};
+    for (size_t i = 0; i < part_count; ++i) {
+        if (!Try_parse_int32(parts[i], parsed[i]) || parsed[i] < 0) {
+            return false;
+        }
+    }
+
+    if (part_count == 1) {
+        if (parsed[0] <= 0) {
+            return false;
+        }
+        padding = InsetsPx{parsed[0], parsed[0], parsed[0], parsed[0]};
+        return true;
+    }
+
+    if (part_count == 2) {
+        if (parsed[0] == 0 && parsed[1] == 0) {
+            return false;
+        }
+        padding = InsetsPx{parsed[0], parsed[1], parsed[0], parsed[1]};
+        return true;
+    }
+
+    if (parsed[0] == 0 && parsed[1] == 0 && parsed[2] == 0 && parsed[3] == 0) {
+        return false;
+    }
+    padding = InsetsPx{parsed[0], parsed[1], parsed[2], parsed[3]};
+    return true;
+}
+
+[[nodiscard]] bool Try_parse_hex_digit(wchar_t ch, uint8_t &value) noexcept {
+    if (ch >= L'0' && ch <= L'9') {
+        value = static_cast<uint8_t>(ch - L'0');
+        return true;
+    }
+    if (ch >= L'a' && ch <= L'f') {
+        value = static_cast<uint8_t>(10 + (ch - L'a'));
+        return true;
+    }
+    if (ch >= L'A' && ch <= L'F') {
+        value = static_cast<uint8_t>(10 + (ch - L'A'));
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] bool Try_parse_hex_byte(std::wstring_view value, uint8_t &out) noexcept {
+    if (value.size() != 2) {
+        return false;
+    }
+    uint8_t high = 0;
+    uint8_t low = 0;
+    if (!Try_parse_hex_digit(value[0], high) || !Try_parse_hex_digit(value[1], low)) {
+        return false;
+    }
+    out = static_cast<uint8_t>((high << 4u) | low);
+    return true;
+}
+
+[[nodiscard]] bool Try_parse_padding_color(std::wstring_view value,
+                                           COLORREF &color) noexcept {
+    constexpr size_t k_hex_color_length = 7;
+    constexpr size_t k_red_offset = 1;
+    constexpr size_t k_green_offset = 3;
+    constexpr size_t k_blue_offset = 5;
+    constexpr size_t k_hex_byte_length = 2;
+
+    std::wstring_view const trimmed = Trim_wspace(value);
+    if (trimmed.size() != k_hex_color_length || trimmed[0] != L'#') {
+        return false;
+    }
+
+    uint8_t red = 0;
+    uint8_t green = 0;
+    uint8_t blue = 0;
+    if (!Try_parse_hex_byte(trimmed.substr(k_red_offset, k_hex_byte_length), red) ||
+        !Try_parse_hex_byte(trimmed.substr(k_green_offset, k_hex_byte_length), green) ||
+        !Try_parse_hex_byte(trimmed.substr(k_blue_offset, k_hex_byte_length), blue)) {
+        return false;
+    }
+
+    color = Make_colorref(red, green, blue);
     return true;
 }
 
@@ -447,6 +578,32 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         options.output_format = format;
         return CliParseResult{{}, options, true};
     }
+    case CliOptionId::Padding: {
+        InsetsPx padding{};
+        if (!Try_parse_padding(value, padding)) {
+            return Make_error(L"--padding expects one value n>0, two values h,v "
+                              L"with h>=0 and v>=0 and at least one >0, or "
+                              L"four values l,t,r,b with each >=0 and at least "
+                              L"one >0.");
+        }
+        if (options.padding_px.has_value()) {
+            return Make_error(L"--padding can only be specified once.");
+        }
+        options.padding_px = padding;
+        return CliParseResult{{}, options, true};
+    }
+    case CliOptionId::PaddingColor: {
+        COLORREF color = static_cast<COLORREF>(0);
+        if (!Try_parse_padding_color(value, color)) {
+            return Make_error(L"--padding-color expects a color value in the form "
+                              L"#rrggbb.");
+        }
+        if (options.padding_color_override.has_value()) {
+            return Make_error(L"--padding-color can only be specified once.");
+        }
+        options.padding_color_override = color;
+        return CliParseResult{{}, options, true};
+    }
     case CliOptionId::Overwrite:
         options.overwrite_output = true;
         return CliParseResult{{}, options, true};
@@ -469,6 +626,14 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         return Make_error(
             L"--format requires one capture mode: --region, --window, --monitor, "
             L"or --desktop.");
+    }
+    if (options.padding_px.has_value() && !Is_capture_mode(options.capture_mode)) {
+        return Make_error(
+            L"--padding requires one capture mode: --region, --window, --monitor, "
+            L"or --desktop.");
+    }
+    if (options.padding_color_override.has_value() && !options.padding_px.has_value()) {
+        return Make_error(L"--padding-color requires --padding.");
     }
     if (options.capture_mode == CliCaptureMode::Region &&
         !options.region_px.has_value()) {

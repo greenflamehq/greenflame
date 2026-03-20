@@ -1,4 +1,5 @@
 #include "greenflame_core/cli_options.h"
+#include "greenflame_core/color_wheel.h"
 
 using namespace greenflame::core;
 
@@ -9,6 +10,8 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
     EXPECT_EQ(result.options.action, CliAction::None);
     EXPECT_FALSE(result.options.region_px.has_value());
+    EXPECT_FALSE(result.options.padding_px.has_value());
+    EXPECT_FALSE(result.options.padding_color_override.has_value());
     EXPECT_TRUE(result.options.output_path.empty());
     EXPECT_FALSE(result.options.output_format.has_value());
     EXPECT_FALSE(result.options.overwrite_output);
@@ -70,6 +73,112 @@ TEST(cli_options, CLI_parser_AcceptsWindowAndOutput) {
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::Window);
     EXPECT_EQ(result.options.window_name, L"Notepad");
     EXPECT_EQ(result.options.output_path, L"C:\\tmp\\shot");
+}
+
+TEST(cli_options, CLI_parser_AcceptsPaddingSingleValue) {
+    std::vector<std::wstring> args = {L"--desktop", L"--padding", L"12"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    ASSERT_TRUE(result.options.padding_px.has_value());
+    EXPECT_EQ(*result.options.padding_px, (InsetsPx{12, 12, 12, 12}));
+}
+
+TEST(cli_options, CLI_parser_AcceptsPaddingShortOptionAndTwoValueForm) {
+    std::vector<std::wstring> args = {L"--monitor", L"2", L"-p", L"8,16"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    ASSERT_TRUE(result.options.padding_px.has_value());
+    EXPECT_EQ(*result.options.padding_px, (InsetsPx{8, 16, 8, 16}));
+}
+
+TEST(cli_options, CLI_parser_AcceptsPaddingFourValueFormAndColorOverride) {
+    std::vector<std::wstring> args = {L"--region", L"10,20,30,40",     L"--padding",
+                                      L"1,2,3,4",  L"--padding-color", L"#AaBbCc"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    ASSERT_TRUE(result.options.padding_px.has_value());
+    ASSERT_TRUE(result.options.padding_color_override.has_value());
+    EXPECT_EQ(*result.options.padding_px, (InsetsPx{1, 2, 3, 4}));
+    EXPECT_EQ(*result.options.padding_color_override, Make_colorref(0xAA, 0xBB, 0xCC));
+}
+
+TEST(cli_options, CLI_parser_AcceptsPaddingWithWhitespaceAroundCommas) {
+    std::vector<std::wstring> args = {L"--desktop", L"--padding", L" 4 , 8 "};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    ASSERT_TRUE(result.options.padding_px.has_value());
+    EXPECT_EQ(*result.options.padding_px, (InsetsPx{4, 8, 4, 8}));
+}
+
+TEST(cli_options, CLI_parser_RejectsZeroOnlyPadding) {
+    for (std::vector<std::wstring> const &args :
+         {std::vector<std::wstring>{L"--desktop", L"--padding", L"0"},
+          std::vector<std::wstring>{L"--desktop", L"--padding", L"0,0"},
+          std::vector<std::wstring>{L"--desktop", L"--padding", L"0,0,0,0"}}) {
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"--padding expects"), std::wstring::npos);
+    }
+}
+
+TEST(cli_options, CLI_parser_RejectsNegativePaddingAndThreeValuePadding) {
+    {
+        std::vector<std::wstring> args = {L"--desktop", L"--padding", L"-1"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"--padding expects"), std::wstring::npos);
+    }
+    {
+        std::vector<std::wstring> args = {L"--desktop", L"--padding", L"1,2,3"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"--padding expects"), std::wstring::npos);
+    }
+}
+
+TEST(cli_options, CLI_parser_RejectsPaddingWithoutCaptureMode) {
+    std::vector<std::wstring> args = {L"--padding", L"4"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--padding requires one capture mode"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsPaddingColorWithoutPadding) {
+    std::vector<std::wstring> args = {L"--desktop", L"--padding-color", L"#112233"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--padding-color requires --padding"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsInvalidPaddingColorAndDuplicates) {
+    {
+        std::vector<std::wstring> args = {L"--desktop", L"--padding", L"4",
+                                          L"--padding-color", L"#12345"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"--padding-color expects"),
+                  std::wstring::npos);
+    }
+    {
+        std::vector<std::wstring> args = {L"--desktop", L"--padding", L"4",
+                                          L"--padding", L"8"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(L"--padding can only be specified once"),
+                  std::wstring::npos);
+    }
+    {
+        std::vector<std::wstring> args = {
+            L"--desktop", L"--padding",       L"4",      L"--padding-color",
+            L"#112233",   L"--padding-color", L"#445566"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(
+            result.error_message.find(L"--padding-color can only be specified once"),
+            std::wstring::npos);
+    }
 }
 
 TEST(cli_options, CLI_parser_AcceptsShortMonitor) {
@@ -202,6 +311,8 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"--version"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--output"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--format"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"-p, --padding"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--padding-color"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--overwrite"), std::wstring::npos);
     EXPECT_EQ(help_release.find(L"--testing-1-2"), std::wstring::npos);
 

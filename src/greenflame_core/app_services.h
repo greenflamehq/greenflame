@@ -6,6 +6,19 @@
 #include "greenflame_core/window_filter.h"
 #include "greenflame_core/window_query.h"
 
+namespace greenflame::core {
+
+struct CaptureSaveRequest final {
+    RectPx source_rect_screen = {};
+    InsetsPx padding_px = {};
+    COLORREF fill_color = static_cast<COLORREF>(0);
+    bool preserve_source_extent = false;
+
+    constexpr bool operator==(const CaptureSaveRequest &) const noexcept = default;
+};
+
+} // namespace greenflame::core
+
 namespace greenflame {
 
 struct WindowMatch final {
@@ -42,9 +55,9 @@ class ICaptureService {
   public:
     virtual ~ICaptureService() = default;
     [[nodiscard]] virtual bool Copy_rect_to_clipboard(core::RectPx screen_rect) = 0;
-    [[nodiscard]] virtual bool Save_rect_to_file(core::RectPx screen_rect,
-                                                 std::wstring_view path,
-                                                 core::ImageSaveFormat format) = 0;
+    [[nodiscard]] virtual bool
+    Save_rect_to_file(core::CaptureSaveRequest const &request, std::wstring_view path,
+                      core::ImageSaveFormat format) = 0;
 };
 
 class IFileSystemService {

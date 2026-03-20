@@ -848,6 +848,19 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The chosen text size step persists after closing and reopening the app.
   - The new draft starts with the previously chosen mapped point size.
 
+### GF-MAN-CFG-009 - CLI Padding Color Config
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Set `save.padding_color` to a non-default value such as `#ffffff`.
+  2. Run `greenflame.exe --desktop --padding 12 --output <file>`.
+  3. Inspect the outer padding in the saved image.
+  4. Change `save.padding_color` back to `#000000` and repeat.
+- Expected:
+  - The saved image uses the configured `save.padding_color` when `--padding` is present.
+  - Changing `save.padding_color` changes the rendered padding on the next CLI capture.
+
 ## Mixed-DPI And Multi-Monitor
 
 ### GF-MAN-DPI-001 - Mixed-DPI Pointer Alignment
@@ -954,3 +967,20 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The overwrite case succeeds and replaces the file.
   - The extensionless path resolves to a `.jpg` file.
   - The command exits without starting a tray instance.
+
+### GF-MAN-CLI-006 - Padding Color Override And Off-Desktop Fill
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Run `greenflame.exe --region <x,y,w,h> --padding 12 --output <file>` and confirm synthetic padding is added around the saved image.
+  2. Run `greenflame.exe --window "<unique-title>" --padding 8,16,24,32 --output <file>`.
+  3. Run `greenflame.exe --monitor <id> --padding 12 --padding-color "#ffffff" --output <file>`.
+  4. Place a target so part of the requested capture area lies outside the virtual desktop, then rerun the padded command.
+  5. Run `greenflame.exe --monitor <id> --padding 12 --padding-color "#00ff00" --output <file>.png` and inspect the saved PNG in a viewer that shows transparency distinctly.
+- Expected:
+  - Padded captures preserve the nominal captured image size and add the requested outer padding.
+  - `--padding-color` overrides the configured padding color for that invocation only.
+  - Off-desktop portions of the nominal capture area are filled with the same padding color instead of being clipped away.
+  - When off-desktop fill occurs, `stderr` includes the fill warning and the command still succeeds if any capturable pixels exist.
+  - The saved PNG padding is an opaque solid color, not transparent or semi-transparent.

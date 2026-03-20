@@ -506,6 +506,13 @@ core::AppConfig Load_app_config() {
             read_string("filename_pattern_monitor", config.filename_pattern_monitor);
             read_string("filename_pattern_window", config.filename_pattern_window);
             read_string("default_save_format", config.default_save_format);
+            if (save.has_key("padding_color") &&
+                save["padding_color"].JSON_type() == easyjson::JSON::Class::String) {
+                COLORREF parsed = 0;
+                if (Try_parse_color(save["padding_color"].to_string(), parsed)) {
+                    config.padding_color = parsed;
+                }
+            }
         }
     } catch (...) {
         // Parse error or file read error: return default config.
@@ -689,7 +696,8 @@ bool Save_app_config(core::AppConfig const &config) {
                           !config.filename_pattern_desktop.empty() ||
                           !config.filename_pattern_monitor.empty() ||
                           !config.filename_pattern_window.empty() ||
-                          !config.default_save_format.empty();
+                          !config.default_save_format.empty() ||
+                          config.padding_color != defaults.padding_color;
 
         if (wrote_save) {
             root["save"] = easyjson::object();
@@ -718,6 +726,9 @@ bool Save_app_config(core::AppConfig const &config) {
             if (!config.default_save_format.empty()) {
                 root["save"]["default_save_format"] =
                     To_utf8(config.default_save_format);
+            }
+            if (config.padding_color != defaults.padding_color) {
+                root["save"]["padding_color"] = To_hex_color(config.padding_color);
             }
         }
 

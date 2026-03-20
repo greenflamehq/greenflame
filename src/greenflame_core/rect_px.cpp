@@ -1,6 +1,37 @@
 #include "rect_px.h"
 
 namespace greenflame::core {
+bool RectPx::Try_get_size(int32_t &w, int32_t &h) const noexcept {
+    int64_t const w64 = static_cast<int64_t>(right) - static_cast<int64_t>(left);
+    int64_t const h64 = static_cast<int64_t>(bottom) - static_cast<int64_t>(top);
+    if (w64 <= 0 || h64 <= 0 || w64 > static_cast<int64_t>(INT32_MAX) ||
+        h64 > static_cast<int64_t>(INT32_MAX)) {
+        return false;
+    }
+    w = static_cast<int32_t>(w64);
+    h = static_cast<int32_t>(h64);
+    return true;
+}
+
+bool InsetsPx::Try_expand_size(int32_t source_w, int32_t source_h, int32_t &out_w,
+                               int32_t &out_h) const noexcept {
+    if (left < 0 || top < 0 || right < 0 || bottom < 0 || source_w <= 0 ||
+        source_h <= 0) {
+        return false;
+    }
+    int64_t const w64 = static_cast<int64_t>(source_w) + static_cast<int64_t>(left) +
+                        static_cast<int64_t>(right);
+    int64_t const h64 = static_cast<int64_t>(source_h) + static_cast<int64_t>(top) +
+                        static_cast<int64_t>(bottom);
+    if (w64 > static_cast<int64_t>(INT32_MAX) ||
+        h64 > static_cast<int64_t>(INT32_MAX)) {
+        return false;
+    }
+    out_w = static_cast<int32_t>(w64);
+    out_h = static_cast<int32_t>(h64);
+    return true;
+}
+
 RectPx RectPx::Normalized() const noexcept {
     RectPx r = *this;
     if (r.left > r.right) std::swap(r.left, r.right);

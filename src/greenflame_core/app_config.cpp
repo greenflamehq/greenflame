@@ -7,6 +7,7 @@ namespace {
 
 constexpr size_t kMaxWindowsPathChars = 260;
 constexpr size_t kMaxConfigPathChars = kMaxWindowsPathChars - 1;
+constexpr COLORREF kColorrefMask = 0x00FFFFFFu;
 constexpr int32_t kMinToolSize = 1;
 constexpr int32_t kMaxToolSize = 50;
 constexpr size_t kMaxTextFontFamilyChars = 128;
@@ -76,6 +77,7 @@ void AppConfig::Normalize() {
     clamp_pattern(filename_pattern_desktop);
     clamp_pattern(filename_pattern_monitor);
     clamp_pattern(filename_pattern_window);
+    padding_color = static_cast<COLORREF>(padding_color & kColorrefMask);
     brush_size = std::clamp(brush_size, kMinToolSize, kMaxToolSize);
     line_size = std::clamp(line_size, kMinToolSize, kMaxToolSize);
     arrow_size = std::clamp(arrow_size, kMinToolSize, kMaxToolSize);

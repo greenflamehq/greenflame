@@ -54,8 +54,11 @@ bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
     if (FAILED(hr) || !factory) return false;
 
     ComPtr<IWICBitmap> wic_bitmap;
+    // GDI capture bitmaps are treated as opaque screenshots. Their alpha bytes are
+    // not a reliable part of the image content, so preserve RGB and force opaque
+    // output.
     hr = factory->CreateBitmapFromHBITMAP(
-        capture.bitmap, nullptr, WICBitmapAlphaChannelOption::WICBitmapUseAlpha,
+        capture.bitmap, nullptr, WICBitmapAlphaChannelOption::WICBitmapIgnoreAlpha,
         &wic_bitmap);
     if (FAILED(hr) || !wic_bitmap) return false;
 

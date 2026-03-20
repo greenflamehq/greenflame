@@ -162,6 +162,8 @@ Optional:
 |---|---|
 | `-o, --output <path>` | Output file path (valid only with a capture mode) |
 | `-t, --format <png\|jpg\|jpeg\|bmp>` | Output format override |
+| `-p, --padding <n\|h,v\|l,t,r,b>` | Add synthetic padding around the captured image in physical pixels |
+| `--padding-color <#rrggbb>` | Override the padding color for this invocation only (valid only with `--padding`) |
 | `-f, --overwrite` | Allow replacing an existing explicit `--output` file |
 
 Both `--option=value` and `--option value` forms are supported.
@@ -171,12 +173,28 @@ Examples:
 ```bat
 greenflame.exe --desktop
 greenflame.exe --desktop --format jpeg
+greenflame.exe --desktop --padding 12
 greenflame.exe --monitor 2 --output "D:\shots\monitor2.png"
+greenflame.exe --monitor 2 --padding 24,12 --padding-color "#ffffff"
 greenflame.exe --window "Notepad" --output "D:\shots\note" --format jpg
 greenflame.exe --window "Notepad" --output "D:\shots\note.jpg" --overwrite
 greenflame.exe --window="Notepad" --output "D:\shots\note"
 greenflame.exe --region 1200,100,800,600
+greenflame.exe --region 1200,100,800,600 --padding 8,16,24,32
 ```
+
+**Padding**
+
+- `--padding` accepts one value (`n`), two values (`h,v`), or four values
+  (`l,t,r,b`).
+- Padding is always synthetic color; it never captures extra screen pixels.
+- When `--padding` is present, any part of the requested capture area that lies
+  outside the virtual desktop is filled with the resolved padding color instead
+  of being clipped away.
+- Padding color resolution order is:
+  1. `--padding-color`, if provided
+  2. `save.padding_color` from config
+  3. default black (`#000000`)
 
 **A few notes on output format resolution**
 
@@ -257,6 +275,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `save.default_save_dir` | `%USERPROFILE%\Pictures\greenflame` (runtime fallback when unset) | Folder used by **Ctrl-S**, **Ctrl-Alt-S**, and CLI captures when `--output` is not provided. |
 | `save.last_save_as_dir` | Falls back to `default_save_dir`, then `%USERPROFILE%\Pictures\greenflame` | Initial folder used by **Ctrl-Shift-S** and **Ctrl-Shift-Alt-S** (Save As). |
 | `save.default_save_format` | `png` | Default image format for **Ctrl-S**, **Ctrl-Alt-S**, and CLI output paths without explicit extension. Accepted values: `png`, `jpg`/`jpeg`, `bmp`. |
+| `save.padding_color` | `#000000` | Padding color used by CLI captures when `--padding` is present and `--padding-color` is not supplied. Values use `#rrggbb`. |
 | `save.filename_pattern_region` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for region captures. |
 | `save.filename_pattern_desktop` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}` | Default filename pattern for desktop captures. |
 | `save.filename_pattern_monitor` | `screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}` | Default filename pattern for monitor captures. |
@@ -300,6 +319,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
     "default_save_dir": "C:\\Users\\you\\Pictures\\greenflame",
     "last_save_as_dir": "D:\\shots\\scratch",
     "default_save_format": "png",
+    "padding_color": "#000000",
     "filename_pattern_region": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}",
     "filename_pattern_desktop": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}",
     "filename_pattern_monitor": "screenshot-${YYYY}-${MM}-${DD}_${hh}${mm}${ss}-monitor${monitor}",

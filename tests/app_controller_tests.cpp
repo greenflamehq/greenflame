@@ -63,7 +63,9 @@ class MockCaptureService : public ICaptureService {
 
     MOCK_METHOD(bool, Copy_rect_to_clipboard, (core::RectPx), (override));
     MOCK_METHOD(bool, Save_rect_to_file,
-                (core::RectPx, std::wstring_view, core::ImageSaveFormat), (override));
+                (core::CaptureSaveRequest const &, std::wstring_view,
+                 core::ImageSaveFormat),
+                (override));
 };
 
 class MockFileSystemService : public IFileSystemService {
@@ -104,6 +106,18 @@ struct ControllerFixture {
     ControllerFixture &operator=(ControllerFixture &&) = delete;
     ~ControllerFixture() = default;
 };
+
+[[nodiscard]] core::CaptureSaveRequest
+Make_save_request(core::RectPx source_rect, core::InsetsPx padding = {},
+                  COLORREF fill_color = static_cast<COLORREF>(0),
+                  bool preserve_source_extent = false) {
+    core::CaptureSaveRequest request{};
+    request.source_rect_screen = source_rect;
+    request.padding_px = padding;
+    request.fill_color = fill_color;
+    request.preserve_source_extent = preserve_source_extent;
+    return request;
+}
 
 } // namespace
 
@@ -250,13 +264,13 @@ TEST(app_controller, cli_window_mode_filters_invocation_window_and_saves) {
     EXPECT_CALL(fixture.windows, Get_window_obscuration(target_hwnd))
         .WillOnce(Return(WindowObscuration::None));
     EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
-        .Times(2)
+        .Times(1)
         .WillRepeatedly(Return(virtual_bounds));
     EXPECT_CALL(fixture.file_system,
                 Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\note.png"})))
         .WillOnce(Return(L"C:\\shots\\note.png"));
     EXPECT_CALL(fixture.capture,
-                Save_rect_to_file(target_rect,
+                Save_rect_to_file(Make_save_request(target_rect),
                                   Eq(std::wstring_view{L"C:\\shots\\note.png"}),
                                   ImageSaveFormat::Png))
         .WillOnce(Return(true));
@@ -265,6 +279,183 @@ TEST(app_controller, cli_window_mode_filters_invocation_window_and_saves) {
     EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
     EXPECT_THAT(result.stdout_message, HasSubstr(L"Saved: C:\\shots\\note.png"));
     EXPECT_TRUE(result.stderr_message.empty());
+}
+
+TEST(app_controller,
+     cli_padded_window_mode_uses_config_color_and_preserves_source_extent) {
+    ControllerFixture fixture;
+    fixture.config.padding_color = Make_colorref(0x11, 0x22, 0x33);
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_name = L"Notepad";
+    options.output_path = L"C:\\shots\\note-pad.png";
+    options.overwrite_output = true;
+    options.padding_px = InsetsPx{4, 8, 12, 16};
+
+    HWND const target_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x7171));
+    RectPx const target_rect = RectPx::From_ltrb(10, 20, 210, 220);
+    WindowMatch target{};
+    target.hwnd = target_hwnd;
+    target.info.title = L"Notepad";
+    target.info.class_name = L"Notepad";
+    target.info.rect = target_rect;
+
+    RectPx const virtual_bounds = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.windows,
+                Find_windows_by_title(Eq(std::wstring_view{L"Notepad"})))
+        .WillOnce(Return(std::vector<WindowMatch>{target}));
+    EXPECT_CALL(fixture.windows, Is_window_valid(target_hwnd)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.windows, Is_window_minimized(target_hwnd))
+        .WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_window_rect(target_hwnd))
+        .WillOnce(Return(target_rect));
+    EXPECT_CALL(fixture.windows, Get_window_obscuration(target_hwnd))
+        .WillOnce(Return(WindowObscuration::Partial));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\note-pad.png"})))
+        .WillOnce(Return(L"C:\\shots\\note-pad.png"));
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(virtual_bounds));
+    EXPECT_CALL(fixture.capture,
+                Save_rect_to_file(Make_save_request(target_rect, InsetsPx{4, 8, 12, 16},
+                                                    fixture.config.padding_color, true),
+                                  Eq(std::wstring_view{L"C:\\shots\\note-pad.png"}),
+                                  ImageSaveFormat::Png))
+        .WillOnce(Return(true));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_THAT(result.stderr_message,
+                HasSubstr(L"partially obscured by other windows"));
+}
+
+TEST(app_controller, cli_padded_region_mode_emits_fill_warning) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Region;
+    options.region_px = RectPx::From_ltrb(80, 80, 130, 130);
+    options.output_path = L"C:\\shots\\region-pad.png";
+    options.overwrite_output = true;
+    options.padding_px = InsetsPx{6, 6, 6, 6};
+
+    RectPx const virtual_bounds = RectPx::From_ltrb(0, 0, 100, 100);
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\region-pad.png"})))
+        .WillOnce(Return(L"C:\\shots\\region-pad.png"));
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(virtual_bounds));
+    EXPECT_CALL(fixture.capture,
+                Save_rect_to_file(
+                    Make_save_request(options.region_px.value(), InsetsPx{6, 6, 6, 6},
+                                      Make_colorref(0x00, 0x00, 0x00), true),
+                    Eq(std::wstring_view{L"C:\\shots\\region-pad.png"}),
+                    ImageSaveFormat::Png))
+        .WillOnce(Return(true));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"filled with the padding color"));
+}
+
+TEST(app_controller, cli_padded_monitor_mode_builds_save_request) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Monitor;
+    options.monitor_id = 1;
+    options.output_path = L"C:\\shots\\monitor-pad.png";
+    options.overwrite_output = true;
+    options.padding_px = InsetsPx{2, 4, 6, 8};
+
+    MonitorWithBounds monitor{};
+    monitor.bounds = RectPx::From_ltrb(10, 20, 210, 220);
+    EXPECT_CALL(fixture.display, Get_monitors_with_bounds())
+        .WillOnce(Return(std::vector<MonitorWithBounds>{monitor}));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\monitor-pad.png"})))
+        .WillOnce(Return(L"C:\\shots\\monitor-pad.png"));
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(RectPx::From_ltrb(0, 0, 400, 300)));
+    EXPECT_CALL(
+        fixture.capture,
+        Save_rect_to_file(Make_save_request(monitor.bounds, InsetsPx{2, 4, 6, 8},
+                                            Make_colorref(0x00, 0x00, 0x00), true),
+                          Eq(std::wstring_view{L"C:\\shots\\monitor-pad.png"}),
+                          ImageSaveFormat::Png))
+        .WillOnce(Return(true));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller, cli_padded_desktop_mode_prefers_cli_color_override) {
+    ControllerFixture fixture;
+    fixture.config.padding_color = Make_colorref(0x22, 0x33, 0x44);
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop-pad.png";
+    options.overwrite_output = true;
+    options.padding_px = InsetsPx{1, 2, 3, 4};
+    options.padding_color_override = Make_colorref(0xAA, 0xBB, 0xCC);
+
+    RectPx const desktop = RectPx::From_ltrb(-100, 0, 1820, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\desktop-pad.png"})))
+        .WillOnce(Return(L"C:\\shots\\desktop-pad.png"));
+    EXPECT_CALL(
+        fixture.capture,
+        Save_rect_to_file(Make_save_request(desktop, InsetsPx{1, 2, 3, 4},
+                                            Make_colorref(0xAA, 0xBB, 0xCC), true),
+                          Eq(std::wstring_view{L"C:\\shots\\desktop-pad.png"}),
+                          ImageSaveFormat::Png))
+        .WillOnce(Return(true));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller, cli_padded_capture_fails_when_source_is_outside_virtual_desktop) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Region;
+    options.region_px = RectPx::From_ltrb(200, 200, 250, 250);
+    options.output_path = L"C:\\shots\\missing.png";
+    options.overwrite_output = true;
+    options.padding_px = InsetsPx{5, 5, 5, 5};
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\missing.png"})))
+        .WillOnce(Return(L"C:\\shots\\missing.png"));
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(RectPx::From_ltrb(0, 0, 100, 100)));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliCaptureSaveFailed);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"outside the virtual desktop"));
+}
+
+TEST(app_controller, cli_padded_capture_rejects_output_size_overflow) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Region;
+    options.region_px = RectPx::From_ltrb(0, 0, 0x7fffffff, 1);
+    options.padding_px = InsetsPx{1, 0, 0, 0};
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliCaptureSaveFailed);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"invalid or too large"));
 }
 
 TEST(app_controller, cli_output_path_detects_format_conflict) {
@@ -314,7 +505,8 @@ TEST(app_controller, cli_default_output_path_uses_timestamp_and_num_scan) {
                 Reserve_unique_file_path(Eq(std::wstring_view{expected_unreserved})))
         .WillOnce(Return(expected_unreserved));
     EXPECT_CALL(fixture.capture,
-                Save_rect_to_file(desktop, Eq(std::wstring_view{expected_unreserved}),
+                Save_rect_to_file(Make_save_request(desktop),
+                                  Eq(std::wstring_view{expected_unreserved}),
                                   ImageSaveFormat::Png))
         .WillOnce(Return(true));
 
@@ -353,7 +545,7 @@ TEST(app_controller, cli_desktop_mode_saves_virtual_bounds) {
                 Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\desktop.png"})))
         .WillOnce(Return(L"C:\\shots\\desktop.png"));
     EXPECT_CALL(fixture.capture,
-                Save_rect_to_file(desktop,
+                Save_rect_to_file(Make_save_request(desktop),
                                   Eq(std::wstring_view{L"C:\\shots\\desktop.png"}),
                                   ImageSaveFormat::Png))
         .WillOnce(Return(true));
@@ -403,7 +595,7 @@ TEST(app_controller,
         Try_reserve_exact_file_path(Eq(std::wstring_view{L"C:\\shots\\fail.png"}), _))
         .WillOnce(Return(true));
     EXPECT_CALL(fixture.capture,
-                Save_rect_to_file(desktop,
+                Save_rect_to_file(Make_save_request(desktop),
                                   Eq(std::wstring_view{L"C:\\shots\\fail.png"}),
                                   ImageSaveFormat::Png))
         .WillOnce(Return(false));

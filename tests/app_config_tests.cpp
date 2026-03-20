@@ -68,6 +68,7 @@ TEST(app_config, Defaults_UseBlackFirstPaletteEntryAndCurrentSlotZero) {
     EXPECT_EQ(config.highlighter_colors, kDefaultHighlighterColorPalette);
     EXPECT_EQ(config.current_highlighter_color_index, 0);
     EXPECT_EQ(config.highlighter_opacity_percent, kDefaultHighlighterOpacityPercent);
+    EXPECT_EQ(config.padding_color, Make_colorref(0x00, 0x00, 0x00));
 }
 
 TEST(app_config, Normalize_ClampsTextSizeStep) {
@@ -142,4 +143,12 @@ TEST(app_config, Normalize_ClampsHighlighterStraightenFieldsToNonNegative) {
 
     EXPECT_EQ(config.highlighter_pause_straighten_ms, 0);
     EXPECT_EQ(config.highlighter_pause_straighten_deadzone_px, 0);
+}
+
+TEST(app_config, Normalize_PreservesDefaultPaddingColor) {
+    AppConfig config{};
+
+    config.Normalize();
+
+    EXPECT_EQ(config.padding_color, Make_colorref(0x00, 0x00, 0x00));
 }

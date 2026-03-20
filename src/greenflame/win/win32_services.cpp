@@ -81,6 +81,28 @@ Capture_rect_from_screen_rect(greenflame::core::RectPx screen_rect,
                                                screen_rect.bottom - virtual_bounds.top);
 }
 
+[[nodiscard]] bool
+Try_compute_render_sizes(greenflame::core::CaptureSaveRequest const &request,
+                         int32_t &source_width, int32_t &source_height,
+                         int32_t &output_width, int32_t &output_height) noexcept {
+    if (!request.source_rect_screen.Try_get_size(source_width, source_height)) {
+        return false;
+    }
+    return request.padding_px.Try_expand_size(source_width, source_height, output_width,
+                                              output_height);
+}
+
+[[nodiscard]] bool Try_compute_offset(int32_t clipped_start, int32_t source_start,
+                                      int32_t &offset) noexcept {
+    int64_t const offset64 =
+        static_cast<int64_t>(clipped_start) - static_cast<int64_t>(source_start);
+    if (offset64 < 0 || offset64 > static_cast<int64_t>(INT32_MAX)) {
+        return false;
+    }
+    offset = static_cast<int32_t>(offset64);
+    return true;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -170,17 +192,50 @@ bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect) {
     return copied;
 }
 
-bool Win32CaptureService::Save_rect_to_file(core::RectPx screen_rect,
+bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &request,
                                             std::wstring_view path,
                                             core::ImageSaveFormat format) {
-    if (screen_rect.Is_empty() || path.empty()) {
+    if (request.source_rect_screen.Is_empty() || path.empty()) {
         return false;
     }
 
     core::RectPx const virtual_bounds = greenflame::Get_virtual_desktop_bounds_px();
     std::optional<core::RectPx> const clipped_screen =
-        core::RectPx::Clip(screen_rect, virtual_bounds);
+        core::RectPx::Clip(request.source_rect_screen, virtual_bounds);
     if (!clipped_screen.has_value()) {
+        return false;
+    }
+
+    if (!request.preserve_source_extent && request.padding_px.Is_zero()) {
+        GdiCaptureResult capture{};
+        if (!greenflame::Capture_virtual_desktop(capture)) {
+            return false;
+        }
+
+        core::RectPx const capture_rect =
+            Capture_rect_from_screen_rect(*clipped_screen, virtual_bounds);
+        GdiCaptureResult cropped{};
+        bool const cropped_ok = greenflame::Crop_capture(
+            capture, capture_rect.left, capture_rect.top, capture_rect.Width(),
+            capture_rect.Height(), cropped);
+        capture.Free();
+        if (!cropped_ok) {
+            return false;
+        }
+
+        std::wstring const output_path(path);
+        bool const saved =
+            greenflame::Save_capture_to_file(cropped, output_path.c_str(), format);
+        cropped.Free();
+        return saved;
+    }
+
+    int32_t source_width = 0;
+    int32_t source_height = 0;
+    int32_t output_width = 0;
+    int32_t output_height = 0;
+    if (!Try_compute_render_sizes(request, source_width, source_height, output_width,
+                                  output_height)) {
         return false;
     }
 
@@ -189,21 +244,60 @@ bool Win32CaptureService::Save_rect_to_file(core::RectPx screen_rect,
         return false;
     }
 
+    GdiCaptureResult source_canvas{};
+    if (!greenflame::Create_solid_capture(source_width, source_height,
+                                          request.fill_color, source_canvas)) {
+        capture.Free();
+        return false;
+    }
+
     core::RectPx const capture_rect =
         Capture_rect_from_screen_rect(*clipped_screen, virtual_bounds);
-    GdiCaptureResult cropped{};
-    bool const cropped_ok =
-        greenflame::Crop_capture(capture, capture_rect.left, capture_rect.top,
-                                 capture_rect.Width(), capture_rect.Height(), cropped);
+    int32_t dst_left = 0;
+    int32_t dst_top = 0;
+    bool const have_offsets =
+        Try_compute_offset(clipped_screen->left, request.source_rect_screen.left,
+                           dst_left) &&
+        Try_compute_offset(clipped_screen->top, request.source_rect_screen.top,
+                           dst_top);
+    bool const blitted_source =
+        have_offsets &&
+        greenflame::Blit_capture(capture, capture_rect.left, capture_rect.top,
+                                 capture_rect.Width(), capture_rect.Height(),
+                                 source_canvas, dst_left, dst_top);
     capture.Free();
-    if (!cropped_ok) {
+    if (!blitted_source) {
+        source_canvas.Free();
         return false;
+    }
+
+    GdiCaptureResult final_capture{};
+    GdiCaptureResult const *capture_to_save = &source_canvas;
+    if (!request.padding_px.Is_zero()) {
+        if (!greenflame::Create_solid_capture(output_width, output_height,
+                                              request.fill_color, final_capture)) {
+            source_canvas.Free();
+            return false;
+        }
+        bool const blitted_final = greenflame::Blit_capture(
+            source_canvas, 0, 0, source_width, source_height, final_capture,
+            request.padding_px.left, request.padding_px.top);
+        source_canvas.Free();
+        if (!blitted_final) {
+            final_capture.Free();
+            return false;
+        }
+        capture_to_save = &final_capture;
     }
 
     std::wstring const output_path(path);
     bool const saved =
-        greenflame::Save_capture_to_file(cropped, output_path.c_str(), format);
-    cropped.Free();
+        greenflame::Save_capture_to_file(*capture_to_save, output_path.c_str(), format);
+    if (capture_to_save == &source_canvas) {
+        source_canvas.Free();
+    } else {
+        final_capture.Free();
+    }
     return saved;
 }
 

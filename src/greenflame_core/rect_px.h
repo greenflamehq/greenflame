@@ -19,6 +19,25 @@ struct SizePx final {
     constexpr bool operator==(const SizePx &) const noexcept = default;
 };
 
+struct InsetsPx final {
+    int32_t left{0};
+    int32_t top{0};
+    int32_t right{0};
+    int32_t bottom{0};
+
+    [[nodiscard]] constexpr bool Is_zero() const noexcept {
+        return left == 0 && top == 0 && right == 0 && bottom == 0;
+    }
+
+    // Expands (source_w, source_h) by these insets and writes the result to (out_w,
+    // out_h). Returns false if any inset is negative, the source size is invalid, or
+    // the result overflows int32_t.
+    [[nodiscard]] bool Try_expand_size(int32_t source_w, int32_t source_h,
+                                       int32_t &out_w, int32_t &out_h) const noexcept;
+
+    constexpr bool operator==(const InsetsPx &) const noexcept = default;
+};
+
 struct RectPx final {
     // Stored as left/top/right/bottom in *physical pixels*.
     // Invariant expected by most operations: left <= right, top <= bottom.
@@ -32,6 +51,10 @@ struct RectPx final {
     [[nodiscard]] constexpr bool Is_empty() const noexcept {
         return Width() <= 0 || Height() <= 0;
     }
+
+    // Computes width and height with overflow detection (rects near INT32 extremes).
+    // Returns false if either dimension is non-positive or overflows int32_t.
+    [[nodiscard]] bool Try_get_size(int32_t &w, int32_t &h) const noexcept;
 
     [[nodiscard]] constexpr PointPx Top_left() const noexcept { return {left, top}; }
     [[nodiscard]] constexpr PointPx Bottom_right() const noexcept {
