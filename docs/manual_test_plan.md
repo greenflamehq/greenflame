@@ -861,6 +861,42 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The saved image uses the configured `save.padding_color` when `--padding` is present.
   - Changing `save.padding_color` changes the rendered padding on the next CLI capture.
 
+### GF-MAN-CFG-010 - Invalid Config Startup Warning And Editor Link
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Exit Greenflame.
+  2. Edit `%USERPROFILE%\.config\greenflame\greenflame.json` so it contains invalid JSON, for example a missing comma between two top-level properties.
+  3. Launch `greenflame.exe`.
+  4. Observe the tray toast.
+  5. Click the config-file path shown in the toast.
+- Expected:
+  - An error toast appears on startup even if success toasts are disabled.
+  - The toast presents the error in this order: a short summary, the parser or validation detail when available, the clickable config-file path, then the consequence text.
+  - The consequence text explains that defaults or partial settings are being used, the file will not be saved while invalid, and transient changes may be lost after a valid reload.
+  - When available, the detail block includes the parser or validation detail and line/column.
+  - Clicking the path opens `%USERPROFILE%\.config\greenflame\greenflame.json` in the same editor/open flow used by `Open config file...`.
+
+### GF-MAN-CFG-011 - Invalid Config Reload Warning And Save Suppression
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Launch Greenflame with a valid config file.
+  2. While the tray app is running, edit `%USERPROFILE%\.config\greenflame\greenflame.json` and introduce an invalid syntax or schema error.
+  3. Wait for the file watcher reload.
+  4. Make a persisted config change from the UI, such as changing a tool size or current color.
+  5. Exit Greenflame.
+  6. Inspect the config file on disk.
+  7. Fix the config file so it becomes valid again, with an intentionally different persisted value from the transient change made in step 4.
+  8. Relaunch Greenflame or wait for the live reload.
+- Expected:
+  - The tray app shows the same error toast when the watched file becomes invalid.
+  - The invalid file is not overwritten by the transient UI change made while the file is broken.
+  - When the file becomes valid again, the tray app shows a short info toast that config persistence is active again, with no file link.
+  - After the file is fixed, the valid on-disk config reloads and wins over the transient in-memory change from step 4.
+
 ## Mixed-DPI And Multi-Monitor
 
 ### GF-MAN-DPI-001 - Mixed-DPI Pointer Alignment
@@ -988,3 +1024,19 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Off-desktop portions of the nominal capture area are filled with the same padding color instead of being clipped away.
   - When off-desktop fill occurs, `stderr` includes the fill warning and the command still succeeds if any capturable pixels exist.
   - The saved PNG padding is an opaque solid color, not transparent or semi-transparent.
+
+### GF-MAN-CLI-007 - Invalid Config Startup Stderr Omits UI-Only Consequences
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Exit any running tray instance of Greenflame.
+  2. Edit `%USERPROFILE%\.config\greenflame\greenflame.json` so it contains invalid JSON, for example a missing comma between two top-level properties.
+  3. Run `greenflame.exe --region <x,y,w,h> --output <file>` from a console.
+  4. Inspect `stderr`.
+- Expected:
+  - The capture still proceeds with defaults or partial config and writes the requested output when the capture itself succeeds.
+  - `stderr` includes the config file path, the short summary, and the parser or validation detail when available.
+  - `stderr` includes the first consequence sentence explaining that defaults or partial settings are being used.
+  - `stderr` does not include the UI-only consequence text about the file not being saved or transient changes being lost after reload.
+  - The command exits without starting a tray instance.

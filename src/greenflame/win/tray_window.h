@@ -8,6 +8,11 @@ enum class TrayBalloonIcon {
     Error,
 };
 
+enum class ToastFileAction {
+    RevealInExplorer,
+    OpenFile,
+};
+
 class ITrayEvents {
   public:
     virtual ~ITrayEvents() = default;
@@ -34,7 +39,10 @@ class TrayWindow final {
                               bool start_with_windows_enabled = false);
     void Destroy();
     void Show_balloon(TrayBalloonIcon icon, wchar_t const *message,
-                      HBITMAP thumbnail = nullptr, std::wstring_view file_path = {});
+                      HBITMAP thumbnail = nullptr, std::wstring_view file_path = {},
+                      ToastFileAction file_action = ToastFileAction::RevealInExplorer,
+                      wchar_t const *detail_message = nullptr,
+                      wchar_t const *footer_message = nullptr);
 
     [[nodiscard]] bool Is_open() const;
 

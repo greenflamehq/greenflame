@@ -61,6 +61,57 @@ void Show_clipboard_result(greenflame::ClipboardCopyResult const &result,
     }
 }
 
+[[nodiscard]] std::wstring First_sentence(std::wstring_view text) {
+    size_t const sentence_end = text.find(L'.');
+    if (sentence_end == std::wstring_view::npos) {
+        return std::wstring(text);
+    }
+
+    return std::wstring(text.substr(0, sentence_end + 1));
+}
+
+[[nodiscard]] std::wstring
+Build_config_issue_stderr_text(greenflame::AppConfigLoadResult const &load_result) {
+    if (!load_result.issue.has_value()) {
+        return {};
+    }
+
+    std::wstring text = L"Config file: ";
+    text += load_result.path.wstring();
+    text += L"\n";
+    text += load_result.issue->summary;
+    if (!load_result.issue->detail.empty()) {
+        text += L"\n";
+        text += load_result.issue->detail;
+    }
+    if (!load_result.issue->consequences.empty()) {
+        text += L"\n";
+        text += First_sentence(load_result.issue->consequences);
+    }
+    return text;
+}
+
+void Show_config_issue(greenflame::AppConfigLoadResult const &load_result,
+                       greenflame::TrayWindow &tray_window) {
+    if (!load_result.issue.has_value()) {
+        return;
+    }
+
+    tray_window.Show_balloon(
+        greenflame::TrayBalloonIcon::Error, load_result.issue->summary.c_str(), nullptr,
+        load_result.path.wstring(), greenflame::ToastFileAction::OpenFile,
+        load_result.issue->detail.empty() ? nullptr : load_result.issue->detail.c_str(),
+        load_result.issue->consequences.empty()
+            ? nullptr
+            : load_result.issue->consequences.c_str());
+}
+
+void Show_config_recovery(greenflame::TrayWindow &tray_window) {
+    tray_window.Show_balloon(
+        greenflame::TrayBalloonIcon::Info,
+        L"Config file restored. Persistent changes will be saved again.");
+}
+
 struct ChangeNotificationGuard {
     HANDLE handle = INVALID_HANDLE_VALUE;
     ~ChangeNotificationGuard() {
@@ -83,10 +134,14 @@ GreenflameApp::GreenflameApp(HINSTANCE hinstance, core::CliOptions const &cli_op
 
 uint8_t GreenflameApp::Run() {
     Enable_per_monitor_dpi_awareness_v2();
-    config_ = Load_app_config();
+    AppConfigLoadResult load_result = Load_app_config();
+    config_ = load_result.config;
     overlay_help_content_ = app_controller_.Build_overlay_help_content();
     overlay_window_.Set_hotkey_help_content(&overlay_help_content_);
     if (core::Is_capture_mode(cli_options_.capture_mode)) {
+        if (load_result.issue.has_value()) {
+            Write_console_block(Build_config_issue_stderr_text(load_result), true);
+        }
         ProcessExitCode const cli_result = Run_cli_capture_mode();
         (void)Save_app_config(config_);
         return To_exit_code(cli_result);
@@ -104,6 +159,7 @@ uint8_t GreenflameApp::Run() {
                              start_with_windows_enabled)) {
         return To_exit_code(ProcessExitCode::TrayWindowCreateFailed);
     }
+    Show_config_issue(load_result, tray_window_);
 
     ChangeNotificationGuard watcher;
     {
@@ -141,7 +197,15 @@ uint8_t GreenflameApp::Run() {
             debounce_deadline = GetTickCount64() + k_debounce_ms;
         } else if (result == WAIT_TIMEOUT) {
             debouncing = false;
-            config_ = Load_app_config();
+            bool const had_issue = load_result.issue.has_value();
+            load_result = Load_app_config();
+            config_ = load_result.config;
+            if (had_issue && !load_result.issue.has_value()) {
+                Show_config_recovery(tray_window_);
+            }
+            if (!had_issue && load_result.issue.has_value()) {
+                Show_config_issue(load_result, tray_window_);
+            }
             continue;
         }
 

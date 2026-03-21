@@ -195,6 +195,72 @@ TEST(app_config_json, Parse_AcceptsSchemaPropertyAndValidValues) {
     EXPECT_EQ(config->padding_color, Make_colorref(0x11, 0x22, 0x33));
 }
 
+TEST(app_config_json, Parse_DecodesEscapedBackslashesInJsonStrings) {
+    std::optional<AppConfig> const config = Parse_app_config_json(R"json(
+{
+  "save": {
+    "default_save_dir": "C:\\captures\\greenflame"
+  }
+}
+)json");
+
+    ASSERT_TRUE(config.has_value());
+    EXPECT_EQ(config->default_save_dir, L"C:\\captures\\greenflame");
+}
+
+TEST(app_config_json, Parse_UnicodeEscapesInStringsArePassedThroughVerbatim) {
+    // easyjson stores JSON unicode escapes (backslash-u + 4 hex digits) as
+    // literal characters rather than decoding them to the actual code point.
+    // The JSON escape for a space is "backslash u 0020", but after parsing it
+    // appears in the config as those 6 literal characters, not as ' '.
+    std::optional<AppConfig> const config = Parse_app_config_json(R"json(
+{
+  "tools": {
+    "font": {
+      "sans": "Arial\u0020Bold"
+    }
+  }
+}
+)json");
+
+    ASSERT_TRUE(config.has_value());
+    EXPECT_EQ(config->text_font_sans, L"Arial\\u0020Bold");
+}
+
+TEST(app_config_json, Serialize_RoundTripsCanonicalSaveDirectoryStably) {
+    std::string json = R"json(
+{
+  "save": {
+    "default_save_dir": "C:\\captures\\greenflame"
+  }
+}
+)json";
+    std::string const expected = R"json({
+  "save" : {
+    "default_save_dir" : "C:\\captures\\greenflame"
+  }
+})json";
+
+    std::string serialized = {};
+    for (int iteration = 0; iteration < 5; ++iteration) {
+        AppConfigParseResult const parsed =
+            Parse_app_config_json_with_diagnostics(json);
+
+        ASSERT_FALSE(parsed.Has_error());
+        ASSERT_EQ(parsed.config.default_save_dir, L"C:\\captures\\greenflame");
+
+        std::string const next = Serialize_app_config_json(parsed.config);
+        if (iteration == 0) {
+            EXPECT_EQ(next, expected);
+        } else {
+            EXPECT_EQ(next, serialized);
+        }
+
+        serialized = next;
+        json = serialized;
+    }
+}
+
 TEST(app_config_json, Parse_RejectsUnknownTopLevelKey) {
     EXPECT_FALSE(Parse_app_config_json(R"json({"extra":true})json").has_value());
 }
@@ -223,4 +289,36 @@ TEST(app_config_json, Parse_RejectsJpegAliasInSaveFormat) {
     EXPECT_FALSE(
         Parse_app_config_json(R"json({"save":{"default_save_format":"jpeg"}})json")
             .has_value());
+}
+
+TEST(app_config_json, ParseWithDiagnostics_ParseErrorReportsLocationAndKeepsPrefix) {
+    AppConfigParseResult const result = Parse_app_config_json_with_diagnostics(R"json(
+{
+  "ui": { "show_balloons": false }
+  "tools": { "brush": { "size": 7 } }
+}
+)json");
+
+    ASSERT_TRUE(result.Has_error());
+    ASSERT_TRUE(result.diagnostic.has_value());
+    EXPECT_EQ(result.diagnostic->kind, AppConfigDiagnosticKind::Parse);
+    EXPECT_TRUE(result.diagnostic->line.has_value());
+    EXPECT_TRUE(result.diagnostic->column.has_value());
+    EXPECT_THAT(result.diagnostic->message,
+                testing::HasSubstr(L"Expected ',' or '}' after an object member."));
+    EXPECT_FALSE(result.config.show_balloons);
+    EXPECT_EQ(result.config.brush_size, AppConfig::kDefaultBrushSize);
+}
+
+TEST(app_config_json, ParseWithDiagnostics_SchemaErrorLoadsOtherValidValues) {
+    AppConfigParseResult const result = Parse_app_config_json_with_diagnostics(
+        R"json({"ui":{"show_balloons":false},"tools":{"brush":{"size":"5"}},"save":{"default_save_format":"png"}})json");
+
+    ASSERT_TRUE(result.Has_error());
+    ASSERT_TRUE(result.diagnostic.has_value());
+    EXPECT_EQ(result.diagnostic->kind, AppConfigDiagnosticKind::Schema);
+    EXPECT_THAT(result.diagnostic->message, testing::HasSubstr(L"tools.brush.size"));
+    EXPECT_FALSE(result.config.show_balloons);
+    EXPECT_EQ(result.config.brush_size, AppConfig::kDefaultBrushSize);
+    EXPECT_EQ(result.config.default_save_format, L"png");
 }

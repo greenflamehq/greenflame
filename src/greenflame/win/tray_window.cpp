@@ -229,6 +229,50 @@ void Draw_severity_icon(HDC hdc, int x, int y, int size,
     }
 }
 
+bool Open_file_in_default_editor(HWND owner, std::wstring_view path) {
+    HINSTANCE const result = ShellExecuteW(nullptr, L"open", std::wstring(path).c_str(),
+                                           nullptr, nullptr, SW_SHOW);
+    if (reinterpret_cast<intptr_t>(result) <= 32) {
+        MessageBoxW(owner, L"Could not open config file.", L"Greenflame",
+                    MB_OK | MB_ICONWARNING);
+        return false;
+    }
+    return true;
+}
+
+void Reveal_file_in_explorer(std::wstring_view path) {
+    PIDLIST_ABSOLUTE const pidl = ILCreateFromPathW(std::wstring(path).c_str());
+    if (pidl == nullptr) {
+        return;
+    }
+
+    LPCITEMIDLIST const child = ILFindLastID(pidl);
+    PIDLIST_ABSOLUTE const parent = ILClone(pidl);
+    if (parent != nullptr) {
+        ILRemoveLastID(parent);
+        LPCITEMIDLIST child_items[] = {child};
+        SHOpenFolderAndSelectItems(parent, 1, child_items, 0);
+        ILFree(parent);
+    }
+    ILFree(pidl);
+}
+
+[[nodiscard]] int Measure_text_height(HDC hdc, HFONT font, std::wstring_view text,
+                                      int width, DWORD flags) {
+    if (hdc == nullptr || text.empty() || width <= 0) {
+        return 0;
+    }
+
+    HGDIOBJ const old_font =
+        SelectObject(hdc, font ? font : GetStockObject(DEFAULT_GUI_FONT));
+    RECT measure{};
+    measure.right = width;
+    DrawTextW(hdc, text.data(), static_cast<int>(text.size()), &measure,
+              flags | DT_CALCRECT);
+    SelectObject(hdc, old_font);
+    return std::max(0, static_cast<int>(measure.bottom - measure.top));
+}
+
 } // namespace
 
 namespace greenflame {
@@ -263,14 +307,18 @@ class TrayWindow::ToastPopup final {
     }
 
     void Show(TrayBalloonIcon icon, wchar_t const *message, HBITMAP thumbnail,
-              std::wstring_view file_path) {
+              std::wstring_view file_path, ToastFileAction file_action,
+              wchar_t const *detail_message, wchar_t const *footer_message) {
         if (!message || message[0] == L'\0') {
             return;
         }
 
         icon_ = icon;
         message_ = message;
+        detail_message_ = detail_message ? detail_message : L"";
         file_path_ = std::wstring(file_path);
+        file_action_ = file_action;
+        footer_message_ = footer_message ? footer_message : L"";
         link_rect_ = {};
         mouse_over_link_ = false;
 
@@ -357,6 +405,7 @@ class TrayWindow::ToastPopup final {
         int title_icon_text_gap;
         int thumbnail_max_height;
         int thumbnail_gap;
+        int section_gap;
         int link_gap;
         int width;
         int content_left;
@@ -369,6 +418,11 @@ class TrayWindow::ToastPopup final {
         int text_width;
         int body_top;
         int body_row_height;
+        int summary_height;
+        int detail_height;
+        int link_height;
+        int footer_top;
+        int footer_height;
         int total_height;
         RECT link_rect; // zeroed when file_path_ is empty
     };
@@ -394,6 +448,7 @@ class TrayWindow::ToastPopup final {
     static constexpr int kFallbackTextHeightDip = 18;
     static constexpr int kThumbnailMaxHeightDip = 80;
     static constexpr int kThumbnailGapDip = 8;
+    static constexpr int kSectionGapDip = 4;
     static constexpr int kLinkGapDip = 6;
     static constexpr wchar_t kTitleText[] = L"Greenflame";
 
@@ -515,17 +570,10 @@ class TrayWindow::ToastPopup final {
                 if (PtInRect(&link_rect_, pt)) {
                     KillTimer(hwnd_, kTimerId);
                     Hide();
-                    PIDLIST_ABSOLUTE const pidl = ILCreateFromPathW(file_path_.c_str());
-                    if (pidl != nullptr) {
-                        LPCITEMIDLIST const child = ILFindLastID(pidl);
-                        PIDLIST_ABSOLUTE const parent = ILClone(pidl);
-                        if (parent != nullptr) {
-                            ILRemoveLastID(parent);
-                            LPCITEMIDLIST child_items[] = {child};
-                            SHOpenFolderAndSelectItems(parent, 1, child_items, 0);
-                            ILFree(parent);
-                        }
-                        ILFree(pidl);
+                    if (file_action_ == ToastFileAction::OpenFile) {
+                        (void)Open_file_in_default_editor(hwnd_, file_path_);
+                    } else {
+                        Reveal_file_in_explorer(file_path_);
                     }
                 }
             }
@@ -637,17 +685,29 @@ class TrayWindow::ToastPopup final {
                 SelectObject(hdc, body_font_ ? body_font_
                                              : GetStockObject(DEFAULT_GUI_FONT));
 
-                RECT body_measure = body_rect;
-                DrawTextW(hdc, message_.c_str(), -1, &body_measure,
-                          DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
-                int const body_text_bottom = body_measure.bottom;
+                int body_cursor_top = layout.body_top;
+                if (!message_.empty()) {
+                    RECT summary_rect = body_rect;
+                    summary_rect.top = body_cursor_top;
+                    summary_rect.bottom = summary_rect.top + layout.summary_height;
+                    DrawTextW(hdc, message_.c_str(), -1, &summary_rect,
+                              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                    body_cursor_top = summary_rect.bottom;
+                }
 
-                DrawTextW(hdc, message_.c_str(), -1, &body_rect,
-                          DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                if (!detail_message_.empty()) {
+                    if (!message_.empty()) {
+                        body_cursor_top += layout.section_gap;
+                    }
+                    RECT detail_rect = body_rect;
+                    detail_rect.top = body_cursor_top;
+                    detail_rect.bottom = detail_rect.top + layout.detail_height;
+                    DrawTextW(hdc, detail_message_.c_str(), -1, &detail_rect,
+                              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                }
 
                 // Bottom of body content (text or icon, whichever is taller).
-                int anchor_bottom =
-                    std::max(body_text_bottom, layout.body_top + layout.icon_size);
+                int anchor_bottom = layout.body_top + layout.body_row_height;
 
                 // Draw the file path as a clickable link when present.
                 if (!file_path_.empty()) {
@@ -679,6 +739,16 @@ class TrayWindow::ToastPopup final {
                     }
 
                     anchor_bottom = link_draw_rect.bottom;
+                }
+
+                if (!footer_message_.empty()) {
+                    RECT footer_rect = body_rect;
+                    footer_rect.top = layout.footer_top;
+                    footer_rect.bottom = footer_rect.top + layout.footer_height;
+                    SetTextColor(hdc, text_color);
+                    DrawTextW(hdc, footer_message_.c_str(), -1, &footer_rect,
+                              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                    anchor_bottom = footer_rect.bottom;
                 }
 
                 SelectObject(hdc, old_font);
@@ -741,7 +811,10 @@ class TrayWindow::ToastPopup final {
     UINT title_font_dpi_ = 0;
     UINT body_font_dpi_ = 0;
     std::wstring message_ = {};
+    std::wstring detail_message_ = {};
     std::wstring file_path_ = {};
+    ToastFileAction file_action_ = ToastFileAction::RevealInExplorer;
+    std::wstring footer_message_ = {};
     HBITMAP thumbnail_ = nullptr;
     TrayBalloonIcon icon_ = TrayBalloonIcon::Info;
     int thumbnail_width_ = 0;
@@ -763,6 +836,7 @@ TrayWindow::ToastPopup::Compute_layout(UINT dpi, HDC hdc) const {
     l.title_icon_text_gap = Scale_for_dpi(kTitleIconTextGapDip, dpi);
     l.thumbnail_max_height = Scale_for_dpi(kThumbnailMaxHeightDip, dpi);
     l.thumbnail_gap = Scale_for_dpi(kThumbnailGapDip, dpi);
+    l.section_gap = Scale_for_dpi(kSectionGapDip, dpi);
     l.link_gap = Scale_for_dpi(kLinkGapDip, dpi);
     l.width = Scale_for_dpi(kWidthDip, dpi);
 
@@ -780,8 +854,7 @@ TrayWindow::ToastPopup::Compute_layout(UINT dpi, HDC hdc) const {
 
     // Text measurements.
     int title_height = l.title_app_icon_size;
-    int body_height = Scale_for_dpi(kFallbackTextHeightDip, dpi);
-    int link_height = 0;
+    int body_height = 0;
 
     HGDIOBJ const old_font =
         SelectObject(hdc, title_font_ ? title_font_ : GetStockObject(DEFAULT_GUI_FONT));
@@ -796,45 +869,62 @@ TrayWindow::ToastPopup::Compute_layout(UINT dpi, HDC hdc) const {
         title_height = measured_title;
     }
 
-    SelectObject(hdc, body_font_ ? body_font_ : GetStockObject(DEFAULT_GUI_FONT));
-    RECT body_measure{};
-    body_measure.right = l.text_width;
-    DrawTextW(hdc, message_.c_str(), -1, &body_measure,
-              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX | DT_CALCRECT);
-    int const measured_body = body_measure.bottom - body_measure.top;
-    if (measured_body > 0) {
-        body_height = measured_body;
-    }
-
-    if (!file_path_.empty()) {
-        RECT link_measure{};
-        link_measure.right = l.text_width;
-        DrawTextW(hdc, file_path_.c_str(), -1, &link_measure,
-                  DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_CALCRECT);
-        link_height = link_measure.bottom - link_measure.top;
-        if (link_height <= 0) {
-            link_height = Scale_for_dpi(kBodyFontDip, dpi);
-        }
-    }
-
     SelectObject(hdc, old_font);
+
+    DWORD const wrapped_flags = DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX;
+    DWORD const single_line_flags =
+        DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
+    l.summary_height =
+        Measure_text_height(hdc, body_font_, message_, l.text_width, wrapped_flags);
+    l.detail_height = Measure_text_height(hdc, body_font_, detail_message_,
+                                          l.text_width, wrapped_flags);
+    l.link_height = Measure_text_height(hdc, body_font_, file_path_, l.text_width,
+                                        single_line_flags);
+    if (!file_path_.empty() && l.link_height <= 0) {
+        l.link_height = Scale_for_dpi(kBodyFontDip, dpi);
+    }
+    l.footer_height = Measure_text_height(hdc, body_font_, footer_message_,
+                                          l.text_width, wrapped_flags);
+    l.footer_top = 0;
+
+    if (l.summary_height <= 0 && !message_.empty()) {
+        l.summary_height = Scale_for_dpi(kFallbackTextHeightDip, dpi);
+    }
+
+    body_height += l.summary_height;
+    if (l.detail_height > 0) {
+        if (body_height > 0) {
+            body_height += l.section_gap;
+        }
+        body_height += l.detail_height;
+    }
+    if (body_height <= 0) {
+        body_height = Scale_for_dpi(kFallbackTextHeightDip, dpi);
+    }
 
     l.body_row_height = std::max(l.icon_size, body_height);
     l.body_top = l.padding + l.title_app_icon_size + l.header_gap;
 
     // Compute link_rect when a file path is present.
     l.link_rect = {};
+    int content_bottom = l.body_top + l.body_row_height;
     if (!file_path_.empty()) {
-        int const body_text_bottom = l.body_top + body_measure.bottom;
-        int const anchor_bottom = std::max(body_text_bottom, l.body_top + l.icon_size);
-        int const link_top = anchor_bottom + l.link_gap;
-        l.link_rect = {l.text_left, link_top, l.content_right, link_top + link_height};
+        int const link_top = content_bottom + l.link_gap;
+        l.link_rect = {l.text_left, link_top, l.content_right,
+                       link_top + l.link_height};
+        content_bottom = l.link_rect.bottom;
+    }
+    if (!footer_message_.empty()) {
+        l.footer_top = content_bottom + l.link_gap;
     }
 
     // Total height.
     int height = l.padding + title_height + l.header_gap + l.body_row_height;
     if (!file_path_.empty()) {
-        height += l.link_gap + link_height;
+        height += l.link_gap + l.link_height;
+    }
+    if (!footer_message_.empty()) {
+        height += l.link_gap + l.footer_height;
     }
     height += l.padding;
 
@@ -977,7 +1067,10 @@ void TrayWindow::Destroy() {
 bool TrayWindow::Is_open() const { return hwnd_ != nullptr && IsWindow(hwnd_) != 0; }
 
 void TrayWindow::Show_balloon(TrayBalloonIcon icon, wchar_t const *message,
-                              HBITMAP thumbnail, std::wstring_view file_path) {
+                              HBITMAP thumbnail, std::wstring_view file_path,
+                              ToastFileAction file_action,
+                              wchar_t const *detail_message,
+                              wchar_t const *footer_message) {
     if (!Is_open() || !message || message[0] == L'\0') {
         if (thumbnail != nullptr) {
             DeleteObject(thumbnail);
@@ -987,7 +1080,8 @@ void TrayWindow::Show_balloon(TrayBalloonIcon icon, wchar_t const *message,
     if (!toast_popup_) {
         toast_popup_ = std::make_unique<ToastPopup>(hinstance_);
     }
-    toast_popup_->Show(icon, message, thumbnail, file_path);
+    toast_popup_->Show(icon, message, thumbnail, file_path, file_action, detail_message,
+                       footer_message);
 }
 
 LRESULT CALLBACK TrayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam,
@@ -1193,13 +1287,7 @@ void TrayWindow::Open_config_file() {
         core::AppConfig const defaults{};
         (void)Save_app_config(defaults);
     }
-    std::wstring const path_w = path.wstring();
-    HINSTANCE const result =
-        ShellExecuteW(nullptr, L"open", path_w.c_str(), nullptr, nullptr, SW_SHOW);
-    if (reinterpret_cast<intptr_t>(result) <= 32) {
-        MessageBoxW(hwnd_, L"Could not open config file.", L"Greenflame",
-                    MB_OK | MB_ICONWARNING);
-    }
+    (void)Open_file_in_default_editor(hwnd_, path.wstring());
 }
 
 void TrayWindow::Notify_start_capture() {
