@@ -5,15 +5,25 @@
 
 #include <ShellScalingApi.h>
 #include <ShlObj.h>
+#include <Windows.Graphics.Capture.Interop.h>
 #include <commdlg.h>
 #include <d2d1_1.h>
 #include <d2d1_1helper.h>
 #include <d2d1effects.h>
+#include <d3d11.h>
 #include <dwmapi.h>
 #include <dwrite.h>
+#include <dxgi1_2.h>
 #include <gdiplus.h>
 #include <shellapi.h>
 #include <wincodec.h>
+#include <windows.graphics.directx.direct3d11.interop.h>
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Graphics.Capture.h>
+#include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
+#include <winrt/Windows.Graphics.DirectX.h>
+#include <winrt/Windows.Graphics.h>
+#include <winrt/base.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -26,6 +36,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>

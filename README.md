@@ -170,6 +170,7 @@ Optional:
 | `-p, --padding <n\|h,v\|l,t,r,b>` | Add synthetic padding around the captured image in physical pixels |
 | `--padding-color <#rrggbb>` | Override the padding color for this invocation only (valid only with `--padding`) |
 | `--annotate <json\|path>` | Apply JSON-defined annotations to the saved CLI capture |
+| `--window-capture <auto\|gdi\|wgc>` | CLI-only window-capture backend for `--window` / `--window-hwnd`; defaults to `auto` |
 | `-f, --overwrite` | Allow replacing an existing explicit `--output` file |
 
 Both `--option=value` and `--option value` forms are supported.
@@ -183,6 +184,7 @@ greenflame.exe --desktop --padding 12
 greenflame.exe --monitor 2 --output "D:\shots\monitor2.png"
 greenflame.exe --monitor 2 --padding 24,12 --padding-color "#ffffff"
 greenflame.exe --window "Notepad" --output "D:\shots\note" --format jpg
+greenflame.exe --window "Notepad" --window-capture wgc --output "D:\shots\note-wgc.png"
 greenflame.exe --window-hwnd 0x0000000000123456 --output "D:\shots\exact-window.png"
 greenflame.exe --window "Notepad" --output "D:\shots\note.jpg" --overwrite
 greenflame.exe --window="Notepad" --output "D:\shots\note"
@@ -209,6 +211,13 @@ greenflame.exe --desktop --padding 64 --annotate ".\\schemas\\examples\\cli_anno
 
 - `--annotate` applies JSON-defined annotations to the saved CLI capture, using either inline JSON or a UTF-8 JSON file.
 - See [docs/cli_annotations.md](docs/cli_annotations.md) for the full format, schema/examples, coordinate rules, and validation behavior.
+
+**CLI window capture backends**
+
+- `--window-capture` is CLI-only and applies only to `--window` and `--window-hwnd`.
+- `auto` prefers Windows Graphics Capture (WGC) and falls back to GDI if WGC backend setup fails for that window.
+- Forced `wgc` does not fall back; backend failures exit with code `15`.
+- See [docs/cli_window_capture.md](docs/cli_window_capture.md) for backend semantics, warning behavior, and examples.
 
 **Window matching**
 
@@ -249,6 +258,7 @@ codes are unique and not reused.
 | `12` | Matched window became unavailable before capture |
 | `13` | Matched window is minimized |
 | `14` | `--annotate` input is invalid (file read, JSON, validation, or missing explicit font family) |
+| `15` | Forced `--window-capture wgc` failed (unsupported, setup/frame failure, or WGC/window size mismatch) |
 
 ---
 

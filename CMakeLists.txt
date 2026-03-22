@@ -130,6 +130,7 @@ add_library(greenflame_core STATIC
     src/greenflame_core/app_config_json.h
     src/greenflame_core/app_services.h
     src/greenflame_core/process_exit_code.h
+    src/greenflame_core/window_capture_backend.h
     src/greenflame_core/monitor_rules.cpp
     src/greenflame_core/monitor_rules.h
     src/greenflame_core/pixel_ops.cpp
@@ -288,6 +289,8 @@ add_executable(greenflame WIN32
     src/greenflame/win/gdi_capture.cpp
     src/greenflame/win/gdi_capture.h
     src/greenflame/win/save_image.cpp
+    src/greenflame/win/wgc_window_capture.cpp
+    src/greenflame/win/wgc_window_capture.h
     src/greenflame/win/overlay_help_overlay.cpp
     src/greenflame/win/overlay_help_overlay.h
     src/greenflame/win/overlay_window.cpp
@@ -388,7 +391,10 @@ target_link_libraries(greenflame PRIVATE
     gdiplus
     d2d1
     dwrite
+    d3d11
+    dxgi
     dxguid  # CLSID_D2D1ArithmeticComposite and other D2D effect GUIDs
+    windowsapp
 )
 
 # -----------------------------

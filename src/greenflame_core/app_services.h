@@ -4,19 +4,41 @@
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/save_image_policy.h"
+#include "greenflame_core/window_capture_backend.h"
 #include "greenflame_core/window_filter.h"
 #include "greenflame_core/window_query.h"
 
 namespace greenflame::core {
 
+enum class CaptureSourceKind : uint8_t {
+    ScreenRect = 0,
+    Window = 1,
+};
+
 struct CaptureSaveRequest final {
+    CaptureSourceKind source_kind = CaptureSourceKind::ScreenRect;
+    WindowCaptureBackend window_capture_backend = WindowCaptureBackend::Auto;
     RectPx source_rect_screen = {};
+    HWND source_window = nullptr;
     InsetsPx padding_px = {};
     COLORREF fill_color = static_cast<COLORREF>(0);
     bool preserve_source_extent = false;
     std::vector<Annotation> annotations = {};
 
     constexpr bool operator==(const CaptureSaveRequest &) const noexcept = default;
+};
+
+enum class CaptureSaveStatus : uint8_t {
+    Success = 0,
+    BackendFailed = 1,
+    SaveFailed = 2,
+};
+
+struct CaptureSaveResult final {
+    CaptureSaveStatus status = CaptureSaveStatus::SaveFailed;
+    std::wstring error_message = {};
+
+    bool operator==(const CaptureSaveResult &) const noexcept = default;
 };
 
 enum class AnnotationPreparationStatus : uint8_t {
@@ -74,15 +96,17 @@ class IWindowInspector {
     Get_window_rect_under_cursor(POINT screen_pt, HWND exclude_hwnd) const = 0;
     [[nodiscard]] virtual std::vector<WindowMatch>
     Find_windows_by_title(std::wstring_view needle) const = 0;
+    [[nodiscard]] virtual size_t
+    Count_minimized_windows_by_title(std::wstring_view needle) const = 0;
 };
 
 class ICaptureService {
   public:
     virtual ~ICaptureService() = default;
     [[nodiscard]] virtual bool Copy_rect_to_clipboard(core::RectPx screen_rect) = 0;
-    [[nodiscard]] virtual bool
-    Save_rect_to_file(core::CaptureSaveRequest const &request, std::wstring_view path,
-                      core::ImageSaveFormat format) = 0;
+    [[nodiscard]] virtual core::CaptureSaveResult
+    Save_capture_to_file(core::CaptureSaveRequest const &request,
+                         std::wstring_view path, core::ImageSaveFormat format) = 0;
 };
 
 class IAnnotationPreparationService {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "greenflame_core/rect_px.h"
+#include "greenflame_core/window_capture_backend.h"
 
 namespace greenflame::core {
 
@@ -41,6 +42,8 @@ struct CliOptions final {
     std::optional<CliOutputFormat> output_format = std::nullopt;
     CliAction action = CliAction::None;
     CliCaptureMode capture_mode = CliCaptureMode::None;
+    WindowCaptureBackend window_capture_backend = WindowCaptureBackend::Auto;
+    bool window_capture_backend_explicit = false;
     bool overwrite_output = false;
 #ifdef DEBUG
     bool testing_1_2 = false;

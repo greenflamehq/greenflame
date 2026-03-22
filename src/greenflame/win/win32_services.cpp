@@ -5,6 +5,7 @@
 #include "win/display_queries.h"
 #include "win/gdi_capture.h"
 #include "win/save_image.h"
+#include "win/wgc_window_capture.h"
 
 namespace {
 
@@ -17,17 +18,48 @@ struct WindowSearchState {
     bool had_exception = false;
 };
 
-[[nodiscard]] std::optional<greenflame::core::WindowCandidateInfo>
-Try_get_window_candidate_info(HWND hwnd, greenflame::IWindowQuery const &window_query) {
+struct MinimizedWindowSearchState {
+    std::wstring_view needle = {};
+    size_t match_count = 0;
+    bool had_exception = false;
+};
+
+[[nodiscard]] bool Is_window_cloaked(HWND hwnd) noexcept {
+    DWORD cloaked = 0;
+    HRESULT const hr =
+        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked));
+    return SUCCEEDED(hr) && cloaked != 0;
+}
+
+[[nodiscard]] bool Is_searchable_top_level_window(HWND hwnd,
+                                                  bool allow_minimized) noexcept {
     if (IsWindow(hwnd) == 0 || IsWindowVisible(hwnd) == 0 ||
-        GetParent(hwnd) != nullptr) {
+        GetParent(hwnd) != nullptr || Is_window_cloaked(hwnd)) {
+        return false;
+    }
+
+    return allow_minimized || IsIconic(hwnd) == 0;
+}
+
+[[nodiscard]] std::optional<greenflame::core::WindowCandidateInfo>
+Try_get_window_candidate_info(HWND hwnd, greenflame::IWindowQuery const *window_query,
+                              bool allow_minimized) {
+    if (!Is_searchable_top_level_window(hwnd, allow_minimized)) {
         return std::nullopt;
     }
 
-    std::optional<greenflame::core::RectPx> const rect =
-        window_query.Get_window_rect(hwnd);
-    if (!rect.has_value()) {
-        return std::nullopt;
+    greenflame::core::RectPx rect = {};
+    if (!allow_minimized) {
+        if (window_query == nullptr) {
+            return std::nullopt;
+        }
+
+        std::optional<greenflame::core::RectPx> const queried_rect =
+            window_query->Get_window_rect(hwnd);
+        if (!queried_rect.has_value()) {
+            return std::nullopt;
+        }
+        rect = *queried_rect;
     }
 
     int const title_len = GetWindowTextLengthW(hwnd);
@@ -52,7 +84,7 @@ Try_get_window_candidate_info(HWND hwnd, greenflame::IWindowQuery const &window_
     greenflame::core::WindowCandidateInfo info{};
     info.title = std::move(title);
     info.class_name = std::move(class_name);
-    info.rect = *rect;
+    info.rect = rect;
     info.hwnd_value = reinterpret_cast<std::uintptr_t>(hwnd);
     return info;
 }
@@ -64,16 +96,8 @@ BOOL CALLBACK Enum_windows_by_title_proc(HWND hwnd, LPARAM lparam) noexcept {
     }
 
     try {
-        if (IsWindowVisible(hwnd) == 0 || GetParent(hwnd) != nullptr) {
-            return TRUE;
-        }
-
-        if (state->window_query == nullptr) {
-            return FALSE;
-        }
-
         std::optional<greenflame::core::WindowCandidateInfo> const info =
-            Try_get_window_candidate_info(hwnd, *state->window_query);
+            Try_get_window_candidate_info(hwnd, state->window_query, false);
         if (!info.has_value() || info->title.empty()) {
             return TRUE;
         }
@@ -84,6 +108,36 @@ BOOL CALLBACK Enum_windows_by_title_proc(HWND hwnd, LPARAM lparam) noexcept {
         }
 
         state->matches.push_back(greenflame::WindowMatch{*info, hwnd});
+        return TRUE;
+    } catch (...) {
+        state->had_exception = true;
+        return FALSE;
+    }
+}
+
+BOOL CALLBACK Enum_minimized_windows_by_title_proc(HWND hwnd, LPARAM lparam) noexcept {
+    auto *state = reinterpret_cast<MinimizedWindowSearchState *>(lparam);
+    if (state == nullptr) {
+        return FALSE;
+    }
+
+    try {
+        if (IsIconic(hwnd) == 0) {
+            return TRUE;
+        }
+
+        std::optional<greenflame::core::WindowCandidateInfo> const info =
+            Try_get_window_candidate_info(hwnd, nullptr, true);
+        if (!info.has_value() || info->title.empty()) {
+            return TRUE;
+        }
+
+        if (!greenflame::core::Contains_no_case(info->title, state->needle) ||
+            greenflame::core::Is_cli_invocation_window(*info, state->needle)) {
+            return TRUE;
+        }
+
+        ++state->match_count;
         return TRUE;
     } catch (...) {
         state->had_exception = true;
@@ -186,6 +240,30 @@ void Strip_utf8_bom(std::string &utf8_text) {
     return true;
 }
 
+[[nodiscard]] greenflame::core::CaptureSaveResult
+Make_capture_save_result(greenflame::core::CaptureSaveStatus status,
+                         std::wstring_view error_message = {}) {
+    return greenflame::core::CaptureSaveResult{status, std::wstring(error_message)};
+}
+
+[[nodiscard]] greenflame::core::CaptureSaveResult
+Save_bitmap_to_file(greenflame::GdiCaptureResult const &capture, std::wstring_view path,
+                    greenflame::core::ImageSaveFormat format) {
+    if (path.empty()) {
+        return Make_capture_save_result(
+            greenflame::core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to encode or write image file.");
+    }
+
+    std::wstring const output_path(path);
+    if (!greenflame::Save_capture_to_file(capture, output_path.c_str(), format)) {
+        return Make_capture_save_result(
+            greenflame::core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to encode or write image file.");
+    }
+    return Make_capture_save_result(greenflame::core::CaptureSaveStatus::Success);
+}
+
 [[nodiscard]] bool Composite_annotations_into_capture(
     greenflame::GdiCaptureResult &capture,
     std::span<const greenflame::core::Annotation> annotations,
@@ -245,6 +323,73 @@ template <typename T>
                annotation.premultiplied_bgra.size();
 }
 
+[[nodiscard]] greenflame::core::CaptureSaveResult
+Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
+                                  greenflame::core::CaptureSaveRequest const &request,
+                                  std::wstring_view path,
+                                  greenflame::core::ImageSaveFormat format) {
+    int32_t source_width = 0;
+    int32_t source_height = 0;
+    int32_t output_width = 0;
+    int32_t output_height = 0;
+    if (!Try_compute_render_sizes(request, source_width, source_height, output_width,
+                                  output_height)) {
+        return Make_capture_save_result(
+            greenflame::core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to prepare the capture bitmap.");
+    }
+
+    if (source_capture.width != source_width ||
+        source_capture.height != source_height) {
+        return Make_capture_save_result(
+            greenflame::core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to prepare the capture bitmap.");
+    }
+
+    if (request.padding_px.Is_zero()) {
+        if (!Composite_annotations_into_capture(source_capture, request.annotations,
+                                                request.source_rect_screen)) {
+            return Make_capture_save_result(
+                greenflame::core::CaptureSaveStatus::SaveFailed,
+                L"Error: Failed to compose annotations onto the capture.");
+        }
+        return Save_bitmap_to_file(source_capture, path, format);
+    }
+
+    greenflame::GdiCaptureResult final_capture{};
+    if (!greenflame::Create_solid_capture(output_width, output_height,
+                                          request.fill_color, final_capture)) {
+        return Make_capture_save_result(
+            greenflame::core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to prepare the capture bitmap.");
+    }
+
+    greenflame::core::CaptureSaveResult result =
+        Make_capture_save_result(greenflame::core::CaptureSaveStatus::Success);
+    bool const blitted = greenflame::Blit_capture(
+        source_capture, 0, 0, source_width, source_height, final_capture,
+        request.padding_px.left, request.padding_px.top);
+    if (!blitted) {
+        result =
+            Make_capture_save_result(greenflame::core::CaptureSaveStatus::SaveFailed,
+                                     L"Error: Failed to prepare the capture bitmap.");
+    } else {
+        greenflame::core::RectPx annotation_target_bounds = {};
+        if (!Try_compute_annotation_target_bounds(request, annotation_target_bounds) ||
+            !Composite_annotations_into_capture(final_capture, request.annotations,
+                                                annotation_target_bounds)) {
+            result = Make_capture_save_result(
+                greenflame::core::CaptureSaveStatus::SaveFailed,
+                L"Error: Failed to compose annotations onto the capture.");
+        } else {
+            result = Save_bitmap_to_file(final_capture, path, format);
+        }
+    }
+
+    final_capture.Free();
+    return result;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -268,7 +413,7 @@ std::optional<core::RectPx> Win32WindowInspector::Get_window_rect(HWND hwnd) con
 
 std::optional<core::WindowCandidateInfo>
 Win32WindowInspector::Get_window_info(HWND hwnd) const {
-    return Try_get_window_candidate_info(hwnd, window_query_);
+    return Try_get_window_candidate_info(hwnd, &window_query_, false);
 }
 
 bool Win32WindowInspector::Is_window_valid(HWND hwnd) const {
@@ -306,6 +451,18 @@ Win32WindowInspector::Find_windows_by_title(std::wstring_view needle) const {
     return state.matches;
 }
 
+size_t
+Win32WindowInspector::Count_minimized_windows_by_title(std::wstring_view needle) const {
+    MinimizedWindowSearchState state{};
+    state.needle = needle;
+    (void)EnumWindows(Enum_minimized_windows_by_title_proc,
+                      reinterpret_cast<LPARAM>(&state));
+    if (state.had_exception) {
+        return 0;
+    }
+    return state.match_count;
+}
+
 bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect) {
     if (screen_rect.Is_empty()) {
         return false;
@@ -339,24 +496,53 @@ bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect) {
     return copied;
 }
 
-bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &request,
-                                            std::wstring_view path,
-                                            core::ImageSaveFormat format) {
+core::CaptureSaveResult
+Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &request,
+                                          std::wstring_view path,
+                                          core::ImageSaveFormat format) {
     if (request.source_rect_screen.Is_empty() || path.empty()) {
-        return false;
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to encode or write image "
+                                        L"file.");
+    }
+
+    if (request.source_kind == core::CaptureSourceKind::Window &&
+        request.window_capture_backend == core::WindowCaptureBackend::Wgc) {
+        if (request.source_window == nullptr) {
+            return Make_capture_save_result(
+                core::CaptureSaveStatus::BackendFailed,
+                L"Error: WGC window capture requires a valid target window.");
+        }
+
+        GdiCaptureResult source_capture{};
+        core::CaptureSaveResult wgc_result = greenflame::Capture_window_with_wgc(
+            request.source_window, request.source_rect_screen, source_capture);
+        if (wgc_result.status != core::CaptureSaveStatus::Success) {
+            source_capture.Free();
+            return wgc_result;
+        }
+
+        core::CaptureSaveResult const save_result =
+            Save_exact_source_capture_to_file(source_capture, request, path, format);
+        source_capture.Free();
+        return save_result;
     }
 
     core::RectPx const virtual_bounds = greenflame::Get_virtual_desktop_bounds_px();
     std::optional<core::RectPx> const clipped_screen =
         core::RectPx::Clip(request.source_rect_screen, virtual_bounds);
     if (!clipped_screen.has_value()) {
-        return false;
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to prepare the capture "
+                                        L"bitmap.");
     }
 
     if (!request.preserve_source_extent && request.padding_px.Is_zero()) {
         GdiCaptureResult capture{};
         if (!greenflame::Capture_virtual_desktop(capture)) {
-            return false;
+            return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                            L"Error: Failed to prepare the capture "
+                                            L"bitmap.");
         }
 
         core::RectPx const capture_rect =
@@ -367,20 +553,23 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
             capture_rect.Height(), cropped);
         capture.Free();
         if (!cropped_ok) {
-            return false;
+            return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                            L"Error: Failed to prepare the capture "
+                                            L"bitmap.");
         }
 
         if (!Composite_annotations_into_capture(cropped, request.annotations,
                                                 request.source_rect_screen)) {
             cropped.Free();
-            return false;
+            return Make_capture_save_result(
+                core::CaptureSaveStatus::SaveFailed,
+                L"Error: Failed to compose annotations onto the capture.");
         }
 
-        std::wstring const output_path(path);
-        bool const saved =
-            greenflame::Save_capture_to_file(cropped, output_path.c_str(), format);
+        core::CaptureSaveResult const save_result =
+            Save_bitmap_to_file(cropped, path, format);
         cropped.Free();
-        return saved;
+        return save_result;
     }
 
     int32_t source_width = 0;
@@ -389,19 +578,25 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
     int32_t output_height = 0;
     if (!Try_compute_render_sizes(request, source_width, source_height, output_width,
                                   output_height)) {
-        return false;
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to prepare the capture "
+                                        L"bitmap.");
     }
 
     GdiCaptureResult capture{};
     if (!greenflame::Capture_virtual_desktop(capture)) {
-        return false;
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to prepare the capture "
+                                        L"bitmap.");
     }
 
     GdiCaptureResult source_canvas{};
     if (!greenflame::Create_solid_capture(source_width, source_height,
                                           request.fill_color, source_canvas)) {
         capture.Free();
-        return false;
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to prepare the capture "
+                                        L"bitmap.");
     }
 
     core::RectPx const capture_rect =
@@ -421,7 +616,9 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
     capture.Free();
     if (!blitted_source) {
         source_canvas.Free();
-        return false;
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to prepare the capture "
+                                        L"bitmap.");
     }
 
     GdiCaptureResult final_capture{};
@@ -430,7 +627,9 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
         if (!greenflame::Create_solid_capture(output_width, output_height,
                                               request.fill_color, final_capture)) {
             source_canvas.Free();
-            return false;
+            return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                            L"Error: Failed to prepare the capture "
+                                            L"bitmap.");
         }
         bool const blitted_final = greenflame::Blit_capture(
             source_canvas, 0, 0, source_width, source_height, final_capture,
@@ -438,7 +637,9 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
         source_canvas.Free();
         if (!blitted_final) {
             final_capture.Free();
-            return false;
+            return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                            L"Error: Failed to prepare the capture "
+                                            L"bitmap.");
         }
         capture_to_save = &final_capture;
     }
@@ -453,18 +654,19 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
         } else {
             final_capture.Free();
         }
-        return false;
+        return Make_capture_save_result(
+            core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to compose annotations onto the capture.");
     }
 
-    std::wstring const output_path(path);
-    bool const saved =
-        greenflame::Save_capture_to_file(*capture_to_save, output_path.c_str(), format);
+    core::CaptureSaveResult const save_result =
+        Save_bitmap_to_file(*capture_to_save, path, format);
     if (capture_to_save == &source_canvas) {
         source_canvas.Free();
     } else {
         final_capture.Free();
     }
-    return saved;
+    return save_result;
 }
 
 core::AnnotationPreparationResult

@@ -18,9 +18,10 @@ enum class CliOptionId : uint8_t {
     Padding = 9,
     PaddingColor = 10,
     Annotate = 11,
-    Overwrite = 12,
+    WindowCapture = 12,
+    Overwrite = 13,
 #ifdef DEBUG
-    Testing12 = 13,
+    Testing12 = 14,
 #endif
 };
 
@@ -168,6 +169,17 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
         L"Apply JSON-defined annotations to the saved CLI capture.",
         L'\0',
         CliOptionId::Annotate,
+        CliOptionValueKind::String,
+        CliOptionGroup::Optional,
+        false,
+    },
+    {
+        L"window-capture",
+        L"<auto|gdi|wgc>",
+        L"CLI-only window capture backend. Valid only with --window or "
+        L"--window-hwnd. Defaults to auto.",
+        L'\0',
+        CliOptionId::WindowCapture,
         CliOptionValueKind::String,
         CliOptionGroup::Optional,
         false,
@@ -469,6 +481,35 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     return false;
 }
 
+[[nodiscard]] bool
+Try_parse_window_capture_backend(std::wstring_view value,
+                                 WindowCaptureBackend &backend) noexcept {
+    std::wstring_view const trimmed = Trim_wspace(value);
+    if (trimmed.empty()) {
+        return false;
+    }
+
+    std::wstring lower;
+    lower.reserve(trimmed.size());
+    for (wchar_t const ch : trimmed) {
+        lower.push_back(static_cast<wchar_t>(std::towlower(ch)));
+    }
+
+    if (lower == L"auto") {
+        backend = WindowCaptureBackend::Auto;
+        return true;
+    }
+    if (lower == L"gdi") {
+        backend = WindowCaptureBackend::Gdi;
+        return true;
+    }
+    if (lower == L"wgc") {
+        backend = WindowCaptureBackend::Wgc;
+        return true;
+    }
+    return false;
+}
+
 [[nodiscard]] std::wstring Make_option_display_name(CliOptionSpec const &spec) {
     std::wstring out;
     if (spec.short_name != L'\0') {
@@ -683,6 +724,18 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         }
         options.annotate_value = value;
         return CliParseResult{{}, options, true};
+    case CliOptionId::WindowCapture: {
+        WindowCaptureBackend backend = WindowCaptureBackend::Auto;
+        if (!Try_parse_window_capture_backend(value, backend)) {
+            return Make_error(L"--window-capture expects one of: auto, gdi, or wgc.");
+        }
+        if (options.window_capture_backend_explicit) {
+            return Make_error(L"--window-capture can only be specified once.");
+        }
+        options.window_capture_backend = backend;
+        options.window_capture_backend_explicit = true;
+        return CliParseResult{{}, options, true};
+    }
     case CliOptionId::Overwrite:
         options.overwrite_output = true;
         return CliParseResult{{}, options, true};
@@ -715,6 +768,10 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         return Make_error(
             L"--annotate requires one capture mode: --region, --window, --monitor, "
             L"or --desktop.");
+    }
+    if (options.window_capture_backend_explicit &&
+        options.capture_mode != CliCaptureMode::Window) {
+        return Make_error(L"--window-capture requires --window or --window-hwnd.");
     }
     if (options.padding_color_override.has_value() && !options.padding_px.has_value()) {
         return Make_error(L"--padding-color requires --padding.");

@@ -138,6 +138,40 @@ Find_unique_exact_title_match(std::vector<greenflame::WindowMatch> const &matche
     return exact_match_index;
 }
 
+[[nodiscard]] bool
+Uses_wgc_title_match_handling(greenflame::core::WindowCaptureBackend backend) noexcept {
+    return backend != greenflame::core::WindowCaptureBackend::Gdi;
+}
+
+[[nodiscard]] std::wstring
+Format_minimized_title_match_error(std::wstring_view query,
+                                   size_t minimized_match_count) {
+    std::wstring message = {};
+    if (minimized_match_count == 1) {
+        message = L"Error: A matching window is minimized: ";
+        message += query;
+        message += L". Restore it and try again.";
+        return message;
+    }
+
+    message = L"Error: All matching windows are minimized: ";
+    message += query;
+    message += L". Restore one and try again.";
+    return message;
+}
+
+[[nodiscard]] std::wstring
+Format_skipped_minimized_window_warning(size_t minimized_match_count) {
+    std::wstring message = L"Warning: ";
+    message += std::to_wstring(minimized_match_count);
+    if (minimized_match_count == 1) {
+        message += L" additional matching window is minimized and was skipped.";
+    } else {
+        message += L" additional matching windows are minimized and were skipped.";
+    }
+    return message;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -324,10 +358,12 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
     std::wstring window_title = {};
     std::optional<HWND> captured_window = std::nullopt;
     WindowObscuration window_obscuration = WindowObscuration::None;
-    bool window_partially_out_of_bounds = false;
+    size_t skipped_minimized_title_match_count = 0;
     bool const has_padding = cli_options.padding_px.has_value();
     core::InsetsPx const padding_px = cli_options.padding_px.value_or(core::InsetsPx{});
     COLORREF const padding_color = Resolve_padding_color(config_, cli_options);
+    core::WindowCaptureBackend const requested_window_capture_backend =
+        cli_options.window_capture_backend;
 
     switch (cli_options.capture_mode) {
     case core::CliCaptureMode::Region:
@@ -374,6 +410,8 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
 
         std::vector<WindowMatch> const raw_matches =
             window_inspector_.Find_windows_by_title(cli_options.window_name);
+        bool const use_wgc_title_match_handling =
+            Uses_wgc_title_match_handling(requested_window_capture_backend);
 
         std::vector<WindowMatch> matches = {};
         matches.reserve(raw_matches.size());
@@ -384,6 +422,18 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         }
 
         if (matches.empty()) {
+            if (use_wgc_title_match_handling) {
+                size_t const minimized_match_count =
+                    window_inspector_.Count_minimized_windows_by_title(
+                        cli_options.window_name);
+                if (minimized_match_count > 0) {
+                    return Make_cli_error(
+                        ProcessExitCode::CliWindowMinimized,
+                        Format_minimized_title_match_error(cli_options.window_name,
+                                                           minimized_match_count));
+                }
+            }
+
             std::wstring message = L"Error: No visible window matches: ";
             message += cli_options.window_name;
             return Make_cli_error(ProcessExitCode::CliWindowNotFound, message);
@@ -433,6 +483,11 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         window_title = matches[selected_match_index].info.title;
         source = core::SaveSelectionSource::Window;
         window_obscuration = window_inspector_.Get_window_obscuration(*captured_window);
+        if (use_wgc_title_match_handling) {
+            skipped_minimized_title_match_count =
+                window_inspector_.Count_minimized_windows_by_title(
+                    cli_options.window_name);
+        }
         break;
     }
     case core::CliCaptureMode::Monitor: {
@@ -462,8 +517,69 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         return {};
     }
 
-    [[maybe_unused]] int32_t padded_output_width = 0;
-    [[maybe_unused]] int32_t padded_output_height = 0;
+    auto try_resolve_and_reserve_output =
+        [&](std::wstring &output_path, core::ImageSaveFormat &output_format,
+            bool &delete_output_path_on_failure) -> std::optional<CliResult> {
+        core::ImageSaveFormat const default_format =
+            cli_options.output_format.has_value()
+                ? core::Image_save_format_from_cli_format(*cli_options.output_format)
+                : Default_image_save_format_from_config(config_);
+        output_format = default_format;
+
+        bool const has_explicit_output_path = !cli_options.output_path.empty();
+        if (has_explicit_output_path) {
+            core::ResolveExplicitPathResult const resolved =
+                core::Resolve_explicit_output_path(
+                    cli_options.output_path, default_format, cli_options.output_format);
+            if (!resolved.ok || resolved.path.empty()) {
+                if (!resolved.error_message.empty()) {
+                    return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                          resolved.error_message);
+                }
+                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                      L"Error: Unable to resolve output path.");
+            }
+            output_path = resolved.path;
+            output_format = resolved.format;
+        } else {
+            output_path = Build_default_output_path(source, monitor_index_zero_based,
+                                                    window_title, default_format);
+        }
+
+        output_path = file_system_service_.Resolve_absolute_path(output_path);
+
+        delete_output_path_on_failure = false;
+        if (!has_explicit_output_path) {
+            std::wstring const reserved =
+                file_system_service_.Reserve_unique_file_path(output_path);
+            if (reserved.empty()) {
+                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                      L"Error: Unable to reserve an output path.");
+            }
+            output_path = reserved;
+            delete_output_path_on_failure = true;
+        } else if (!cli_options.overwrite_output) {
+            bool already_exists = false;
+            if (!file_system_service_.Try_reserve_exact_file_path(output_path,
+                                                                  already_exists)) {
+                if (already_exists) {
+                    std::wstring message = L"Error: Output file already exists: ";
+                    message += output_path;
+                    message += L". Use --overwrite (or -f) to replace it.";
+                    return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                          message);
+                }
+                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                      L"Error: Unable to reserve the output path.");
+            }
+            delete_output_path_on_failure = true;
+        }
+
+        return std::nullopt;
+    };
+
+    int32_t padded_output_width = 0;
+    int32_t padded_output_height = 0;
     if (has_padding &&
         !Try_compute_padded_output_size(target_rect, padding_px, padded_output_width,
                                         padded_output_height)) {
@@ -474,11 +590,13 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
 
     core::RectPx const virtual_bounds =
         display_queries_.Get_virtual_desktop_bounds_px();
-    std::wstring stderr_text = {};
     std::optional<core::RectPx> const clipped =
         core::RectPx::Clip(target_rect, virtual_bounds);
-    window_partially_out_of_bounds = clipped.has_value() && *clipped != target_rect;
-    if (!clipped.has_value()) {
+    bool const target_partially_out_of_bounds =
+        clipped.has_value() && *clipped != target_rect;
+
+    auto make_outside_virtual_desktop_error = [&]() -> CliResult {
+        std::wstring stderr_text = {};
         if (cli_options.capture_mode == core::CliCaptureMode::Window) {
             Append_line(stderr_text,
                         L"Error: Matched window is completely outside the virtual "
@@ -489,31 +607,47 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
                         L"desktop.");
         }
         return CliResult{{}, stderr_text, ProcessExitCode::CliCaptureSaveFailed};
-    }
+    };
 
-    if (window_obscuration == WindowObscuration::Full) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is fully obscured by other windows. "
-                    L"The saved image may not show that window.");
-    } else if (!has_padding && window_obscuration == WindowObscuration::Partial &&
-               window_partially_out_of_bounds) {
-        Append_line(stderr_text,
+    auto append_gdi_capture_warnings = [&](std::wstring &stderr_text) {
+        if (source == core::SaveSelectionSource::Window) {
+            if (window_obscuration == WindowObscuration::Full) {
+                Append_line(stderr_text,
+                            L"Warning: Matched window is fully obscured by other "
+                            L"windows. The saved image may not show that window.");
+            } else if (!has_padding &&
+                       window_obscuration == WindowObscuration::Partial &&
+                       target_partially_out_of_bounds) {
+                Append_line(
+                    stderr_text,
                     L"Warning: Matched window is partially obscured and partially "
                     L"outside visible desktop bounds. The saved image may include "
                     L"other windows and may clip the target window.");
-    } else if (window_obscuration == WindowObscuration::Partial) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially obscured by other "
-                    L"windows. The saved image may include those windows.");
-    } else if (!has_padding && window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially outside visible desktop "
-                    L"bounds. The saved image may clip the target window.");
-    }
-    if (has_padding && window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Requested capture area extends outside the virtual "
-                    L"desktop. Uncovered areas were filled with the padding color.");
+            } else if (window_obscuration == WindowObscuration::Partial) {
+                Append_line(stderr_text,
+                            L"Warning: Matched window is partially obscured by other "
+                            L"windows. The saved image may include those windows.");
+            } else if (!has_padding && target_partially_out_of_bounds) {
+                Append_line(stderr_text,
+                            L"Warning: Matched window is partially outside visible "
+                            L"desktop bounds. The saved image may clip the target "
+                            L"window.");
+            }
+        }
+
+        if (has_padding && target_partially_out_of_bounds) {
+            Append_line(stderr_text,
+                        L"Warning: Requested capture area extends outside the virtual "
+                        L"desktop. Uncovered areas were filled with the padding "
+                        L"color.");
+        }
+    };
+
+    bool const requires_gdi_precheck =
+        cli_options.capture_mode != core::CliCaptureMode::Window ||
+        requested_window_capture_backend == core::WindowCaptureBackend::Gdi;
+    if (requires_gdi_precheck && !clipped.has_value()) {
+        return make_outside_virtual_desktop_error();
     }
 
     std::vector<core::Annotation> prepared_annotations = {};
@@ -577,76 +711,143 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         }
     }
 
-    core::ImageSaveFormat const default_format =
-        cli_options.output_format.has_value()
-            ? core::Image_save_format_from_cli_format(*cli_options.output_format)
-            : Default_image_save_format_from_config(config_);
-    core::ImageSaveFormat output_format = default_format;
-
-    bool const has_explicit_output_path = !cli_options.output_path.empty();
     std::wstring output_path = {};
-    if (has_explicit_output_path) {
-        core::ResolveExplicitPathResult const resolved =
-            core::Resolve_explicit_output_path(cli_options.output_path, default_format,
-                                               cli_options.output_format);
-        if (!resolved.ok || resolved.path.empty()) {
-            if (!resolved.error_message.empty()) {
-                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
-                                      resolved.error_message);
-            }
-            return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
-                                  L"Error: Unable to resolve output path.");
-        }
-        output_path = resolved.path;
-        output_format = resolved.format;
-    } else {
-        output_path = Build_default_output_path(source, monitor_index_zero_based,
-                                                window_title, default_format);
-    }
-
-    output_path = file_system_service_.Resolve_absolute_path(output_path);
-
+    core::ImageSaveFormat output_format = core::ImageSaveFormat::Png;
     bool delete_output_path_on_failure = false;
-    if (!has_explicit_output_path) {
-        std::wstring const reserved =
-            file_system_service_.Reserve_unique_file_path(output_path);
-        if (reserved.empty()) {
-            return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
-                                  L"Error: Unable to reserve an output path.");
-        }
-        output_path = reserved;
-        delete_output_path_on_failure = true;
-    } else if (!cli_options.overwrite_output) {
-        bool already_exists = false;
-        if (!file_system_service_.Try_reserve_exact_file_path(output_path,
-                                                              already_exists)) {
-            if (already_exists) {
-                std::wstring message = L"Error: Output file already exists: ";
-                message += output_path;
-                message += L". Use --overwrite (or -f) to replace it.";
-                return Make_cli_error(ProcessExitCode::CliOutputPathFailure, message);
-            }
-            return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
-                                  L"Error: Unable to reserve the output path.");
-        }
-        delete_output_path_on_failure = true;
+    if (std::optional<CliResult> const output_error = try_resolve_and_reserve_output(
+            output_path, output_format, delete_output_path_on_failure);
+        output_error.has_value()) {
+        return *output_error;
     }
 
-    core::CaptureSaveRequest save_request{};
-    save_request.source_rect_screen = target_rect;
-    save_request.padding_px = padding_px;
-    save_request.fill_color = padding_color;
-    save_request.preserve_source_extent = has_padding;
-    save_request.annotations = prepared_annotations;
+    auto make_save_request =
+        [&](core::CaptureSourceKind source_kind,
+            core::WindowCaptureBackend backend) -> core::CaptureSaveRequest {
+        core::CaptureSaveRequest save_request{};
+        save_request.source_kind = source_kind;
+        save_request.window_capture_backend = backend;
+        save_request.source_rect_screen = target_rect;
+        save_request.source_window = captured_window.value_or(nullptr);
+        save_request.padding_px = padding_px;
+        save_request.fill_color = padding_color;
+        save_request.preserve_source_extent = has_padding;
+        save_request.annotations = prepared_annotations;
+        return save_request;
+    };
 
-    if (!capture_service_.Save_rect_to_file(save_request, output_path, output_format)) {
-        if (delete_output_path_on_failure) {
-            file_system_service_.Delete_file_if_exists(output_path);
+    auto append_save_failure_message = [&](std::wstring &stderr_text,
+                                           core::CaptureSaveResult const &save_result) {
+        if (!save_result.error_message.empty()) {
+            Append_line(stderr_text, save_result.error_message);
+            return;
         }
         std::wstring error_message = L"Error: Failed to encode or write image file: ";
         error_message += output_path;
         Append_line(stderr_text, error_message);
-        return CliResult{{}, stderr_text, ProcessExitCode::CliCaptureSaveFailed};
+    };
+
+    auto finish_with_save_result =
+        [&](core::CaptureSaveResult const &save_result, std::wstring &stderr_text,
+            ProcessExitCode backend_failure_exit_code) -> std::optional<CliResult> {
+        if (save_result.status == core::CaptureSaveStatus::Success) {
+            return std::nullopt;
+        }
+
+        if (delete_output_path_on_failure) {
+            file_system_service_.Delete_file_if_exists(output_path);
+        }
+
+        append_save_failure_message(stderr_text, save_result);
+        ProcessExitCode exit_code = ProcessExitCode::CliCaptureSaveFailed;
+        if (save_result.status == core::CaptureSaveStatus::BackendFailed) {
+            exit_code = backend_failure_exit_code;
+        }
+        return CliResult{{}, stderr_text, exit_code};
+    };
+
+    std::wstring stderr_text = {};
+    if (skipped_minimized_title_match_count > 0) {
+        Append_line(stderr_text, Format_skipped_minimized_window_warning(
+                                     skipped_minimized_title_match_count));
+    }
+    if (cli_options.capture_mode == core::CliCaptureMode::Window) {
+        auto save_window_capture =
+            [&](core::WindowCaptureBackend backend) -> core::CaptureSaveResult {
+            return capture_service_.Save_capture_to_file(
+                make_save_request(core::CaptureSourceKind::Window, backend),
+                output_path, output_format);
+        };
+
+        switch (requested_window_capture_backend) {
+        case core::WindowCaptureBackend::Gdi: {
+            append_gdi_capture_warnings(stderr_text);
+            if (std::optional<CliResult> const failure = finish_with_save_result(
+                    save_window_capture(core::WindowCaptureBackend::Gdi), stderr_text,
+                    ProcessExitCode::CliCaptureSaveFailed);
+                failure.has_value()) {
+                return *failure;
+            }
+            break;
+        }
+        case core::WindowCaptureBackend::Wgc: {
+            if (std::optional<CliResult> const failure = finish_with_save_result(
+                    save_window_capture(core::WindowCaptureBackend::Wgc), stderr_text,
+                    ProcessExitCode::CliWindowCaptureBackendFailed);
+                failure.has_value()) {
+                return *failure;
+            }
+            break;
+        }
+        case core::WindowCaptureBackend::Auto: {
+            core::CaptureSaveResult save_result =
+                save_window_capture(core::WindowCaptureBackend::Wgc);
+            if (save_result.status == core::CaptureSaveStatus::Success) {
+                break;
+            }
+            if (save_result.status == core::CaptureSaveStatus::SaveFailed) {
+                if (std::optional<CliResult> const failure =
+                        finish_with_save_result(save_result, stderr_text,
+                                                ProcessExitCode::CliCaptureSaveFailed);
+                    failure.has_value()) {
+                    return *failure;
+                }
+                break;
+            }
+
+            Append_line(stderr_text,
+                        L"Info: WGC window capture failed; falling back to GDI.");
+            if (!clipped.has_value()) {
+                if (delete_output_path_on_failure) {
+                    file_system_service_.Delete_file_if_exists(output_path);
+                }
+                Append_line(stderr_text,
+                            L"Error: Matched window is completely outside the "
+                            L"virtual desktop. Nothing to capture.");
+                return CliResult{
+                    {}, stderr_text, ProcessExitCode::CliCaptureSaveFailed};
+            }
+
+            append_gdi_capture_warnings(stderr_text);
+            if (std::optional<CliResult> const failure = finish_with_save_result(
+                    save_window_capture(core::WindowCaptureBackend::Gdi), stderr_text,
+                    ProcessExitCode::CliCaptureSaveFailed);
+                failure.has_value()) {
+                return *failure;
+            }
+            break;
+        }
+        }
+    } else {
+        append_gdi_capture_warnings(stderr_text);
+        if (std::optional<CliResult> const failure = finish_with_save_result(
+                capture_service_.Save_capture_to_file(
+                    make_save_request(core::CaptureSourceKind::ScreenRect,
+                                      core::WindowCaptureBackend::Gdi),
+                    output_path, output_format),
+                stderr_text, ProcessExitCode::CliCaptureSaveFailed);
+            failure.has_value()) {
+            return *failure;
+        }
     }
 
     Update_default_save_dir_from_path(config_, output_path);

@@ -16,7 +16,11 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     EXPECT_FALSE(result.options.annotate_value.has_value());
     EXPECT_TRUE(result.options.output_path.empty());
     EXPECT_FALSE(result.options.output_format.has_value());
+    EXPECT_EQ(result.options.window_capture_backend, WindowCaptureBackend::Auto);
+    EXPECT_FALSE(result.options.window_capture_backend_explicit);
     EXPECT_FALSE(result.options.overwrite_output);
+#ifdef DEBUG
+#endif
 }
 
 TEST(cli_options, CLI_parser_AcceptsRegionEquals) {
@@ -219,6 +223,66 @@ TEST(cli_options, CLI_parser_RejectsWhitespaceOnlyAnnotateValue) {
               std::wstring::npos);
 }
 
+TEST(cli_options, CLI_parser_AcceptsWindowCaptureBackendValues) {
+    {
+        std::vector<std::wstring> args = {L"--window", L"Notepad", L"--window-capture",
+                                          L"auto"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.window_capture_backend, WindowCaptureBackend::Auto);
+        EXPECT_TRUE(result.options.window_capture_backend_explicit);
+    }
+    {
+        std::vector<std::wstring> args = {L"--window", L"Notepad",
+                                          L"--window-capture=gdi"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.window_capture_backend, WindowCaptureBackend::Gdi);
+        EXPECT_TRUE(result.options.window_capture_backend_explicit);
+    }
+    {
+        std::vector<std::wstring> args = {L"--window-hwnd", L"0x1234",
+                                          L"--window-capture", L"wgc"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.window_capture_backend, WindowCaptureBackend::Wgc);
+        EXPECT_TRUE(result.options.window_capture_backend_explicit);
+    }
+}
+
+TEST(cli_options, CLI_parser_RejectsInvalidWindowCaptureBackend) {
+    std::vector<std::wstring> args = {L"--window", L"Notepad", L"--window-capture",
+                                      L"dxgi"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--window-capture expects one of"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsDuplicateWindowCaptureBackend) {
+    std::vector<std::wstring> args = {L"--window",         L"Notepad",
+                                      L"--window-capture", L"wgc",
+                                      L"--window-capture", L"gdi"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(
+        result.error_message.find(L"--window-capture can only be specified once."),
+        std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsWindowCaptureBackendWithoutWindowMode) {
+    for (std::vector<std::wstring> const &args :
+         {std::vector<std::wstring>{L"--desktop", L"--window-capture", L"auto"},
+          std::vector<std::wstring>{L"--monitor", L"1", L"--window-capture", L"wgc"},
+          std::vector<std::wstring>{L"--window-capture", L"gdi"}}) {
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(result.error_message.find(
+                      L"--window-capture requires --window or --window-hwnd."),
+                  std::wstring::npos);
+    }
+}
+
 TEST(cli_options, CLI_parser_RejectsInvalidPaddingColorAndDuplicates) {
     {
         std::vector<std::wstring> args = {L"--desktop", L"--padding", L"4",
@@ -386,14 +450,17 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"-p, --padding"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--padding-color"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--annotate"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--window-capture"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--overwrite"), std::wstring::npos);
     EXPECT_EQ(help_release.find(L"--testing-1-2"), std::wstring::npos);
 
 #ifdef DEBUG
     std::wstring const help_debug = Build_cli_help_text(true);
+    EXPECT_NE(help_debug.find(L"--window-capture"), std::wstring::npos);
     EXPECT_NE(help_debug.find(L"--testing-1-2"), std::wstring::npos);
 #else
     std::wstring const help_debug = Build_cli_help_text(true);
+    EXPECT_NE(help_debug.find(L"--window-capture"), std::wstring::npos);
     EXPECT_EQ(help_debug.find(L"--testing-1-2"), std::wstring::npos);
 #endif
 }

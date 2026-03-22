@@ -27,6 +27,8 @@ class Win32WindowInspector final : public IWindowInspector {
     Get_window_rect_under_cursor(POINT screen_pt, HWND exclude_hwnd) const override;
     [[nodiscard]] std::vector<WindowMatch>
     Find_windows_by_title(std::wstring_view needle) const override;
+    [[nodiscard]] size_t
+    Count_minimized_windows_by_title(std::wstring_view needle) const override;
 
   private:
     Win32WindowQuery window_query_ = {};
@@ -35,9 +37,9 @@ class Win32WindowInspector final : public IWindowInspector {
 class Win32CaptureService final : public ICaptureService {
   public:
     [[nodiscard]] bool Copy_rect_to_clipboard(core::RectPx screen_rect) override;
-    [[nodiscard]] bool Save_rect_to_file(core::CaptureSaveRequest const &request,
-                                         std::wstring_view path,
-                                         core::ImageSaveFormat format) override;
+    [[nodiscard]] core::CaptureSaveResult
+    Save_capture_to_file(core::CaptureSaveRequest const &request,
+                         std::wstring_view path, core::ImageSaveFormat format) override;
 };
 
 class Win32AnnotationPreparationService final : public IAnnotationPreparationService {

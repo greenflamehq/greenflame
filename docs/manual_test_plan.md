@@ -7,7 +7,7 @@ audience:
 status: reference
 owners:
   - core-team
-last_updated: 2026-03-19
+last_updated: 2026-03-22
 tags:
   - testing
   - manual
@@ -1085,3 +1085,40 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The unknown-key fixture reports a strict validation failure pointing at the offending property path.
   - The missing-font fixture reports that the explicit font family is not installed.
   - None of the four commands leaves behind a partially written output file.
+
+### GF-MAN-CLI-011 - CLI Window Capture Backends
+
+- Priority: `P2`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. For one visible unobscured window, run:
+     `greenflame.exe --window "<unique-title>" --window-capture gdi --output "%TEMP%\greenflame-window-gdi-visible.png" --overwrite`
+  2. Without moving the window, run:
+     `greenflame.exe --window "<unique-title>" --window-capture wgc --output "%TEMP%\greenflame-window-wgc-visible.png" --overwrite`
+  3. Without moving the window, run:
+     `greenflame.exe --window "<unique-title>" --window-capture auto --output "%TEMP%\greenflame-window-auto-visible.png" --overwrite`
+  4. Fully obscure the same target window with another window, then rerun the `gdi` and `wgc` commands with new output names.
+  5. Move the same target window so part of it sits outside the visible desktop, then rerun:
+     `greenflame.exe --window "<unique-title>" --window-capture gdi --padding 32 --output "%TEMP%\greenflame-window-gdi-offscreen.png" --overwrite`
+     and
+     `greenflame.exe --window "<unique-title>" --window-capture wgc --padding 32 --output "%TEMP%\greenflame-window-wgc-offscreen.png" --overwrite`
+  6. Rerun once with:
+     `greenflame.exe --window-hwnd <hex> --window-capture wgc --output "%TEMP%\greenflame-window-wgc-hwnd.png" --overwrite`
+  7. Rerun once with:
+     `greenflame.exe --window "<unique-title>" --window-capture wgc --padding 32 --annotate ".\schemas\examples\cli_annotations\local_mixed_edge_cases.json" --output "%TEMP%\greenflame-window-wgc-annotated.png" --overwrite`
+  8. Minimize the target window and run:
+     `greenflame.exe --window "<unique-title>" --window-capture wgc --output "%TEMP%\greenflame-window-wgc-minimized.png" --overwrite`
+  9. Create two windows whose titles both match the same `--window` query, leave one visible, minimize the other, and run:
+     `greenflame.exe --window "<shared-title>" --window-capture wgc --output "%TEMP%\greenflame-window-wgc-minimized-match-warning.png" --overwrite`
+  10. Minimize every matching window for that same title query and rerun the same command with a new output name.
+- Expected:
+  - `gdi` continues to reflect current visible-desktop limitations for unobscured, obscured, and partially off-screen windows.
+  - `wgc` captures the target window itself for unobscured, obscured, and partially off-screen cases, without the usual GDI warning text.
+  - `auto` behaves like `wgc` when WGC succeeds.
+  - The partially off-screen `wgc` case still adds only synthetic outer padding; it does not fill missing source pixels inside the nominal window image.
+  - The `--window-hwnd` `wgc` path behaves the same as the title-based `wgc` path for the same target window.
+  - The annotated `wgc` capture renders annotations over the final padded image using the same semantics as other CLI captures.
+  - The minimized-window `wgc` command still fails with exit code `13`.
+  - When one visible title match and one or more minimized title matches coexist, the `wgc` title-based command still succeeds and `stderr` warns that the minimized matches were skipped.
+  - When all title matches are minimized, the `wgc` title-based command exits with code `13` and reports that matching windows were minimized rather than saying no window matched.
+  - Record whether any yellow capture border appears on screen or in the saved output while `wgc` is active.
