@@ -13,6 +13,7 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     EXPECT_FALSE(result.options.window_hwnd.has_value());
     EXPECT_FALSE(result.options.padding_px.has_value());
     EXPECT_FALSE(result.options.padding_color_override.has_value());
+    EXPECT_FALSE(result.options.annotate_value.has_value());
     EXPECT_TRUE(result.options.output_path.empty());
     EXPECT_FALSE(result.options.output_format.has_value());
     EXPECT_FALSE(result.options.overwrite_output);
@@ -172,6 +173,49 @@ TEST(cli_options, CLI_parser_RejectsPaddingColorWithoutPadding) {
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error_message.find(L"--padding-color requires --padding"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_AcceptsAnnotateInlineJson) {
+    std::vector<std::wstring> args = {L"--desktop", L"--annotate",
+                                      L"{\"annotations\":[]}"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    ASSERT_TRUE(result.options.annotate_value.has_value());
+    EXPECT_EQ(*result.options.annotate_value, L"{\"annotations\":[]}");
+}
+
+TEST(cli_options, CLI_parser_AcceptsAnnotateEqualsForm) {
+    std::vector<std::wstring> args = {L"--desktop", L"--annotate=annotations.json"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    ASSERT_TRUE(result.options.annotate_value.has_value());
+    EXPECT_EQ(*result.options.annotate_value, L"annotations.json");
+}
+
+TEST(cli_options, CLI_parser_RejectsDuplicateAnnotate) {
+    std::vector<std::wstring> args = {L"--desktop", L"--annotate", L"{}", L"--annotate",
+                                      L"annotations.json"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--annotate can only be specified once"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsAnnotateWithoutCaptureMode) {
+    std::vector<std::wstring> args = {L"--annotate", L"{}"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--annotate requires one capture mode"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsWhitespaceOnlyAnnotateValue) {
+    std::vector<std::wstring> args = {L"--desktop", L"--annotate", L"   "};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(
+                  L"--annotate expects a non-empty JSON string or path"),
               std::wstring::npos);
 }
 
@@ -341,6 +385,7 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"--format"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"-p, --padding"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--padding-color"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--annotate"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--overwrite"), std::wstring::npos);
     EXPECT_EQ(help_release.find(L"--testing-1-2"), std::wstring::npos);
 

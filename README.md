@@ -169,6 +169,7 @@ Optional:
 | `-t, --format <png\|jpg\|jpeg\|bmp>` | Output format override |
 | `-p, --padding <n\|h,v\|l,t,r,b>` | Add synthetic padding around the captured image in physical pixels |
 | `--padding-color <#rrggbb>` | Override the padding color for this invocation only (valid only with `--padding`) |
+| `--annotate <json\|path>` | Apply JSON-defined annotations to the saved CLI capture |
 | `-f, --overwrite` | Allow replacing an existing explicit `--output` file |
 
 Both `--option=value` and `--option value` forms are supported.
@@ -187,6 +188,8 @@ greenflame.exe --window "Notepad" --output "D:\shots\note.jpg" --overwrite
 greenflame.exe --window="Notepad" --output "D:\shots\note"
 greenflame.exe --region 1200,100,800,600
 greenflame.exe --region 1200,100,800,600 --padding 8,16,24,32
+greenflame.exe --desktop --annotate "{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":20,\"y\":20},\"end\":{\"x\":220,\"y\":120},\"size\":4}]}"
+greenflame.exe --desktop --padding 64 --annotate ".\\schemas\\examples\\cli_annotations\\global_padding_edge_cases.json"
 ```
 
 **Padding**
@@ -201,6 +204,11 @@ greenflame.exe --region 1200,100,800,600 --padding 8,16,24,32
   1. `--padding-color`, if provided
   2. `save.padding_color` from config
   3. default black (`#000000`)
+
+**Annotations**
+
+- `--annotate` applies JSON-defined annotations to the saved CLI capture, using either inline JSON or a UTF-8 JSON file.
+- See [docs/cli_annotations.md](docs/cli_annotations.md) for the full format, schema/examples, coordinate rules, and validation behavior.
 
 **Window matching**
 
@@ -240,6 +248,7 @@ codes are unique and not reused.
 | `11` | Capture/save operation failed |
 | `12` | Matched window became unavailable before capture |
 | `13` | Matched window is minimized |
+| `14` | `--annotate` input is invalid (file read, JSON, validation, or missing explicit font family) |
 
 ---
 

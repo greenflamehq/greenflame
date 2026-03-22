@@ -1,0 +1,77 @@
+{
+  "coordinate_space": "global",
+  "color": "#ff4f81",
+  "highlighter_opacity_percent": 30,
+  "font": {
+    "family": "Segoe UI"
+  },
+  "annotations": [
+    {
+      "type": "highlighter",
+      "start": {
+        "x": -48,
+        "y": 24
+      },
+      "end": {
+        "x": 320,
+        "y": 24
+      },
+      "size": 10
+    },
+    {
+      "type": "filled_rectangle",
+      "left": -36,
+      "top": 60,
+      "width": 72,
+      "height": 48,
+      "color": "#ffcc00"
+    },
+    {
+      "type": "ellipse",
+      "center": {
+        "x": 120,
+        "y": 140
+      },
+      "width": 160,
+      "height": 80,
+      "size": 4,
+      "color": "#00ffaa"
+    },
+    {
+      "type": "text",
+      "origin": {
+        "x": 24,
+        "y": 170
+      },
+      "size": 10,
+      "color": "#ffffff",
+      "spans": [
+        {
+          "text": "Global desktop origin",
+          "bold": true
+        },
+        {
+          "text": "\nRaw family: Segoe UI",
+          "italic": true
+        }
+      ]
+    },
+    {
+      "type": "bubble",
+      "center": {
+        "x": 18,
+        "y": 18
+      },
+      "size": 10
+    },
+    {
+      "type": "bubble",
+      "center": {
+        "x": 340,
+        "y": 26
+      },
+      "size": 10,
+      "color": "#0080ff"
+    }
+  ]
+}

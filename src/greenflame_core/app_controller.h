@@ -31,6 +31,7 @@ class AppController final {
   public:
     AppController(core::AppConfig &config, IDisplayQueries &display_queries,
                   IWindowInspector &window_inspector, ICaptureService &capture_service,
+                  IAnnotationPreparationService &annotation_preparation_service,
                   IFileSystemService &file_system_service);
     AppController(AppController const &) = delete;
     AppController &operator=(AppController const &) = delete;
@@ -65,6 +66,7 @@ class AppController final {
     IDisplayQueries &display_queries_;
     IWindowInspector &window_inspector_;
     ICaptureService &capture_service_;
+    IAnnotationPreparationService &annotation_preparation_service_;
     IFileSystemService &file_system_service_;
 
     std::optional<core::RectPx> last_capture_screen_rect_ = std::nullopt;

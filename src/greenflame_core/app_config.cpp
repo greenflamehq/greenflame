@@ -10,19 +10,6 @@ constexpr size_t kMaxConfigPathChars = kMaxWindowsPathChars - 1;
 constexpr COLORREF kColorrefMask = 0x00FFFFFFu;
 constexpr int32_t kMinToolSize = 1;
 constexpr int32_t kMaxToolSize = 50;
-constexpr size_t kMaxTextFontFamilyChars = 128;
-
-[[nodiscard]] TextFontChoice
-Normalize_text_font_choice(TextFontChoice choice) noexcept {
-    switch (choice) {
-    case TextFontChoice::Sans:
-    case TextFontChoice::Serif:
-    case TextFontChoice::Mono:
-    case TextFontChoice::Art:
-        return choice;
-    }
-    return TextFontChoice::Sans;
-}
 
 [[nodiscard]] std::wstring_view
 Default_text_font_family(TextFontChoice choice) noexcept {

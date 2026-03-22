@@ -13,6 +13,7 @@ struct BubbleAnnotation final {
     int32_t diameter_px = 0;
     COLORREF color = 0;
     TextFontChoice font_choice = TextFontChoice::Sans;
+    std::wstring font_family = {};
     int32_t counter_value = 0;
     int32_t bitmap_width_px = 0;
     int32_t bitmap_height_px = 0;

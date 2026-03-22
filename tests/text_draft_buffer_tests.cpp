@@ -174,7 +174,11 @@ class FakeTextLayoutEngine final : public ITextLayoutEngine {
 };
 
 [[nodiscard]] TextAnnotationBaseStyle Default_style() {
-    return TextAnnotationBaseStyle{RGB(0x11, 0x22, 0x33), TextFontChoice::Sans, 12};
+    return TextAnnotationBaseStyle{
+        .color = RGB(0x11, 0x22, 0x33),
+        .font_choice = TextFontChoice::Sans,
+        .point_size = 12,
+    };
 }
 
 [[nodiscard]] TextEditController Make_controller(FakeTextLayoutEngine &engine) {

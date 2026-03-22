@@ -120,6 +120,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/rect_px.h
     src/greenflame_core/cli_options.cpp
     src/greenflame_core/cli_options.h
+    src/greenflame_core/cli_annotation_import.cpp
+    src/greenflame_core/cli_annotation_import.h
     src/greenflame_core/app_controller.cpp
     src/greenflame_core/app_controller.h
     src/greenflame_core/app_config.cpp

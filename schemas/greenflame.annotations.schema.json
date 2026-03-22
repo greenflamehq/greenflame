@@ -1,0 +1,291 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://greenflame.dev/schemas/greenflame.annotations.schema.json",
+  "title": "Greenflame CLI Annotations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["annotations"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "annotations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/annotation"
+      }
+    },
+    "coordinate_space": {
+      "type": "string",
+      "enum": ["local", "global"]
+    },
+    "color": {
+      "$ref": "#/$defs/color"
+    },
+    "highlighter_opacity_percent": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "font": {
+      "$ref": "#/$defs/font"
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{6}$"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "integer" },
+        "y": { "type": "integer" }
+      }
+    },
+    "font": {
+      "type": "object",
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "required": ["preset"],
+          "properties": {
+            "preset": {
+              "type": "string",
+              "enum": ["sans", "serif", "mono", "art"]
+            }
+          }
+        },
+        {
+          "required": ["family"],
+          "properties": {
+            "family": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text"],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bold": { "type": "boolean" },
+        "italic": { "type": "boolean" },
+        "underline": { "type": "boolean" },
+        "strikethrough": { "type": "boolean" }
+      }
+    },
+    "line": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "start", "end"],
+      "properties": {
+        "type": { "const": "line" },
+        "start": { "$ref": "#/$defs/point" },
+        "end": { "$ref": "#/$defs/point" },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "arrow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "start", "end"],
+      "properties": {
+        "type": { "const": "arrow" },
+        "start": { "$ref": "#/$defs/point" },
+        "end": { "$ref": "#/$defs/point" },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "brush": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "points"],
+      "properties": {
+        "type": { "const": "brush" },
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/point" }
+        },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "highlighter_segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "start", "end"],
+      "properties": {
+        "type": { "const": "highlighter" },
+        "start": { "$ref": "#/$defs/point" },
+        "end": { "$ref": "#/$defs/point" },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" },
+        "opacity_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "highlighter_points": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "points"],
+      "properties": {
+        "type": { "const": "highlighter" },
+        "points": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/point" }
+        },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" },
+        "opacity_percent": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        }
+      }
+    },
+    "rectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "left", "top", "width", "height"],
+      "properties": {
+        "type": { "const": "rectangle" },
+        "left": { "type": "integer" },
+        "top": { "type": "integer" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "filled_rectangle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "left", "top", "width", "height"],
+      "properties": {
+        "type": { "const": "filled_rectangle" },
+        "left": { "type": "integer" },
+        "top": { "type": "integer" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "ellipse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "center", "width", "height"],
+      "properties": {
+        "type": { "const": "ellipse" },
+        "center": { "$ref": "#/$defs/point" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "filled_ellipse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "center", "width", "height"],
+      "properties": {
+        "type": { "const": "filled_ellipse" },
+        "center": { "$ref": "#/$defs/point" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "text_plain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "origin", "text"],
+      "properties": {
+        "type": { "const": "text" },
+        "origin": { "$ref": "#/$defs/point" },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "font": { "$ref": "#/$defs/font" },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "text_spans": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "origin", "spans"],
+      "properties": {
+        "type": { "const": "text" },
+        "origin": { "$ref": "#/$defs/point" },
+        "spans": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/span" }
+        },
+        "font": { "$ref": "#/$defs/font" },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "bubble": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "center"],
+      "properties": {
+        "type": { "const": "bubble" },
+        "center": { "$ref": "#/$defs/point" },
+        "font": { "$ref": "#/$defs/font" },
+        "size": { "$ref": "#/$defs/size" },
+        "color": { "$ref": "#/$defs/color" }
+      }
+    },
+    "annotation": {
+      "oneOf": [
+        { "$ref": "#/$defs/line" },
+        { "$ref": "#/$defs/arrow" },
+        { "$ref": "#/$defs/brush" },
+        {
+          "oneOf": [
+            { "$ref": "#/$defs/highlighter_segment" },
+            { "$ref": "#/$defs/highlighter_points" }
+          ]
+        },
+        { "$ref": "#/$defs/rectangle" },
+        { "$ref": "#/$defs/filled_rectangle" },
+        { "$ref": "#/$defs/ellipse" },
+        { "$ref": "#/$defs/filled_ellipse" },
+        {
+          "oneOf": [
+            { "$ref": "#/$defs/text_plain" },
+            { "$ref": "#/$defs/text_spans" }
+          ]
+        },
+        { "$ref": "#/$defs/bubble" }
+      ]
+    }
+  }
+}

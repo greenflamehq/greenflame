@@ -1040,3 +1040,48 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - `stderr` includes the first consequence sentence explaining that defaults or partial settings are being used.
   - `stderr` does not include the UI-only consequence text about the file not being saved or transient changes being lost after reload.
   - The command exits without starting a tray instance.
+
+### GF-MAN-CLI-008 - Inline `--annotate` Happy Path And Padding Edge Coverage
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Run `greenflame.exe --region 100,100,220,160 --output "%TEMP%\greenflame-inline-line.png" --overwrite --annotate "{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":0,\"y\":0},\"end\":{\"x\":219,\"y\":159},\"size\":4,\"color\":\"#ff0000\"}]}"`.
+  2. Run `greenflame.exe --region 100,100,220,160 --padding 32 --padding-color "#202020" --output "%TEMP%\greenflame-inline-padding.png" --overwrite --annotate "{\"annotations\":[{\"type\":\"rectangle\",\"left\":-16,\"top\":-12,\"width\":120,\"height\":72,\"size\":3,\"color\":\"#00ff00\"},{\"type\":\"bubble\",\"center\":{\"x\":-4,\"y\":-4},\"size\":12}]}"`.
+- Expected:
+  - Step 1 exits successfully and draws a red diagonal line across the saved capture.
+  - Step 2 exits successfully and draws both annotations over the final padded image, including the portions that extend into the padding fill.
+  - The output images are written exactly to the requested paths.
+  - No tray instance remains running after either one-shot command.
+
+### GF-MAN-CLI-009 - Fixture-Based `--annotate` Coverage
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+1. Run `greenflame.exe --region 100,100,240,180 --padding 40 --padding-color "#202020" --output "%TEMP%\greenflame-local-mixed.png" --overwrite --annotate ".\schemas\examples\cli_annotations\local_mixed_edge_cases.json"`.
+2. Run `greenflame.exe --desktop --padding 64 --padding-color "#101010" --output "%TEMP%\greenflame-global-padding.png" --overwrite --annotate ".\schemas\examples\cli_annotations\global_padding_edge_cases.json"`.
+3. Run `greenflame.exe --region 100,100,240,180 --padding 48 --padding-color "#202020" --output "%TEMP%\greenflame-brush-padding.png" --overwrite --annotate ".\schemas\examples\cli_annotations\brush_padding_edge_cases.json"`.
+- Expected:
+  - The local-space fixture renders the mixed annotation set relative to the capture origin, including text, bubbles, and out-of-bounds geometry.
+  - The global-space fixture renders annotations relative to the virtual-desktop origin, including negative or off-screen coordinates where applicable.
+  - The brush fixture renders a continuous neon-magenta stroke that starts in the upper-left padding, passes through the captured content, and exits into the lower-right padding without being clipped at the original capture boundary.
+  - In all three cases, annotations that land in padded areas remain visible on top of the padding color.
+  - Bubble numbering matches annotation order among bubbles only: first bubble is `1`, second bubble is `2`, and so on.
+
+### GF-MAN-CLI-010 - Invalid `--annotate` Inputs Fail With Exit `14`
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Run `greenflame.exe --desktop --output "%TEMP%\greenflame-missing-file.png" --overwrite --annotate ".\schemas\examples\cli_annotations\does_not_exist.json"`.
+  2. Run `greenflame.exe --desktop --output "%TEMP%\greenflame-malformed-json.png" --overwrite --annotate "{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":0,\"y\":0},\"end\":{\"x\":10,\"y\":10}}"`.
+  3. Run `greenflame.exe --region 100,100,220,160 --output "%TEMP%\greenflame-invalid-unknown-key.png" --overwrite --annotate ".\schemas\examples\cli_annotations\invalid_unknown_key.json"`.
+  4. Run `greenflame.exe --region 100,100,220,160 --output "%TEMP%\greenflame-invalid-font.png" --overwrite --annotate ".\schemas\examples\cli_annotations\invalid_missing_font_family.json"`.
+- Expected:
+  - Each command exits with code `14`.
+  - The missing-file case reports that the annotation file could not be read.
+  - The malformed inline JSON case reports a JSON syntax error rooted at `--annotate`.
+  - The unknown-key fixture reports a strict validation failure pointing at the offending property path.
+  - The missing-font fixture reports that the explicit font family is not installed.
+  - None of the four commands leaves behind a partially written output file.

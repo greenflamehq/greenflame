@@ -129,7 +129,7 @@ GreenflameApp::GreenflameApp(HINSTANCE hinstance, core::CliOptions const &cli_op
     : hinstance_(hinstance), tray_window_(this),
       overlay_window_(this, &config_, &window_query_),
       app_controller_(config_, display_queries_, window_inspector_, capture_service_,
-                      file_system_service_),
+                      annotation_preparation_service_, file_system_service_),
       cli_options_(cli_options) {}
 
 uint8_t GreenflameApp::Run() {

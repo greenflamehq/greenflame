@@ -70,6 +70,21 @@ class MockCaptureService : public ICaptureService {
                 (override));
 };
 
+class MockAnnotationPreparationService : public IAnnotationPreparationService {
+  public:
+    MockAnnotationPreparationService() = default;
+    MockAnnotationPreparationService(MockAnnotationPreparationService const &) = delete;
+    MockAnnotationPreparationService &
+    operator=(MockAnnotationPreparationService const &) = delete;
+    MockAnnotationPreparationService(MockAnnotationPreparationService &&) = delete;
+    MockAnnotationPreparationService &
+    operator=(MockAnnotationPreparationService &&) = delete;
+    ~MockAnnotationPreparationService() override = default;
+
+    MOCK_METHOD(core::AnnotationPreparationResult, Prepare_annotations,
+                (core::AnnotationPreparationRequest const &), (override));
+};
+
 class MockFileSystemService : public IFileSystemService {
   public:
     MockFileSystemService() = default;
@@ -89,6 +104,8 @@ class MockFileSystemService : public IFileSystemService {
                 (const, override));
     MOCK_METHOD(std::wstring, Resolve_absolute_path, (std::wstring_view),
                 (const, override));
+    MOCK_METHOD(bool, Try_read_text_file_utf8,
+                (std::wstring_view, std::string &, std::wstring &), (const, override));
     MOCK_METHOD(void, Delete_file_if_exists, (std::wstring_view), (const, override));
     MOCK_METHOD(core::SaveTimestamp, Get_current_timestamp, (), (const, override));
 };
@@ -98,10 +115,13 @@ struct ControllerFixture {
     StrictMock<MockDisplayQueries> display = {};
     StrictMock<MockWindowInspector> windows = {};
     StrictMock<MockCaptureService> capture = {};
+    StrictMock<MockAnnotationPreparationService> annotation_preparation = {};
     StrictMock<MockFileSystemService> file_system = {};
     AppController controller;
 
-    ControllerFixture() : controller(config, display, windows, capture, file_system) {}
+    ControllerFixture()
+        : controller(config, display, windows, capture, annotation_preparation,
+                     file_system) {}
     ControllerFixture(ControllerFixture const &) = delete;
     ControllerFixture &operator=(ControllerFixture const &) = delete;
     ControllerFixture(ControllerFixture &&) = delete;
@@ -581,9 +601,6 @@ TEST(app_controller, cli_padded_capture_fails_when_source_is_outside_virtual_des
     options.overwrite_output = true;
     options.padding_px = InsetsPx{5, 5, 5, 5};
 
-    EXPECT_CALL(fixture.file_system,
-                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\missing.png"})))
-        .WillOnce(Return(L"C:\\shots\\missing.png"));
     EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
         .WillOnce(Return(RectPx::From_ltrb(0, 0, 100, 100)));
 
@@ -615,7 +632,8 @@ TEST(app_controller, cli_output_path_detects_format_conflict) {
 
     RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
     EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
-        .WillOnce(Return(desktop));
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
 
     CliResult const result = fixture.controller.Run_cli_capture_mode(options);
     EXPECT_EQ(result.exit_code, ProcessExitCode::CliOutputPathFailure);
@@ -709,7 +727,8 @@ TEST(app_controller, cli_explicit_output_without_overwrite_checks_reservation) {
 
     RectPx const desktop = RectPx::From_ltrb(0, 0, 100, 100);
     EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
-        .WillOnce(Return(desktop));
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
     EXPECT_CALL(fixture.file_system,
                 Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\exists.png"})))
         .WillOnce(Return(L"C:\\shots\\exists.png"));
@@ -752,4 +771,233 @@ TEST(app_controller,
     CliResult const result = fixture.controller.Run_cli_capture_mode(options);
     EXPECT_EQ(result.exit_code, ProcessExitCode::CliCaptureSaveFailed);
     EXPECT_THAT(result.stderr_message, HasSubstr(L"Failed to encode or write image"));
+}
+
+TEST(app_controller,
+     cli_annotate_inline_json_prepares_before_output_resolution_and_saves_annotations) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop-annotated.png";
+    options.overwrite_output = true;
+    options.annotate_value =
+        L"{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":1,\"y\":2},"
+        L"\"end\":{\"x\":10,\"y\":20},\"size\":3}]}";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    core::Annotation prepared_annotation{};
+    prepared_annotation.id = 1;
+    prepared_annotation.data = core::LineAnnotation{
+        .start = PointPx{1, 2},
+        .end = PointPx{10, 20},
+        .style = StrokeStyle{.width_px = 3,
+                             .color = Make_colorref(0x00, 0x00, 0x00),
+                             .opacity_percent = StrokeStyle::kDefaultOpacityPercent},
+        .arrow_head = false,
+    };
+
+    {
+        ::testing::InSequence sequence;
+        EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+            .Times(2)
+            .WillRepeatedly(Return(desktop));
+        EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+            .WillOnce([&](core::AnnotationPreparationRequest const &request) {
+                EXPECT_EQ(request.annotations.size(), 1u);
+                core::AnnotationPreparationResult result{};
+                if (!request.annotations.empty() &&
+                    std::holds_alternative<core::LineAnnotation>(
+                        request.annotations[0].data)) {
+                    core::LineAnnotation const &line =
+                        std::get<core::LineAnnotation>(request.annotations[0].data);
+                    EXPECT_EQ(line.start, (PointPx{1, 2}));
+                    EXPECT_EQ(line.end, (PointPx{10, 20}));
+                    EXPECT_EQ(line.style.width_px, 3);
+                    result.status = core::AnnotationPreparationStatus::Success;
+                    result.annotations = {prepared_annotation};
+                } else {
+                    result.status = core::AnnotationPreparationStatus::InputInvalid;
+                    result.error_message =
+                        L"--annotate: expected a parsed line annotation.";
+                }
+                return result;
+            });
+        EXPECT_CALL(fixture.file_system, Resolve_absolute_path(Eq(std::wstring_view{
+                                             L"C:\\shots\\desktop-annotated.png"})))
+            .WillOnce(Return(L"C:\\shots\\desktop-annotated.png"));
+        EXPECT_CALL(fixture.capture,
+                    Save_rect_to_file(
+                        _, Eq(std::wstring_view{L"C:\\shots\\desktop-annotated.png"}),
+                        ImageSaveFormat::Png))
+            .WillOnce([&](core::CaptureSaveRequest const &request, std::wstring_view,
+                          ImageSaveFormat) {
+                EXPECT_EQ(request.source_rect_screen, desktop);
+                EXPECT_EQ(request.annotations.size(), 1u);
+                EXPECT_EQ(request.annotations[0], prepared_annotation);
+                return true;
+            });
+    }
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller, cli_annotate_parse_failure_does_not_resolve_output_path) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\out.png";
+    options.annotate_value = L"{\"annotations\":[{\"bogus\":1}]}";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    // No EXPECT_CALL for Prepare_annotations or Resolve_absolute_path(output_path):
+    // StrictMock will fail the test if either is unexpectedly invoked.
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliAnnotationInputInvalid);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"--annotate:"));
+}
+
+TEST(app_controller, cli_annotate_file_read_success_parses_and_saves_annotations) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\out.png";
+    options.overwrite_output = true;
+    options.annotate_value = L"annotations.json";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    core::Annotation prepared_annotation{};
+    prepared_annotation.id = 7;
+    prepared_annotation.data = core::LineAnnotation{
+        .start = PointPx{1, 2},
+        .end = PointPx{10, 20},
+        .style = StrokeStyle{.width_px = 2,
+                             .color = Make_colorref(0x00, 0x00, 0x00),
+                             .opacity_percent = StrokeStyle::kDefaultOpacityPercent},
+        .arrow_head = false,
+    };
+
+    {
+        ::testing::InSequence sequence;
+        EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+            .Times(2)
+            .WillRepeatedly(Return(desktop));
+        EXPECT_CALL(fixture.file_system,
+                    Resolve_absolute_path(Eq(std::wstring_view{L"annotations.json"})))
+            .WillOnce(Return(L"C:\\shots\\annotations.json"));
+        EXPECT_CALL(fixture.file_system,
+                    Try_read_text_file_utf8(
+                        Eq(std::wstring_view{L"C:\\shots\\annotations.json"}), _, _))
+            .WillOnce([](std::wstring_view, std::string &out, std::wstring &) {
+                out =
+                    R"({"annotations":[{"type":"line","start":{"x":1,"y":2},"end":{"x":10,"y":20},"size":2}]})";
+                return true;
+            });
+        EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+            .WillOnce([&](core::AnnotationPreparationRequest const &request) {
+                core::AnnotationPreparationResult result{};
+                result.status = core::AnnotationPreparationStatus::Success;
+                result.annotations = {prepared_annotation};
+                EXPECT_EQ(request.annotations.size(), 1u);
+                return result;
+            });
+        EXPECT_CALL(fixture.file_system,
+                    Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\out.png"})))
+            .WillOnce(Return(L"C:\\shots\\out.png"));
+        EXPECT_CALL(fixture.capture,
+                    Save_rect_to_file(_, Eq(std::wstring_view{L"C:\\shots\\out.png"}),
+                                      ImageSaveFormat::Png))
+            .WillOnce([&](core::CaptureSaveRequest const &request, std::wstring_view,
+                          ImageSaveFormat) {
+                EXPECT_EQ(request.annotations.size(), 1u);
+                EXPECT_EQ(request.annotations[0], prepared_annotation);
+                return true;
+            });
+    }
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller, cli_annotate_file_read_failure_returns_exit_14) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop-annotated.png";
+    options.overwrite_output = true;
+    options.annotate_value = L"annotations.json";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"annotations.json"})))
+        .WillOnce(Return(L"C:\\shots\\annotations.json"));
+    EXPECT_CALL(fixture.file_system, Try_read_text_file_utf8(_, _, _))
+        .WillOnce(DoAll(SetArgReferee<2>(L"access denied"), Return(false)));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliAnnotationInputInvalid);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"unable to read annotation file"));
+}
+
+TEST(app_controller, cli_annotate_preparation_input_invalid_returns_exit_14) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop-annotated.png";
+    options.overwrite_output = true;
+    options.annotate_value =
+        L"{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":0,\"y\":0},"
+        L"\"end\":{\"x\":1,\"y\":1},\"size\":2}]}";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce([](core::AnnotationPreparationRequest const &) {
+            core::AnnotationPreparationResult result{};
+            result.status = core::AnnotationPreparationStatus::InputInvalid;
+            result.error_message =
+                L"--annotate: font family \"Nope\" is not installed.";
+            return result;
+        });
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliAnnotationInputInvalid);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"font family"));
+}
+
+TEST(app_controller, cli_annotate_preparation_render_failed_returns_exit_11) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop-annotated.png";
+    options.overwrite_output = true;
+    options.annotate_value =
+        L"{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},"
+        L"\"text\":\"hello\",\"size\":10}]}";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce([](core::AnnotationPreparationRequest const &) {
+            core::AnnotationPreparationResult result{};
+            result.status = core::AnnotationPreparationStatus::RenderFailed;
+            result.error_message =
+                L"Error: Failed to rasterize a text annotation for --annotate.";
+            return result;
+        });
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliCaptureSaveFailed);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"Failed to rasterize"));
 }

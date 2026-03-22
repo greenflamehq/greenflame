@@ -40,6 +40,12 @@ class Win32CaptureService final : public ICaptureService {
                                          core::ImageSaveFormat format) override;
 };
 
+class Win32AnnotationPreparationService final : public IAnnotationPreparationService {
+  public:
+    [[nodiscard]] core::AnnotationPreparationResult
+    Prepare_annotations(core::AnnotationPreparationRequest const &request) override;
+};
+
 class Win32FileSystemService final : public IFileSystemService {
   public:
     [[nodiscard]] std::vector<std::wstring>
@@ -52,6 +58,9 @@ class Win32FileSystemService final : public IFileSystemService {
     Resolve_save_directory(std::wstring const &configured_dir) const override;
     [[nodiscard]] std::wstring
     Resolve_absolute_path(std::wstring_view path) const override;
+    [[nodiscard]] bool
+    Try_read_text_file_utf8(std::wstring_view path, std::string &utf8_text,
+                            std::wstring &error_message) const override;
     void Delete_file_if_exists(std::wstring_view path) const override;
     [[nodiscard]] core::SaveTimestamp Get_current_timestamp() const override;
 };

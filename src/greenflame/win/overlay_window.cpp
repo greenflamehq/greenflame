@@ -2709,9 +2709,9 @@ LRESULT OverlayWindow::On_paint() {
             !controller_.Has_active_annotation_gesture() &&
             controller_.Active_annotation_tool() == core::AnnotationToolId::Text) {
             input.text_cursor_preview_style = core::TextAnnotationBaseStyle{
-                controller_.Annotation_color(),
-                controller_.Text_current_font(),
-                controller_.Text_point_size(),
+                .color = controller_.Annotation_color(),
+                .font_choice = controller_.Text_current_font(),
+                .point_size = controller_.Text_point_size(),
             };
             input.color_wheel_font_families = Resolve_text_font_families(config_);
         }

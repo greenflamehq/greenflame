@@ -1,5 +1,7 @@
 #include "greenflame/win/d2d_text_layout_engine.h"
 
+#include "greenflame_core/color_wheel.h"
+
 namespace greenflame {
 
 namespace {
@@ -74,19 +76,30 @@ Default_font_family(core::TextFontChoice choice) noexcept {
     return L"Arial";
 }
 
-[[nodiscard]] constexpr size_t
-Text_font_choice_index(core::TextFontChoice choice) noexcept {
-    switch (choice) {
-    case core::TextFontChoice::Sans:
-        return 0;
-    case core::TextFontChoice::Serif:
-        return 1;
-    case core::TextFontChoice::Mono:
-        return 2;
-    case core::TextFontChoice::Art:
-        return 3;
+[[nodiscard]] std::wstring_view
+Resolve_text_font_family(core::TextAnnotationBaseStyle const &base_style,
+                         std::array<std::wstring, 4> const &font_families) noexcept {
+    if (!base_style.font_family.empty()) {
+        return base_style.font_family;
     }
-    return 0;
+
+    size_t const family_index = core::Text_font_choice_index(base_style.font_choice);
+    return font_families[family_index].empty()
+               ? Default_font_family(base_style.font_choice)
+               : std::wstring_view(font_families[family_index]);
+}
+
+[[nodiscard]] std::wstring_view
+Resolve_text_font_family(core::BubbleAnnotation const &annotation,
+                         std::array<std::wstring, 4> const &font_families) noexcept {
+    if (!annotation.font_family.empty()) {
+        return annotation.font_family;
+    }
+
+    size_t const family_index = core::Text_font_choice_index(annotation.font_choice);
+    return font_families[family_index].empty()
+               ? Default_font_family(annotation.font_choice)
+               : std::wstring_view(font_families[family_index]);
 }
 
 struct StyledRange final {
@@ -132,11 +145,8 @@ Create_text_format(IDWriteFactory *factory,
         return format;
     }
 
-    size_t const family_index = Text_font_choice_index(base_style.font_choice);
     std::wstring_view const family =
-        font_families[family_index].empty()
-            ? Default_font_family(base_style.font_choice)
-            : std::wstring_view(font_families[family_index]);
+        Resolve_text_font_family(base_style, font_families);
     HRESULT const hr = factory->CreateTextFormat(
         family.data(), nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(base_style.point_size), L"",
@@ -525,6 +535,33 @@ int32_t D2DTextLayoutEngine::Move_vertical(core::TextDraftBuffer const &buf,
     return Insertion_offset_from_hit_test(hit_metrics, trailing_hit, text_length);
 }
 
+bool D2DTextLayoutEngine::Prepare_for_cli(core::TextAnnotation &annotation) {
+    if (dwrite_factory_ == nullptr || !Text_runs_have_text(annotation.runs)) {
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+    LayoutBuildData data{};
+    if (!Build_text_layout(dwrite_factory_, annotation.base_style, annotation.runs,
+                           font_families_, format, layout, data)) {
+        return false;
+    }
+
+    DWRITE_TEXT_METRICS metrics{};
+    if (FAILED(layout->GetMetrics(&metrics))) {
+        return false;
+    }
+
+    annotation.visual_bounds = Rect_from_left_top_width_height(
+        static_cast<float>(annotation.origin.x) + metrics.left,
+        static_cast<float>(annotation.origin.y) + metrics.top,
+        metrics.widthIncludingTrailingWhitespace, metrics.height);
+    Rasterize(annotation);
+    return annotation.bitmap_width_px > 0 && annotation.bitmap_height_px > 0 &&
+           annotation.bitmap_row_bytes > 0 && !annotation.premultiplied_bgra.empty();
+}
+
 void D2DTextLayoutEngine::Rasterize(core::TextAnnotation &annotation) {
     annotation.bitmap_width_px = 0;
     annotation.bitmap_height_px = 0;
@@ -667,11 +704,8 @@ void D2DTextLayoutEngine::Rasterize_bubble(core::BubbleAnnotation &annotation) {
     float const font_fraction = (n >= 100) ? 0.38f : 0.55f;
     float const font_size_dip = font_fraction * fd;
 
-    size_t const family_index = Text_font_choice_index(annotation.font_choice);
     std::wstring_view const family =
-        font_families_[family_index].empty()
-            ? Default_font_family(annotation.font_choice)
-            : std::wstring_view(font_families_[family_index]);
+        Resolve_text_font_family(annotation, font_families_);
 
     Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
     hr = dwrite_factory_->CreateTextFormat(

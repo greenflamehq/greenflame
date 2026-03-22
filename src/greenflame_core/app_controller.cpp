@@ -1,6 +1,7 @@
 #include "greenflame_core/app_controller.h"
 
 #include "greenflame_core/app_config.h"
+#include "greenflame_core/cli_annotation_import.h"
 #include "greenflame_core/output_path.h"
 #include "greenflame_core/string_utils.h"
 #include "greenflame_core/window_filter.h"
@@ -68,6 +69,39 @@ void Append_line(std::wstring &text, std::wstring_view line) {
     text += line;
 }
 
+[[nodiscard]] std::wstring_view Trim_wspace(std::wstring_view text) noexcept {
+    size_t begin = 0;
+    size_t end = text.size();
+    while (begin < end && std::iswspace(text[begin]) != 0) {
+        ++begin;
+    }
+    while (end > begin && std::iswspace(text[end - 1]) != 0) {
+        --end;
+    }
+    return text.substr(begin, end - begin);
+}
+
+[[nodiscard]] bool Try_encode_utf8(std::wstring_view value,
+                                   std::string &utf8) noexcept {
+    utf8.clear();
+    if (value.empty()) {
+        return true;
+    }
+
+    int const required_chars =
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                            nullptr, 0, nullptr, nullptr);
+    if (required_chars <= 0) {
+        return false;
+    }
+
+    utf8.resize(static_cast<size_t>(required_chars));
+    int const converted_chars =
+        WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
+                            utf8.data(), required_chars, nullptr, nullptr);
+    return converted_chars == required_chars;
+}
+
 [[nodiscard]] greenflame::CliResult Make_cli_error(greenflame::ProcessExitCode code,
                                                    std::wstring_view message) {
     greenflame::CliResult result{};
@@ -108,12 +142,14 @@ Find_unique_exact_title_match(std::vector<greenflame::WindowMatch> const &matche
 
 namespace greenflame {
 
-AppController::AppController(core::AppConfig &config, IDisplayQueries &display_queries,
-                             IWindowInspector &window_inspector,
-                             ICaptureService &capture_service,
-                             IFileSystemService &file_system_service)
+AppController::AppController(
+    core::AppConfig &config, IDisplayQueries &display_queries,
+    IWindowInspector &window_inspector, ICaptureService &capture_service,
+    IAnnotationPreparationService &annotation_preparation_service,
+    IFileSystemService &file_system_service)
     : config_(config), display_queries_(display_queries),
       window_inspector_(window_inspector), capture_service_(capture_service),
+      annotation_preparation_service_(annotation_preparation_service),
       file_system_service_(file_system_service) {}
 
 ClipboardCopyResult
@@ -436,6 +472,111 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
             L"Error: Requested padded output dimensions are invalid or too large.");
     }
 
+    core::RectPx const virtual_bounds =
+        display_queries_.Get_virtual_desktop_bounds_px();
+    std::wstring stderr_text = {};
+    std::optional<core::RectPx> const clipped =
+        core::RectPx::Clip(target_rect, virtual_bounds);
+    window_partially_out_of_bounds = clipped.has_value() && *clipped != target_rect;
+    if (!clipped.has_value()) {
+        if (cli_options.capture_mode == core::CliCaptureMode::Window) {
+            Append_line(stderr_text,
+                        L"Error: Matched window is completely outside the virtual "
+                        L"desktop. Nothing to capture.");
+        } else {
+            Append_line(stderr_text,
+                        L"Error: Requested capture area is outside the virtual "
+                        L"desktop.");
+        }
+        return CliResult{{}, stderr_text, ProcessExitCode::CliCaptureSaveFailed};
+    }
+
+    if (window_obscuration == WindowObscuration::Full) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is fully obscured by other windows. "
+                    L"The saved image may not show that window.");
+    } else if (!has_padding && window_obscuration == WindowObscuration::Partial &&
+               window_partially_out_of_bounds) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is partially obscured and partially "
+                    L"outside visible desktop bounds. The saved image may include "
+                    L"other windows and may clip the target window.");
+    } else if (window_obscuration == WindowObscuration::Partial) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is partially obscured by other "
+                    L"windows. The saved image may include those windows.");
+    } else if (!has_padding && window_partially_out_of_bounds) {
+        Append_line(stderr_text,
+                    L"Warning: Matched window is partially outside visible desktop "
+                    L"bounds. The saved image may clip the target window.");
+    }
+    if (has_padding && window_partially_out_of_bounds) {
+        Append_line(stderr_text,
+                    L"Warning: Requested capture area extends outside the virtual "
+                    L"desktop. Uncovered areas were filled with the padding color.");
+    }
+
+    std::vector<core::Annotation> prepared_annotations = {};
+    if (cli_options.annotate_value.has_value()) {
+        std::wstring_view const annotate_value =
+            Trim_wspace(*cli_options.annotate_value);
+        std::string annotation_json = {};
+        if (core::Classify_cli_annotation_input(annotate_value) ==
+            core::CliAnnotationInputKind::InlineJson) {
+            if (!Try_encode_utf8(annotate_value, annotation_json)) {
+                return Make_cli_error(
+                    ProcessExitCode::CliAnnotationInputInvalid,
+                    L"Error: --annotate inline JSON could not be encoded as UTF-8.");
+            }
+        } else {
+            std::wstring const annotation_path =
+                file_system_service_.Resolve_absolute_path(annotate_value);
+            std::wstring read_error = {};
+            if (!file_system_service_.Try_read_text_file_utf8(
+                    annotation_path, annotation_json, read_error)) {
+                std::wstring message = L"--annotate: unable to read annotation file \"";
+                message += annotation_path;
+                message += L"\"";
+                if (!read_error.empty()) {
+                    message += L": ";
+                    message += read_error;
+                }
+                return Make_cli_error(ProcessExitCode::CliAnnotationInputInvalid,
+                                      message);
+            }
+        }
+
+        core::CliAnnotationParseContext const parse_context{
+            .capture_rect_screen = target_rect,
+            .virtual_desktop_bounds = virtual_bounds,
+            .config = &config_,
+        };
+        core::CliAnnotationParseResult const parsed_annotations =
+            core::Parse_cli_annotations_json(annotation_json, parse_context);
+        if (!parsed_annotations.ok) {
+            return Make_cli_error(ProcessExitCode::CliAnnotationInputInvalid,
+                                  parsed_annotations.error_message);
+        }
+
+        core::AnnotationPreparationRequest const prepare_request{
+            .annotations = parsed_annotations.annotations,
+            .preset_font_families = core::Resolve_text_font_families(config_),
+        };
+        core::AnnotationPreparationResult const prepared_result =
+            annotation_preparation_service_.Prepare_annotations(prepare_request);
+        switch (prepared_result.status) {
+        case core::AnnotationPreparationStatus::Success:
+            prepared_annotations = prepared_result.annotations;
+            break;
+        case core::AnnotationPreparationStatus::InputInvalid:
+            return Make_cli_error(ProcessExitCode::CliAnnotationInputInvalid,
+                                  prepared_result.error_message);
+        case core::AnnotationPreparationStatus::RenderFailed:
+            return Make_cli_error(ProcessExitCode::CliCaptureSaveFailed,
+                                  prepared_result.error_message);
+        }
+    }
+
     core::ImageSaveFormat const default_format =
         cli_options.output_format.has_value()
             ? core::Image_save_format_from_cli_format(*cli_options.output_format)
@@ -491,58 +632,12 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         delete_output_path_on_failure = true;
     }
 
-    std::wstring stderr_text = {};
-    core::RectPx const virtual_bounds =
-        display_queries_.Get_virtual_desktop_bounds_px();
-    std::optional<core::RectPx> const clipped =
-        core::RectPx::Clip(target_rect, virtual_bounds);
-    window_partially_out_of_bounds = clipped.has_value() && *clipped != target_rect;
-    if (!clipped.has_value()) {
-        if (delete_output_path_on_failure) {
-            file_system_service_.Delete_file_if_exists(output_path);
-        }
-        if (cli_options.capture_mode == core::CliCaptureMode::Window) {
-            Append_line(stderr_text,
-                        L"Error: Matched window is completely outside the virtual "
-                        L"desktop. Nothing to capture.");
-        } else {
-            Append_line(stderr_text,
-                        L"Error: Requested capture area is outside the virtual "
-                        L"desktop.");
-        }
-        return CliResult{{}, stderr_text, ProcessExitCode::CliCaptureSaveFailed};
-    }
-
-    if (window_obscuration == WindowObscuration::Full) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is fully obscured by other windows. "
-                    L"The saved image may not show that window.");
-    } else if (!has_padding && window_obscuration == WindowObscuration::Partial &&
-               window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially obscured and partially "
-                    L"outside visible desktop bounds. The saved image may include "
-                    L"other windows and may clip the target window.");
-    } else if (window_obscuration == WindowObscuration::Partial) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially obscured by other "
-                    L"windows. The saved image may include those windows.");
-    } else if (!has_padding && window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Matched window is partially outside visible desktop "
-                    L"bounds. The saved image may clip the target window.");
-    }
-    if (has_padding && window_partially_out_of_bounds) {
-        Append_line(stderr_text,
-                    L"Warning: Requested capture area extends outside the virtual "
-                    L"desktop. Uncovered areas were filled with the padding color.");
-    }
-
     core::CaptureSaveRequest save_request{};
     save_request.source_rect_screen = target_rect;
     save_request.padding_px = padding_px;
     save_request.fill_color = padding_color;
     save_request.preserve_source_extent = has_padding;
+    save_request.annotations = prepared_annotations;
 
     if (!capture_service_.Save_rect_to_file(save_request, output_path, output_format)) {
         if (delete_output_path_on_failure) {

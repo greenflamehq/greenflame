@@ -1,0 +1,17 @@
+{
+  "coordinate_space": "local",
+  "annotations": [
+    {
+      "type": "text",
+      "origin": {
+        "x": 10,
+        "y": 10
+      },
+      "size": 12,
+      "font": {
+        "family": "Greenflame Definitely Missing Font 123"
+      },
+      "text": "Missing font should fail"
+    }
+  ]
+}

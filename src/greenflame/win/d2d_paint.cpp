@@ -53,9 +53,13 @@ inline D2D1_COLOR_F Colorref_to_d2d(COLORREF c, float alpha = 1.f) {
 }
 
 [[nodiscard]] std::wstring_view
-Resolve_text_font_family(core::TextFontChoice choice,
+Resolve_text_font_family(core::TextAnnotationBaseStyle const &style,
                          std::array<std::wstring_view, 4> const &families) noexcept {
-    size_t const index = core::Text_font_choice_index(choice);
+    if (!style.font_family.empty()) {
+        return style.font_family;
+    }
+
+    size_t const index = core::Text_font_choice_index(style.font_choice);
     if (families[index].empty()) {
         return core::kDefaultTextFontFamilies[index];
     }
@@ -652,7 +656,7 @@ Build_draft_text_layout(D2DOverlayResources &res,
     }
 
     std::wstring_view const family =
-        Resolve_text_font_family(annotation.base_style.font_choice, font_families);
+        Resolve_text_font_family(annotation.base_style, font_families);
     format = Create_text_format(res.dwrite_factory.Get(), family,
                                 static_cast<float>(annotation.base_style.point_size));
     if (!format) {
@@ -1436,10 +1440,10 @@ void Draw_text_cursor_preview(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     bool const cache_valid =
         res.text_cursor_preview_cache.has_value() &&
         res.text_cursor_preview_cache->font_choice == style.font_choice &&
+        res.text_cursor_preview_cache->font_family == style.font_family &&
         res.text_cursor_preview_cache->point_size == style.point_size;
     if (!cache_valid) {
-        std::wstring_view const family =
-            Resolve_text_font_family(style.font_choice, font_families);
+        std::wstring_view const family = Resolve_text_font_family(style, font_families);
         Microsoft::WRL::ComPtr<IDWriteTextFormat> format = Create_text_format(
             res.dwrite_factory.Get(), family, static_cast<float>(style.point_size));
         if (format == nullptr) {
@@ -1460,6 +1464,7 @@ void Draw_text_cursor_preview(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
         D2DOverlayResources::TextCursorPreviewCache cache;
         cache.font_choice = style.font_choice;
+        cache.font_family = style.font_family;
         cache.point_size = style.point_size;
         GlyphOutlineRenderer renderer(res.factory.Get(), cache.geometries);
         (void)layout->Draw(nullptr, &renderer, 0.f, baseline_offset);

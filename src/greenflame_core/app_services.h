@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame_core/annotation_types.h"
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/save_image_policy.h"
@@ -13,8 +14,30 @@ struct CaptureSaveRequest final {
     InsetsPx padding_px = {};
     COLORREF fill_color = static_cast<COLORREF>(0);
     bool preserve_source_extent = false;
+    std::vector<Annotation> annotations = {};
 
     constexpr bool operator==(const CaptureSaveRequest &) const noexcept = default;
+};
+
+enum class AnnotationPreparationStatus : uint8_t {
+    Success = 0,
+    InputInvalid = 1,
+    RenderFailed = 2,
+};
+
+struct AnnotationPreparationRequest final {
+    std::vector<Annotation> annotations = {};
+    std::array<std::wstring, 4> preset_font_families = {};
+
+    bool operator==(const AnnotationPreparationRequest &) const noexcept = default;
+};
+
+struct AnnotationPreparationResult final {
+    AnnotationPreparationStatus status = AnnotationPreparationStatus::RenderFailed;
+    std::wstring error_message = {};
+    std::vector<Annotation> annotations = {};
+
+    bool operator==(const AnnotationPreparationResult &) const noexcept = default;
 };
 
 } // namespace greenflame::core
@@ -62,6 +85,13 @@ class ICaptureService {
                       core::ImageSaveFormat format) = 0;
 };
 
+class IAnnotationPreparationService {
+  public:
+    virtual ~IAnnotationPreparationService() = default;
+    [[nodiscard]] virtual core::AnnotationPreparationResult
+    Prepare_annotations(core::AnnotationPreparationRequest const &request) = 0;
+};
+
 class IFileSystemService {
   public:
     virtual ~IFileSystemService() = default;
@@ -75,6 +105,9 @@ class IFileSystemService {
     Resolve_save_directory(std::wstring const &configured_dir) const = 0;
     [[nodiscard]] virtual std::wstring
     Resolve_absolute_path(std::wstring_view path) const = 0;
+    [[nodiscard]] virtual bool
+    Try_read_text_file_utf8(std::wstring_view path, std::string &utf8_text,
+                            std::wstring &error_message) const = 0;
     virtual void Delete_file_if_exists(std::wstring_view path) const = 0;
     [[nodiscard]] virtual core::SaveTimestamp Get_current_timestamp() const = 0;
 };

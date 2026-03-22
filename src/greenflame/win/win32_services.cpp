@@ -1,11 +1,14 @@
 #include "win/win32_services.h"
 
+#include "greenflame/win/d2d_text_layout_engine.h"
 #include "greenflame_core/string_utils.h"
 #include "win/display_queries.h"
 #include "win/gdi_capture.h"
 #include "win/save_image.h"
 
 namespace {
+
+constexpr std::array<unsigned char, 3> kUtf8BomBytes = {{0xEFu, 0xBBu, 0xBFu}};
 
 struct WindowSearchState {
     std::wstring_view needle = {};
@@ -117,6 +120,129 @@ Try_compute_render_sizes(greenflame::core::CaptureSaveRequest const &request,
     }
     offset = static_cast<int32_t>(offset64);
     return true;
+}
+
+[[nodiscard]] std::wstring Trim_trailing_wspace(std::wstring text) {
+    while (!text.empty() && std::iswspace(text.back()) != 0) {
+        text.pop_back();
+    }
+    return text;
+}
+
+[[nodiscard]] std::wstring Format_windows_error_message(DWORD error) {
+    if (error == 0) {
+        return {};
+    }
+
+    LPWSTR buffer = nullptr;
+    DWORD const flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                        FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD const length =
+        FormatMessageW(flags, nullptr, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                       reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
+    if (length == 0 || buffer == nullptr) {
+        return L"Windows error " + std::to_wstring(error);
+    }
+
+    std::wstring message(buffer, static_cast<size_t>(length));
+    LocalFree(buffer);
+    return Trim_trailing_wspace(std::move(message));
+}
+
+void Strip_utf8_bom(std::string &utf8_text) {
+    if (utf8_text.size() >= kUtf8BomBytes.size() &&
+        static_cast<unsigned char>(utf8_text[0]) == kUtf8BomBytes[0] &&
+        static_cast<unsigned char>(utf8_text[1]) == kUtf8BomBytes[1] &&
+        static_cast<unsigned char>(utf8_text[2]) == kUtf8BomBytes[2]) {
+        utf8_text.erase(0, kUtf8BomBytes.size());
+    }
+}
+
+[[nodiscard]] bool Try_compute_annotation_target_bounds(
+    greenflame::core::CaptureSaveRequest const &request,
+    greenflame::core::RectPx &target_bounds) noexcept {
+    int64_t const left64 =
+        static_cast<int64_t>(request.source_rect_screen.left) - request.padding_px.left;
+    int64_t const top64 =
+        static_cast<int64_t>(request.source_rect_screen.top) - request.padding_px.top;
+    int64_t const right64 = static_cast<int64_t>(request.source_rect_screen.right) +
+                            request.padding_px.right;
+    int64_t const bottom64 = static_cast<int64_t>(request.source_rect_screen.bottom) +
+                             request.padding_px.bottom;
+    if (left64 < static_cast<int64_t>(INT32_MIN) ||
+        left64 > static_cast<int64_t>(INT32_MAX) ||
+        top64 < static_cast<int64_t>(INT32_MIN) ||
+        top64 > static_cast<int64_t>(INT32_MAX) ||
+        right64 < static_cast<int64_t>(INT32_MIN) ||
+        right64 > static_cast<int64_t>(INT32_MAX) ||
+        bottom64 < static_cast<int64_t>(INT32_MIN) ||
+        bottom64 > static_cast<int64_t>(INT32_MAX)) {
+        return false;
+    }
+
+    target_bounds = greenflame::core::RectPx::From_ltrb(
+        static_cast<int32_t>(left64), static_cast<int32_t>(top64),
+        static_cast<int32_t>(right64), static_cast<int32_t>(bottom64));
+    return true;
+}
+
+[[nodiscard]] bool Composite_annotations_into_capture(
+    greenflame::GdiCaptureResult &capture,
+    std::span<const greenflame::core::Annotation> annotations,
+    greenflame::core::RectPx target_bounds) {
+    if (!capture.Is_valid() || annotations.empty()) {
+        return true;
+    }
+
+    HDC const dc = GetDC(nullptr);
+    if (dc == nullptr) {
+        return false;
+    }
+
+    bool ok = false;
+    int const row_bytes = greenflame::Row_bytes32(capture.width);
+    size_t const buffer_size =
+        static_cast<size_t>(row_bytes) * static_cast<size_t>(capture.height);
+    std::vector<uint8_t> pixels(buffer_size);
+    BITMAPINFOHEADER bmi{};
+    greenflame::Fill_bmi32_top_down(bmi, capture.width, capture.height);
+    if (GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
+                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi),
+                  DIB_RGB_COLORS) != 0) {
+        greenflame::core::Blend_annotations_onto_pixels(pixels, capture.width,
+                                                        capture.height, row_bytes,
+                                                        annotations, target_bounds);
+        ok = SetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
+                       pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi),
+                       DIB_RGB_COLORS) != 0;
+    }
+
+    ReleaseDC(nullptr, dc);
+    return ok;
+}
+
+[[nodiscard]] bool Has_installed_font_family(IDWriteFontCollection *font_collection,
+                                             std::wstring_view family) {
+    if (font_collection == nullptr || family.empty()) {
+        return false;
+    }
+
+    UINT32 family_index = 0;
+    BOOL exists = FALSE;
+    if (FAILED(
+            font_collection->FindFamilyName(family.data(), &family_index, &exists))) {
+        return false;
+    }
+    return exists != FALSE;
+}
+
+template <typename T>
+[[nodiscard]] bool Is_rasterized_ready(T const &annotation) noexcept {
+    return annotation.bitmap_width_px > 0 && annotation.bitmap_height_px > 0 &&
+           annotation.bitmap_row_bytes > 0 && !annotation.premultiplied_bgra.empty() &&
+           static_cast<size_t>(annotation.bitmap_row_bytes) *
+                   static_cast<size_t>(annotation.bitmap_height_px) ==
+               annotation.premultiplied_bgra.size();
 }
 
 } // namespace
@@ -244,6 +370,12 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
             return false;
         }
 
+        if (!Composite_annotations_into_capture(cropped, request.annotations,
+                                                request.source_rect_screen)) {
+            cropped.Free();
+            return false;
+        }
+
         std::wstring const output_path(path);
         bool const saved =
             greenflame::Save_capture_to_file(cropped, output_path.c_str(), format);
@@ -311,6 +443,19 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
         capture_to_save = &final_capture;
     }
 
+    core::RectPx annotation_target_bounds = {};
+    if (!Try_compute_annotation_target_bounds(request, annotation_target_bounds) ||
+        !Composite_annotations_into_capture(
+            capture_to_save == &source_canvas ? source_canvas : final_capture,
+            request.annotations, annotation_target_bounds)) {
+        if (capture_to_save == &source_canvas) {
+            source_canvas.Free();
+        } else {
+            final_capture.Free();
+        }
+        return false;
+    }
+
     std::wstring const output_path(path);
     bool const saved =
         greenflame::Save_capture_to_file(*capture_to_save, output_path.c_str(), format);
@@ -320,6 +465,95 @@ bool Win32CaptureService::Save_rect_to_file(core::CaptureSaveRequest const &requ
         final_capture.Free();
     }
     return saved;
+}
+
+core::AnnotationPreparationResult
+Win32AnnotationPreparationService::Prepare_annotations(
+    core::AnnotationPreparationRequest const &request) {
+    core::AnnotationPreparationResult result{};
+    if (request.annotations.empty()) {
+        result.status = core::AnnotationPreparationStatus::Success;
+        return result;
+    }
+    result.annotations = request.annotations;
+
+    Microsoft::WRL::ComPtr<ID2D1Factory> d2d_factory;
+    HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+                                   d2d_factory.GetAddressOf());
+    if (FAILED(hr) || !d2d_factory) {
+        result.error_message = L"Error: Failed to initialize Direct2D for --annotate.";
+        return result;
+    }
+
+    Microsoft::WRL::ComPtr<IDWriteFactory> dwrite_factory;
+    hr = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown **>(dwrite_factory.GetAddressOf()));
+    if (FAILED(hr) || !dwrite_factory) {
+        result.error_message =
+            L"Error: Failed to initialize DirectWrite for --annotate.";
+        return result;
+    }
+
+    Microsoft::WRL::ComPtr<IDWriteFontCollection> font_collection;
+    hr = dwrite_factory->GetSystemFontCollection(font_collection.GetAddressOf(), FALSE);
+    if (FAILED(hr) || !font_collection) {
+        result.error_message =
+            L"Error: Failed to enumerate installed fonts for --annotate.";
+        return result;
+    }
+
+    D2DTextLayoutEngine engine(d2d_factory.Get(), dwrite_factory.Get());
+    std::array<std::wstring_view, 4> preset_font_families = {
+        request.preset_font_families[0], request.preset_font_families[1],
+        request.preset_font_families[2], request.preset_font_families[3]};
+    engine.Set_font_families(preset_font_families);
+
+    for (core::Annotation &annotation : result.annotations) {
+        if (core::TextAnnotation *const text =
+                std::get_if<core::TextAnnotation>(&annotation.data);
+            text != nullptr) {
+            if (!text->base_style.font_family.empty() &&
+                !Has_installed_font_family(font_collection.Get(),
+                                           text->base_style.font_family)) {
+                result.status = core::AnnotationPreparationStatus::InputInvalid;
+                result.error_message = L"--annotate: font family \"" +
+                                       text->base_style.font_family +
+                                       L"\" is not installed.";
+                return result;
+            }
+
+            if (!engine.Prepare_for_cli(*text) || !Is_rasterized_ready(*text)) {
+                result.error_message =
+                    L"Error: Failed to rasterize a text annotation for --annotate.";
+                return result;
+            }
+            continue;
+        }
+
+        if (core::BubbleAnnotation *const bubble =
+                std::get_if<core::BubbleAnnotation>(&annotation.data);
+            bubble != nullptr) {
+            if (!bubble->font_family.empty() &&
+                !Has_installed_font_family(font_collection.Get(),
+                                           bubble->font_family)) {
+                result.status = core::AnnotationPreparationStatus::InputInvalid;
+                result.error_message = L"--annotate: font family \"" +
+                                       bubble->font_family + L"\" is not installed.";
+                return result;
+            }
+
+            engine.Rasterize_bubble(*bubble);
+            if (!Is_rasterized_ready(*bubble)) {
+                result.error_message =
+                    L"Error: Failed to rasterize a bubble annotation for --annotate.";
+                return result;
+            }
+        }
+    }
+
+    result.status = core::AnnotationPreparationStatus::Success;
+    return result;
 }
 
 std::vector<std::wstring>
@@ -389,6 +623,63 @@ Win32FileSystemService::Resolve_absolute_path(std::wstring_view path) const {
         result.resize(written);
     }
     return result;
+}
+
+bool Win32FileSystemService::Try_read_text_file_utf8(
+    std::wstring_view path, std::string &utf8_text, std::wstring &error_message) const {
+    utf8_text.clear();
+    error_message.clear();
+    if (path.empty()) {
+        error_message = L"Path is empty.";
+        return false;
+    }
+
+    std::wstring const path_string(path);
+    HANDLE const handle =
+        CreateFileW(path_string.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        error_message = Format_windows_error_message(GetLastError());
+        return false;
+    }
+
+    LARGE_INTEGER file_size = {};
+    if (GetFileSizeEx(handle, &file_size) == 0) {
+        error_message = Format_windows_error_message(GetLastError());
+        CloseHandle(handle);
+        return false;
+    }
+    if (file_size.QuadPart < 0) {
+        error_message = L"File is too large.";
+        CloseHandle(handle);
+        return false;
+    }
+
+    utf8_text.resize(static_cast<size_t>(file_size.QuadPart));
+    size_t total_read = 0;
+    std::span<char> utf8_bytes(utf8_text);
+    while (total_read < utf8_text.size()) {
+        std::span<char> remaining_bytes = utf8_bytes.subspan(total_read);
+        DWORD const chunk_size = static_cast<DWORD>(
+            std::min<size_t>(remaining_bytes.size(), static_cast<size_t>(1u << 20)));
+        DWORD bytes_read = 0;
+        if (ReadFile(handle, remaining_bytes.data(), chunk_size, &bytes_read,
+                     nullptr) == 0) {
+            error_message = Format_windows_error_message(GetLastError());
+            CloseHandle(handle);
+            utf8_text.clear();
+            return false;
+        }
+        if (bytes_read == 0) {
+            break;
+        }
+        total_read += static_cast<size_t>(bytes_read);
+    }
+
+    CloseHandle(handle);
+    utf8_text.resize(total_read);
+    Strip_utf8_bom(utf8_text);
+    return true;
 }
 
 void Win32FileSystemService::Delete_file_if_exists(std::wstring_view path) const {

@@ -64,6 +64,7 @@ struct D2DOverlayResources final {
     // a render-target translation to the cursor position is pushed at draw time.
     struct TextCursorPreviewCache {
         core::TextFontChoice font_choice = core::TextFontChoice::Sans;
+        std::wstring font_family = {};
         int32_t point_size = 0;
         std::vector<Microsoft::WRL::ComPtr<ID2D1TransformedGeometry>> geometries;
     };

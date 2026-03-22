@@ -49,6 +49,7 @@ class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
     Win32DisplayQueries display_queries_;
     Win32WindowInspector window_inspector_;
     Win32CaptureService capture_service_;
+    Win32AnnotationPreparationService annotation_preparation_service_;
     Win32FileSystemService file_system_service_;
     AppController app_controller_;
     core::CliOptions cli_options_ = {};

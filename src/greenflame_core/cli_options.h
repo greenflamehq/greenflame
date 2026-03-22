@@ -32,6 +32,7 @@ enum class CliAction : uint8_t {
 struct CliOptions final {
     std::wstring window_name = {};
     std::wstring output_path = {};
+    std::optional<std::wstring> annotate_value = std::nullopt;
     std::optional<RectPx> region_px = std::nullopt;
     std::optional<InsetsPx> padding_px = std::nullopt;
     std::optional<COLORREF> padding_color_override = std::nullopt;

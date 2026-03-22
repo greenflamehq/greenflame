@@ -17,9 +17,10 @@ enum class CliOptionId : uint8_t {
     Format = 8,
     Padding = 9,
     PaddingColor = 10,
-    Overwrite = 11,
+    Annotate = 11,
+    Overwrite = 12,
 #ifdef DEBUG
-    Testing12 = 12,
+    Testing12 = 13,
 #endif
 };
 
@@ -157,6 +158,16 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
         L"--padding.",
         L'\0',
         CliOptionId::PaddingColor,
+        CliOptionValueKind::String,
+        CliOptionGroup::Optional,
+        false,
+    },
+    {
+        L"annotate",
+        L"<json|path>",
+        L"Apply JSON-defined annotations to the saved CLI capture.",
+        L'\0',
+        CliOptionId::Annotate,
         CliOptionValueKind::String,
         CliOptionGroup::Optional,
         false,
@@ -663,6 +674,15 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         options.padding_color_override = color;
         return CliParseResult{{}, options, true};
     }
+    case CliOptionId::Annotate:
+        if (Trim_wspace(value).empty()) {
+            return Make_error(L"--annotate expects a non-empty JSON string or path.");
+        }
+        if (options.annotate_value.has_value()) {
+            return Make_error(L"--annotate can only be specified once.");
+        }
+        options.annotate_value = value;
+        return CliParseResult{{}, options, true};
     case CliOptionId::Overwrite:
         options.overwrite_output = true;
         return CliParseResult{{}, options, true};
@@ -689,6 +709,11 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
     if (options.padding_px.has_value() && !Is_capture_mode(options.capture_mode)) {
         return Make_error(
             L"--padding requires one capture mode: --region, --window, --monitor, "
+            L"or --desktop.");
+    }
+    if (options.annotate_value.has_value() && !Is_capture_mode(options.capture_mode)) {
+        return Make_error(
+            L"--annotate requires one capture mode: --region, --window, --monitor, "
             L"or --desktop.");
     }
     if (options.padding_color_override.has_value() && !options.padding_px.has_value()) {
