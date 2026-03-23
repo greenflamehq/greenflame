@@ -165,7 +165,7 @@ void Set_style_flag(TextStyleFlags &flags, TextStyleToggle which, bool value) no
 } // namespace
 
 TextEditController::TextEditController(PointPx origin,
-                                       TextAnnotationBaseStyle base_style,
+                                       TextAnnotationBaseStyle const &base_style,
                                        ITextLayoutEngine *layout_engine)
     : origin_(origin), layout_engine_(layout_engine) {
     buffer_.base_style = base_style;

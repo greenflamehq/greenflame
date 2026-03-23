@@ -48,7 +48,7 @@ struct TextDraftView final {
 
 class TextEditController final {
   public:
-    TextEditController(PointPx origin, TextAnnotationBaseStyle base_style,
+    TextEditController(PointPx origin, TextAnnotationBaseStyle const &base_style,
                        ITextLayoutEngine *layout_engine);
     TextEditController(TextEditController const &) = delete;
     TextEditController &operator=(TextEditController const &) = delete;
