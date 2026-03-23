@@ -1122,3 +1122,45 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - When one visible title match and one or more minimized title matches coexist, the `wgc` title-based command still succeeds and `stderr` warns that the minimized matches were skipped.
   - When all title matches are minimized, the `wgc` title-based command exits with code `13` and reports that matching windows were minimized rather than saying no window matched.
   - Record whether any yellow capture border appears on screen or in the saved output while `wgc` is active.
+
+### GF-MAN-CLI-012 - `--input` Validation And One-Shot Console Behavior
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Run `greenflame.exe --input "%TEMP%\greenflame-source.png"`.
+  2. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --annotate "{\"annotations\":[]}"`.
+  3. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --annotate "{\"coordinate_space\":\"global\",\"annotations\":[]}" --overwrite`.
+  4. After each command, inspect the tray area.
+- Expected:
+  - Step 1 fails validation because `--annotate` is required.
+  - Step 2 fails validation because either `--output` or `--overwrite` is required.
+  - Step 3 fails with exit code `14` because `global` coordinates are not supported with `--input`.
+  - None of the three commands starts or leaves behind a tray instance.
+
+### GF-MAN-CLI-013 - `--input` In-Place Overwrite And Explicit Output
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Create an opaque PNG or JPEG input image such as `%TEMP%\greenflame-source.png`.
+  2. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --overwrite --annotate "{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":0,\"y\":0},\"end\":{\"x\":40,\"y\":20},\"size\":3}]}"`.
+  3. Recreate the original source image, then run `greenflame.exe --input "%TEMP%\greenflame-source.png" --output "%TEMP%\greenflame-annotated.png" --annotate "{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":0,\"y\":0},\"end\":{\"x\":40,\"y\":20},\"size\":3}]}"`.
+  4. Recreate the original source image again, then run `greenflame.exe --input "%TEMP%\greenflame-source.jpg" --output "%TEMP%\greenflame-annotated" --annotate "{\"annotations\":[]}" --overwrite`.
+- Expected:
+  - Step 2 succeeds and overwrites the input file in place.
+  - Step 3 succeeds and writes only the explicit output path.
+  - Step 4 succeeds and writes `%TEMP%\greenflame-annotated.jpg`, preserving the probed input format for the extensionless explicit output path.
+  - The commands exit without starting a tray instance.
+
+### GF-MAN-CLI-014 - `--input` Transparent Image Rejection
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Create a PNG input with at least one transparent pixel.
+  2. Run `greenflame.exe --input "%TEMP%\greenflame-transparent.png" --overwrite --annotate "{\"annotations\":[]}"`.
+- Expected:
+  - The command fails with exit code `16`.
+  - `stderr` reports that image transparency is not supported with `--input` in V1.
+  - The source image is left unchanged.

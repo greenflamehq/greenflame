@@ -62,6 +62,42 @@ struct AnnotationPreparationResult final {
     bool operator==(const AnnotationPreparationResult &) const noexcept = default;
 };
 
+enum class InputImageProbeStatus : uint8_t {
+    Success = 0,
+    SourceReadFailed = 1,
+};
+
+struct InputImageProbeResult final {
+    InputImageProbeStatus status = InputImageProbeStatus::SourceReadFailed;
+    int32_t width = 0;
+    int32_t height = 0;
+    ImageSaveFormat format = ImageSaveFormat::Png;
+    std::wstring error_message = {};
+
+    bool operator==(const InputImageProbeResult &) const noexcept = default;
+};
+
+enum class InputImageSaveStatus : uint8_t {
+    Success = 0,
+    SourceReadFailed = 1,
+    SaveFailed = 2,
+};
+
+struct InputImageSaveRequest final {
+    InsetsPx padding_px = {};
+    COLORREF fill_color = static_cast<COLORREF>(0);
+    std::vector<Annotation> annotations = {};
+
+    constexpr bool operator==(const InputImageSaveRequest &) const noexcept = default;
+};
+
+struct InputImageSaveResult final {
+    InputImageSaveStatus status = InputImageSaveStatus::SaveFailed;
+    std::wstring error_message = {};
+
+    bool operator==(const InputImageSaveResult &) const noexcept = default;
+};
+
 } // namespace greenflame::core
 
 namespace greenflame {
@@ -114,6 +150,16 @@ class IAnnotationPreparationService {
     virtual ~IAnnotationPreparationService() = default;
     [[nodiscard]] virtual core::AnnotationPreparationResult
     Prepare_annotations(core::AnnotationPreparationRequest const &request) = 0;
+};
+
+class IInputImageService {
+  public:
+    virtual ~IInputImageService() = default;
+    [[nodiscard]] virtual core::InputImageProbeResult
+    Probe_input_image(std::wstring_view path) = 0;
+    [[nodiscard]] virtual core::InputImageSaveResult Save_input_image_to_file(
+        core::InputImageSaveRequest const &request, std::wstring_view input_path,
+        std::wstring_view output_path, core::ImageSaveFormat format) = 0;
 };
 
 class IFileSystemService {

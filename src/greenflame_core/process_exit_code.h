@@ -19,6 +19,7 @@ enum class ProcessExitCode : uint8_t {
     CliWindowMinimized = 13,
     CliAnnotationInputInvalid = 14,
     CliWindowCaptureBackendFailed = 15,
+    CliInputImageUnreadable = 16,
 };
 
 [[nodiscard]] constexpr uint8_t To_exit_code(ProcessExitCode code) noexcept {

@@ -158,6 +158,7 @@ You can also run one-shot command-line modes (at most one mode per invocation):
 | `--window-hwnd <hex>` | Capture a visible top-level window by exact hex HWND |
 | `-m, --monitor <id>` | Capture monitor by 1-based id |
 | `-d, --desktop` | Capture the full virtual desktop |
+| `--input <path>` | Load an existing PNG/JPEG/BMP image, apply `--annotate`, and save the result |
 | `-h, --help` | Show help and exit |
 | `-v, --version` | Show version and exit |
 
@@ -165,11 +166,11 @@ Optional:
 
 | Option | Meaning |
 |---|---|
-| `-o, --output <path>` | Output file path (valid only with a capture mode) |
+| `-o, --output <path>` | Output file path (valid only with a render source) |
 | `-t, --format <png\|jpg\|jpeg\|bmp>` | Output format override |
-| `-p, --padding <n\|h,v\|l,t,r,b>` | Add synthetic padding around the captured image in physical pixels |
+| `-p, --padding <n\|h,v\|l,t,r,b>` | Add synthetic padding around the rendered image in physical pixels |
 | `--padding-color <#rrggbb>` | Override the padding color for this invocation only (valid only with `--padding`) |
-| `--annotate <json\|path>` | Apply JSON-defined annotations to the saved CLI capture |
+| `--annotate <json\|path>` | Apply JSON-defined annotations to the saved CLI render result |
 | `--window-capture <auto\|gdi\|wgc>` | CLI-only window-capture backend for `--window` / `--window-hwnd`; defaults to `auto` |
 | `-f, --overwrite` | Allow replacing an existing explicit `--output` file |
 
@@ -192,7 +193,9 @@ greenflame.exe --region 1200,100,800,600
 greenflame.exe --region 1200,100,800,600 --padding 8,16,24,32
 greenflame.exe --desktop --annotate "{\"annotations\":[{\"type\":\"line\",\"start\":{\"x\":20,\"y\":20},\"end\":{\"x\":220,\"y\":120},\"size\":4}]}"
 greenflame.exe --desktop --padding 64 --annotate ".\\schemas\\examples\\cli_annotations\\global_padding_edge_cases.json"
-```
+greenflame.exe --input "D:\shots\issue.png" --overwrite --annotate ".\\note.json"
+greenflame.exe --input "D:\shots\issue.jpg" --output "D:\shots\issue-annotated" --annotate ".\\note.json"
+``` 
 
 **Padding**
 
@@ -209,7 +212,13 @@ greenflame.exe --desktop --padding 64 --annotate ".\\schemas\\examples\\cli_anno
 
 **Annotations**
 
-- `--annotate` applies JSON-defined annotations to the saved CLI capture, using either inline JSON or a UTF-8 JSON file.
+- `--annotate` applies JSON-defined annotations to the saved CLI render result, using either inline JSON or a UTF-8 JSON file.
+- `--input` is valid only with `--annotate`.
+- `--input` requires either `--output` or `--overwrite`.
+- `--input --overwrite` without `--output` writes back to the input path.
+- `--input` is incompatible with live capture modes and with `--window-capture`.
+- Imported images support only local coordinates. `coordinate_space: "global"` fails with exit code `14`.
+- Imported images must decode fully opaque in V1. Any non-opaque alpha fails with exit code `16`.
 - See [docs/cli_annotations.md](docs/cli_annotations.md) for the full format, schema/examples, coordinate rules, and validation behavior.
 
 **CLI window capture backends**
@@ -231,10 +240,12 @@ greenflame.exe --desktop --padding 64 --annotate ".\\schemas\\examples\\cli_anno
 
 1. If `--output` has a supported extension (`.png`, `.jpg`, `.jpeg`, `.bmp`), that extension defines the format.
 2. Otherwise, if `--format` is provided, `--format` defines the format.
-3. Otherwise, `save.default_save_format` (from the config) defines the format.
-4. If `--output` extension conflicts with `--format`, the command fails.
-5. If `--output` has an unsupported extension (for example `.tiff`), the command fails.
-6. If `--output` has no extension, Greenflame appends one based on the resolved format.
+3. Otherwise, with `--input`, an extensionless explicit `--output` preserves the probed input-image format.
+4. Otherwise, `save.default_save_format` (from the config) defines the format.
+5. If `--output` extension conflicts with `--format`, the command fails.
+6. If `--output` has an unsupported extension (for example `.tiff`), the command fails.
+7. If `--output` has no extension, Greenflame appends one based on the resolved format.
+8. If `--input --overwrite` writes back to the input path, any explicit `--format` must match the input image format.
 
 ### Exit codes
 
@@ -259,6 +270,7 @@ codes are unique and not reused.
 | `13` | Matched window is minimized |
 | `14` | `--annotate` input is invalid (file read, JSON, validation, or missing explicit font family) |
 | `15` | Forced `--window-capture wgc` failed (unsupported, setup/frame failure, or WGC/window size mismatch) |
+| `16` | `--input` image is unreadable or unsupported (decode failure, unsupported image format, or transparency rejection) |
 
 ---
 

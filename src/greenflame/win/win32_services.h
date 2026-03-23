@@ -48,6 +48,15 @@ class Win32AnnotationPreparationService final : public IAnnotationPreparationSer
     Prepare_annotations(core::AnnotationPreparationRequest const &request) override;
 };
 
+class Win32InputImageService final : public IInputImageService {
+  public:
+    [[nodiscard]] core::InputImageProbeResult
+    Probe_input_image(std::wstring_view path) override;
+    [[nodiscard]] core::InputImageSaveResult Save_input_image_to_file(
+        core::InputImageSaveRequest const &request, std::wstring_view input_path,
+        std::wstring_view output_path, core::ImageSaveFormat format) override;
+};
+
 class Win32FileSystemService final : public IFileSystemService {
   public:
     [[nodiscard]] std::vector<std::wstring>

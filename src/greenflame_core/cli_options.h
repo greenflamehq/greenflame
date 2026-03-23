@@ -31,6 +31,7 @@ enum class CliAction : uint8_t {
 }
 
 struct CliOptions final {
+    std::wstring input_path = {};
     std::wstring window_name = {};
     std::wstring output_path = {};
     std::optional<std::wstring> annotate_value = std::nullopt;
@@ -49,6 +50,10 @@ struct CliOptions final {
     bool testing_1_2 = false;
 #endif
 };
+
+[[nodiscard]] constexpr bool Has_cli_render_source(CliOptions const &options) noexcept {
+    return Is_capture_mode(options.capture_mode) || !options.input_path.empty();
+}
 
 struct CliParseResult final {
     std::wstring error_message = {};

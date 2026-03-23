@@ -11,17 +11,18 @@ enum class CliOptionId : uint8_t {
     WindowHwnd = 2,
     Monitor = 3,
     Desktop = 4,
-    Help = 5,
-    Version = 6,
-    Output = 7,
-    Format = 8,
-    Padding = 9,
-    PaddingColor = 10,
-    Annotate = 11,
-    WindowCapture = 12,
-    Overwrite = 13,
+    Input = 5,
+    Help = 6,
+    Version = 7,
+    Output = 8,
+    Format = 9,
+    Padding = 10,
+    PaddingColor = 11,
+    Annotate = 12,
+    WindowCapture = 13,
+    Overwrite = 14,
 #ifdef DEBUG
-    Testing12 = 14,
+    Testing12 = 15,
 #endif
 };
 
@@ -103,6 +104,17 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
         false,
     },
     {
+        L"input",
+        L"<path>",
+        L"Load an existing PNG/JPEG/BMP image, apply --annotate, and save the "
+        L"result. Requires --annotate and either --output or --overwrite.",
+        L'\0',
+        CliOptionId::Input,
+        CliOptionValueKind::Path,
+        CliOptionGroup::Exclusive,
+        false,
+    },
+    {
         L"help",
         nullptr,
         L"Display help and exit.",
@@ -125,7 +137,7 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     {
         L"output",
         L"<path>",
-        L"Output file path. Valid only with a capture mode.",
+        L"Output file path. Valid only with a live capture source or --input.",
         L'o',
         CliOptionId::Output,
         CliOptionValueKind::Path,
@@ -135,7 +147,8 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     {
         L"format",
         L"<png|jpg|bmp>",
-        L"Output image format. Accepts png, jpg/jpeg, or bmp.",
+        L"Output image format. Accepts png, jpg/jpeg, or bmp. Valid only with "
+        L"a live capture source or --input.",
         L't',
         CliOptionId::Format,
         CliOptionValueKind::String,
@@ -145,7 +158,7 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     {
         L"padding",
         L"<n|h,v|l,t,r,b>",
-        L"Add synthetic padding around the captured image in physical pixels.",
+        L"Add synthetic padding around the rendered image in physical pixels.",
         L'p',
         CliOptionId::Padding,
         CliOptionValueKind::String,
@@ -166,7 +179,7 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
     {
         L"annotate",
         L"<json|path>",
-        L"Apply JSON-defined annotations to the saved CLI capture.",
+        L"Apply JSON-defined annotations to the saved CLI render result.",
         L'\0',
         CliOptionId::Annotate,
         CliOptionValueKind::String,
@@ -582,7 +595,7 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
 }
 
 [[nodiscard]] bool Has_exclusive_mode(CliOptions const &options) {
-    return Is_capture_mode(options.capture_mode) || options.action != CliAction::None;
+    return Has_cli_render_source(options) || options.action != CliAction::None;
 }
 
 [[nodiscard]] bool Try_set_capture_mode(CliOptions &options, CliCaptureMode mode,
@@ -658,6 +671,15 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         if (!Try_set_capture_mode(options, CliCaptureMode::Desktop, error_message)) {
             return Make_error(error_message);
         }
+        return CliParseResult{{}, options, true};
+    case CliOptionId::Input:
+        if (value.empty()) {
+            return Make_error(L"--input expects a non-empty path.");
+        }
+        if (Has_exclusive_mode(options)) {
+            return Make_error(L"Only one mode can be specified per invocation.");
+        }
+        options.input_path = value;
         return CliParseResult{{}, options, true};
     case CliOptionId::Help:
         if (!Try_set_action(options, CliAction::Help, error_message)) {
@@ -749,25 +771,28 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
 }
 
 [[nodiscard]] CliParseResult Validate_cli_options(CliOptions const &options) {
-    if (!options.output_path.empty() && !Is_capture_mode(options.capture_mode)) {
-        return Make_error(
-            L"--output requires one capture mode: --region, --window, --monitor, "
-            L"or --desktop.");
+    if (!options.output_path.empty() && !Has_cli_render_source(options)) {
+        return Make_error(L"--output requires one render source: --region, --window, "
+                          L"--window-hwnd, --monitor, --desktop, or --input.");
     }
-    if (options.output_format.has_value() && !Is_capture_mode(options.capture_mode)) {
-        return Make_error(
-            L"--format requires one capture mode: --region, --window, --monitor, "
-            L"or --desktop.");
+    if (options.output_format.has_value() && !Has_cli_render_source(options)) {
+        return Make_error(L"--format requires one render source: --region, --window, "
+                          L"--window-hwnd, --monitor, --desktop, or --input.");
     }
-    if (options.padding_px.has_value() && !Is_capture_mode(options.capture_mode)) {
-        return Make_error(
-            L"--padding requires one capture mode: --region, --window, --monitor, "
-            L"or --desktop.");
+    if (options.padding_px.has_value() && !Has_cli_render_source(options)) {
+        return Make_error(L"--padding requires one render source: --region, --window, "
+                          L"--window-hwnd, --monitor, --desktop, or --input.");
     }
-    if (options.annotate_value.has_value() && !Is_capture_mode(options.capture_mode)) {
-        return Make_error(
-            L"--annotate requires one capture mode: --region, --window, --monitor, "
-            L"or --desktop.");
+    if (options.annotate_value.has_value() && !Has_cli_render_source(options)) {
+        return Make_error(L"--annotate requires one render source: --region, --window, "
+                          L"--window-hwnd, --monitor, --desktop, or --input.");
+    }
+    if (!options.input_path.empty() && !options.annotate_value.has_value()) {
+        return Make_error(L"--input requires --annotate.");
+    }
+    if (!options.input_path.empty() && options.output_path.empty() &&
+        !options.overwrite_output) {
+        return Make_error(L"--input requires either --output or --overwrite.");
     }
     if (options.window_capture_backend_explicit &&
         options.capture_mode != CliCaptureMode::Window) {

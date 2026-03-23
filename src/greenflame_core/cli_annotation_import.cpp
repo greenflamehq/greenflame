@@ -86,6 +86,7 @@ struct ParseState final {
     AppConfig const *config = nullptr;
     RectPx capture_rect_screen = {};
     RectPx virtual_desktop_bounds = {};
+    CliAnnotationTargetKind target_kind = CliAnnotationTargetKind::Capture;
     CoordinateSpace coordinate_space = CoordinateSpace::Local;
     Defaults defaults = {};
 
@@ -1465,6 +1466,7 @@ Parse_cli_annotations_json(std::string_view json_text,
     state.config = context.config;
     state.capture_rect_screen = context.capture_rect_screen;
     state.virtual_desktop_bounds = context.virtual_desktop_bounds;
+    state.target_kind = context.target_kind;
 
     if (state.config == nullptr) {
         state.Fail(kRootPath, L"internal annotation parse context is missing config.");
@@ -1505,6 +1507,11 @@ Parse_cli_annotations_json(std::string_view json_text,
         if (coordinate_space == "local") {
             state.coordinate_space = CoordinateSpace::Local;
         } else if (coordinate_space == "global") {
+            if (state.target_kind == CliAnnotationTargetKind::InputImage) {
+                state.Fail(Join_path(kRootPath, "coordinate_space"),
+                           L"\"global\" is not supported with --input.");
+                return state.result;
+            }
             state.coordinate_space = CoordinateSpace::Global;
         } else {
             state.Fail(Join_path(kRootPath, "coordinate_space"),

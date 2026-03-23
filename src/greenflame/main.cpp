@@ -113,7 +113,7 @@ int WINAPI wWinMain(HINSTANCE h_instance, HINSTANCE, PWSTR, int) {
         return greenflame::To_exit_code(greenflame::ProcessExitCode::Success);
     }
 
-    if (parse_result.options.capture_mode == greenflame::core::CliCaptureMode::None &&
+    if (!greenflame::core::Has_cli_render_source(parse_result.options) &&
         GetConsoleWindow() != nullptr) {
         std::wstring command_line = GetCommandLineW();
         if (!command_line.empty()) {
@@ -131,7 +131,7 @@ int WINAPI wWinMain(HINSTANCE h_instance, HINSTANCE, PWSTR, int) {
     }
 
     ScopedHandle tray_single_instance_lock;
-    if (parse_result.options.capture_mode == greenflame::core::CliCaptureMode::None) {
+    if (!greenflame::core::Has_cli_render_source(parse_result.options)) {
         SingleInstanceResult const lock_result =
             Acquire_tray_single_instance_lock(tray_single_instance_lock);
         if (lock_result == SingleInstanceResult::AlreadyRunning) {

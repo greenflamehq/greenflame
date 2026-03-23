@@ -102,6 +102,92 @@ void Append_line(std::wstring &text, std::wstring_view line) {
     return converted_chars == required_chars;
 }
 
+struct CliPreparedAnnotationsLoadResult final {
+    std::vector<greenflame::core::Annotation> annotations = {};
+    std::wstring error_message = {};
+    greenflame::ProcessExitCode exit_code = greenflame::ProcessExitCode::Success;
+    bool ok = false;
+};
+
+[[nodiscard]] CliPreparedAnnotationsLoadResult Load_prepared_annotations(
+    greenflame::core::CliOptions const &cli_options,
+    greenflame::core::CliAnnotationParseContext const &parse_context,
+    greenflame::core::AppConfig const &config,
+    greenflame::IAnnotationPreparationService &annotation_preparation_service,
+    greenflame::IFileSystemService &file_system_service) {
+    CliPreparedAnnotationsLoadResult result{};
+    result.ok = true;
+    if (!cli_options.annotate_value.has_value()) {
+        return result;
+    }
+
+    std::wstring_view const annotate_value = Trim_wspace(*cli_options.annotate_value);
+    std::string annotation_json = {};
+    if (greenflame::core::Classify_cli_annotation_input(annotate_value) ==
+        greenflame::core::CliAnnotationInputKind::InlineJson) {
+        if (!Try_encode_utf8(annotate_value, annotation_json)) {
+            result.ok = false;
+            result.exit_code = greenflame::ProcessExitCode::CliAnnotationInputInvalid;
+            result.error_message =
+                L"Error: --annotate inline JSON could not be encoded as UTF-8.";
+            return result;
+        }
+    } else {
+        std::wstring const annotation_path =
+            file_system_service.Resolve_absolute_path(annotate_value);
+        std::wstring read_error = {};
+        if (!file_system_service.Try_read_text_file_utf8(annotation_path,
+                                                         annotation_json, read_error)) {
+            result.ok = false;
+            result.exit_code = greenflame::ProcessExitCode::CliAnnotationInputInvalid;
+            result.error_message = L"--annotate: unable to read annotation file \"";
+            result.error_message += annotation_path;
+            result.error_message += L"\"";
+            if (!read_error.empty()) {
+                result.error_message += L": ";
+                result.error_message += read_error;
+            }
+            return result;
+        }
+    }
+
+    greenflame::core::CliAnnotationParseResult const parsed_annotations =
+        greenflame::core::Parse_cli_annotations_json(annotation_json, parse_context);
+    if (!parsed_annotations.ok) {
+        result.ok = false;
+        result.exit_code = greenflame::ProcessExitCode::CliAnnotationInputInvalid;
+        result.error_message = parsed_annotations.error_message;
+        return result;
+    }
+
+    greenflame::core::AnnotationPreparationRequest const prepare_request{
+        .annotations = parsed_annotations.annotations,
+        .preset_font_families = greenflame::core::Resolve_text_font_families(config),
+    };
+    greenflame::core::AnnotationPreparationResult prepared_result =
+        annotation_preparation_service.Prepare_annotations(prepare_request);
+    switch (prepared_result.status) {
+    case greenflame::core::AnnotationPreparationStatus::Success:
+        result.annotations = std::move(prepared_result.annotations);
+        return result;
+    case greenflame::core::AnnotationPreparationStatus::InputInvalid:
+        result.ok = false;
+        result.exit_code = greenflame::ProcessExitCode::CliAnnotationInputInvalid;
+        result.error_message = std::move(prepared_result.error_message);
+        return result;
+    case greenflame::core::AnnotationPreparationStatus::RenderFailed:
+        result.ok = false;
+        result.exit_code = greenflame::ProcessExitCode::CliCaptureSaveFailed;
+        result.error_message = std::move(prepared_result.error_message);
+        return result;
+    }
+
+    result.ok = false;
+    result.exit_code = greenflame::ProcessExitCode::CliCaptureSaveFailed;
+    result.error_message = L"Error: Failed to prepare annotations.";
+    return result;
+}
+
 [[nodiscard]] greenflame::CliResult Make_cli_error(greenflame::ProcessExitCode code,
                                                    std::wstring_view message) {
     greenflame::CliResult result{};
@@ -172,6 +258,17 @@ Format_skipped_minimized_window_warning(size_t minimized_match_count) {
     return message;
 }
 
+[[nodiscard]] std::wstring Build_input_overwrite_format_conflict(
+    greenflame::core::ImageSaveFormat input_format,
+    greenflame::core::ImageSaveFormat requested_format) {
+    std::wstring message = L"Error: --format ";
+    message += greenflame::core::Name_for_image_save_format(requested_format);
+    message += L" conflicts with input image format ";
+    message += greenflame::core::Name_for_image_save_format(input_format);
+    message += L" when overwriting the input file.";
+    return message;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -179,10 +276,12 @@ namespace greenflame {
 AppController::AppController(
     core::AppConfig &config, IDisplayQueries &display_queries,
     IWindowInspector &window_inspector, ICaptureService &capture_service,
+    IInputImageService &input_image_service,
     IAnnotationPreparationService &annotation_preparation_service,
     IFileSystemService &file_system_service)
     : config_(config), display_queries_(display_queries),
       window_inspector_(window_inspector), capture_service_(capture_service),
+      input_image_service_(input_image_service),
       annotation_preparation_service_(annotation_preparation_service),
       file_system_service_(file_system_service) {}
 
@@ -352,6 +451,10 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
 }
 
 CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_options) {
+    if (!cli_options.input_path.empty()) {
+        return Run_cli_input_mode(cli_options);
+    }
+
     core::RectPx target_rect = {};
     core::SaveSelectionSource source = core::SaveSelectionSource::Region;
     std::optional<size_t> monitor_index_zero_based = std::nullopt;
@@ -650,66 +753,22 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         return make_outside_virtual_desktop_error();
     }
 
-    std::vector<core::Annotation> prepared_annotations = {};
-    if (cli_options.annotate_value.has_value()) {
-        std::wstring_view const annotate_value =
-            Trim_wspace(*cli_options.annotate_value);
-        std::string annotation_json = {};
-        if (core::Classify_cli_annotation_input(annotate_value) ==
-            core::CliAnnotationInputKind::InlineJson) {
-            if (!Try_encode_utf8(annotate_value, annotation_json)) {
-                return Make_cli_error(
-                    ProcessExitCode::CliAnnotationInputInvalid,
-                    L"Error: --annotate inline JSON could not be encoded as UTF-8.");
-            }
-        } else {
-            std::wstring const annotation_path =
-                file_system_service_.Resolve_absolute_path(annotate_value);
-            std::wstring read_error = {};
-            if (!file_system_service_.Try_read_text_file_utf8(
-                    annotation_path, annotation_json, read_error)) {
-                std::wstring message = L"--annotate: unable to read annotation file \"";
-                message += annotation_path;
-                message += L"\"";
-                if (!read_error.empty()) {
-                    message += L": ";
-                    message += read_error;
-                }
-                return Make_cli_error(ProcessExitCode::CliAnnotationInputInvalid,
-                                      message);
-            }
-        }
-
-        core::CliAnnotationParseContext const parse_context{
-            .capture_rect_screen = target_rect,
-            .virtual_desktop_bounds = virtual_bounds,
-            .config = &config_,
-        };
-        core::CliAnnotationParseResult const parsed_annotations =
-            core::Parse_cli_annotations_json(annotation_json, parse_context);
-        if (!parsed_annotations.ok) {
-            return Make_cli_error(ProcessExitCode::CliAnnotationInputInvalid,
-                                  parsed_annotations.error_message);
-        }
-
-        core::AnnotationPreparationRequest const prepare_request{
-            .annotations = parsed_annotations.annotations,
-            .preset_font_families = core::Resolve_text_font_families(config_),
-        };
-        core::AnnotationPreparationResult const prepared_result =
-            annotation_preparation_service_.Prepare_annotations(prepare_request);
-        switch (prepared_result.status) {
-        case core::AnnotationPreparationStatus::Success:
-            prepared_annotations = prepared_result.annotations;
-            break;
-        case core::AnnotationPreparationStatus::InputInvalid:
-            return Make_cli_error(ProcessExitCode::CliAnnotationInputInvalid,
-                                  prepared_result.error_message);
-        case core::AnnotationPreparationStatus::RenderFailed:
-            return Make_cli_error(ProcessExitCode::CliCaptureSaveFailed,
-                                  prepared_result.error_message);
-        }
+    core::CliAnnotationParseContext const parse_context{
+        .capture_rect_screen = target_rect,
+        .virtual_desktop_bounds = virtual_bounds,
+        .config = &config_,
+        .target_kind = core::CliAnnotationTargetKind::Capture,
+    };
+    CliPreparedAnnotationsLoadResult const prepared_annotations_result =
+        Load_prepared_annotations(cli_options, parse_context, config_,
+                                  annotation_preparation_service_,
+                                  file_system_service_);
+    if (!prepared_annotations_result.ok) {
+        return Make_cli_error(prepared_annotations_result.exit_code,
+                              prepared_annotations_result.error_message);
     }
+    std::vector<core::Annotation> const &prepared_annotations =
+        prepared_annotations_result.annotations;
 
     std::wstring output_path = {};
     core::ImageSaveFormat output_format = core::ImageSaveFormat::Png;
@@ -857,6 +916,142 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
     std::wstring stdout_text = L"Saved: ";
     stdout_text += output_path;
     return CliResult{stdout_text, stderr_text, ProcessExitCode::Success};
+}
+
+CliResult AppController::Run_cli_input_mode(core::CliOptions const &cli_options) {
+    bool const has_padding = cli_options.padding_px.has_value();
+    core::InsetsPx const padding_px = cli_options.padding_px.value_or(core::InsetsPx{});
+    COLORREF const padding_color = Resolve_padding_color(config_, cli_options);
+
+    std::wstring const input_path =
+        file_system_service_.Resolve_absolute_path(cli_options.input_path);
+    core::InputImageProbeResult const probe_result =
+        input_image_service_.Probe_input_image(input_path);
+    if (probe_result.status != core::InputImageProbeStatus::Success) {
+        std::wstring const error_message =
+            probe_result.error_message.empty()
+                ? L"Error: Failed to read input image file."
+                : probe_result.error_message;
+        return Make_cli_error(ProcessExitCode::CliInputImageUnreadable, error_message);
+    }
+
+    core::RectPx const target_rect =
+        core::RectPx::From_ltrb(0, 0, probe_result.width, probe_result.height);
+    if (target_rect.Is_empty()) {
+        return Make_cli_error(ProcessExitCode::CliInputImageUnreadable,
+                              L"Error: Failed to read input image file.");
+    }
+
+    int32_t padded_output_width = 0;
+    int32_t padded_output_height = 0;
+    if (has_padding &&
+        !Try_compute_padded_output_size(target_rect, padding_px, padded_output_width,
+                                        padded_output_height)) {
+        return Make_cli_error(
+            ProcessExitCode::CliCaptureSaveFailed,
+            L"Error: Requested padded output dimensions are invalid or too large.");
+    }
+
+    core::CliAnnotationParseContext const parse_context{
+        .capture_rect_screen = target_rect,
+        .virtual_desktop_bounds = target_rect,
+        .config = &config_,
+        .target_kind = core::CliAnnotationTargetKind::InputImage,
+    };
+    CliPreparedAnnotationsLoadResult const prepared_annotations_result =
+        Load_prepared_annotations(cli_options, parse_context, config_,
+                                  annotation_preparation_service_,
+                                  file_system_service_);
+    if (!prepared_annotations_result.ok) {
+        return Make_cli_error(prepared_annotations_result.exit_code,
+                              prepared_annotations_result.error_message);
+    }
+
+    std::wstring output_path = {};
+    core::ImageSaveFormat output_format = probe_result.format;
+    bool delete_output_path_on_failure = false;
+    if (cli_options.output_path.empty()) {
+        output_path = input_path;
+        if (cli_options.output_format.has_value()) {
+            core::ImageSaveFormat const requested_format =
+                core::Image_save_format_from_cli_format(*cli_options.output_format);
+            if (requested_format != probe_result.format) {
+                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                      Build_input_overwrite_format_conflict(
+                                          probe_result.format, requested_format));
+            }
+            output_format = requested_format;
+        }
+    } else {
+        core::ImageSaveFormat const default_format =
+            cli_options.output_format.has_value()
+                ? core::Image_save_format_from_cli_format(*cli_options.output_format)
+                : probe_result.format;
+        core::ResolveExplicitPathResult const resolved =
+            core::Resolve_explicit_output_path(cli_options.output_path, default_format,
+                                               cli_options.output_format);
+        if (!resolved.ok || resolved.path.empty()) {
+            if (!resolved.error_message.empty()) {
+                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                      resolved.error_message);
+            }
+            return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                  L"Error: Unable to resolve output path.");
+        }
+
+        output_path = file_system_service_.Resolve_absolute_path(resolved.path);
+        output_format = resolved.format;
+
+        if (!cli_options.overwrite_output) {
+            bool already_exists = false;
+            if (!file_system_service_.Try_reserve_exact_file_path(output_path,
+                                                                  already_exists)) {
+                if (already_exists) {
+                    std::wstring message = L"Error: Output file already exists: ";
+                    message += output_path;
+                    message += L". Use --overwrite (or -f) to replace it.";
+                    return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                          message);
+                }
+                return Make_cli_error(ProcessExitCode::CliOutputPathFailure,
+                                      L"Error: Unable to reserve the output path.");
+            }
+            delete_output_path_on_failure = true;
+        }
+    }
+
+    core::InputImageSaveRequest const save_request{
+        .padding_px = padding_px,
+        .fill_color = padding_color,
+        .annotations = prepared_annotations_result.annotations,
+    };
+    core::InputImageSaveResult const save_result =
+        input_image_service_.Save_input_image_to_file(save_request, input_path,
+                                                      output_path, output_format);
+    if (save_result.status != core::InputImageSaveStatus::Success) {
+        if (delete_output_path_on_failure) {
+            file_system_service_.Delete_file_if_exists(output_path);
+        }
+
+        std::wstring stderr_text = save_result.error_message;
+        if (stderr_text.empty()) {
+            if (save_result.status == core::InputImageSaveStatus::SourceReadFailed) {
+                stderr_text = L"Error: Failed to read input image file.";
+            } else {
+                stderr_text = L"Error: Failed to encode or write image file: ";
+                stderr_text += output_path;
+            }
+        }
+        ProcessExitCode const exit_code =
+            save_result.status == core::InputImageSaveStatus::SourceReadFailed
+                ? ProcessExitCode::CliInputImageUnreadable
+                : ProcessExitCode::CliCaptureSaveFailed;
+        return CliResult{{}, stderr_text, exit_code};
+    }
+
+    std::wstring stdout_text = L"Saved: ";
+    stdout_text += output_path;
+    return CliResult{stdout_text, {}, ProcessExitCode::Success};
 }
 
 std::wstring AppController::Build_default_output_path(

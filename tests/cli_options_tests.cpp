@@ -14,6 +14,7 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     EXPECT_FALSE(result.options.padding_px.has_value());
     EXPECT_FALSE(result.options.padding_color_override.has_value());
     EXPECT_FALSE(result.options.annotate_value.has_value());
+    EXPECT_TRUE(result.options.input_path.empty());
     EXPECT_TRUE(result.options.output_path.empty());
     EXPECT_FALSE(result.options.output_format.has_value());
     EXPECT_EQ(result.options.window_capture_backend, WindowCaptureBackend::Auto);
@@ -103,6 +104,67 @@ TEST(cli_options, CLI_parser_RejectsInvalidWindowHwnd) {
     }
 }
 
+TEST(cli_options, CLI_parser_AcceptsInputAnnotateOutputAndOverwrite) {
+    std::vector<std::wstring> args = {L"--input",     L"shot.png",
+                                      L"--annotate",  L"{\"annotations\":[]}",
+                                      L"--output",    L"C:\\tmp\\annotated.png",
+                                      L"--overwrite", L"--padding",
+                                      L"4",           L"--format",
+                                      L"png"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_TRUE(result.ok);
+    EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
+    EXPECT_EQ(result.options.input_path, L"shot.png");
+    ASSERT_TRUE(result.options.annotate_value.has_value());
+    EXPECT_EQ(*result.options.annotate_value, L"{\"annotations\":[]}");
+    EXPECT_EQ(result.options.output_path, L"C:\\tmp\\annotated.png");
+    EXPECT_TRUE(result.options.overwrite_output);
+    ASSERT_TRUE(result.options.padding_px.has_value());
+    EXPECT_EQ(*result.options.padding_px, (InsetsPx{4, 4, 4, 4}));
+    ASSERT_TRUE(result.options.output_format.has_value());
+    EXPECT_EQ(*result.options.output_format, CliOutputFormat::Png);
+}
+
+TEST(cli_options, CLI_parser_RejectsInputWithoutAnnotate) {
+    std::vector<std::wstring> args = {L"--input", L"shot.png", L"--overwrite"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--input requires --annotate."),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsBareInputWithoutOutputOrOverwrite) {
+    std::vector<std::wstring> args = {L"--input", L"shot.png", L"--annotate",
+                                      L"{\"annotations\":[]}"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(
+        result.error_message.find(L"--input requires either --output or --overwrite."),
+        std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsInputWithLiveCaptureModesAndWindowCapture) {
+    for (std::vector<std::wstring> const &args :
+         {std::vector<std::wstring>{L"--input", L"shot.png", L"--region",
+                                    L"10,20,30,40"},
+          std::vector<std::wstring>{L"--input", L"shot.png", L"--window", L"Notepad"},
+          std::vector<std::wstring>{L"--input", L"shot.png", L"--window-hwnd",
+                                    L"0x1234"},
+          std::vector<std::wstring>{L"--input", L"shot.png", L"--monitor", L"1"},
+          std::vector<std::wstring>{L"--input", L"shot.png", L"--desktop"},
+          std::vector<std::wstring>{L"--input", L"shot.png", L"--window-capture",
+                                    L"gdi"}}) {
+        std::vector<std::wstring> full_args = args;
+        if (full_args.back() != L"gdi") {
+            full_args.push_back(L"--annotate");
+            full_args.push_back(L"{\"annotations\":[]}");
+            full_args.push_back(L"--overwrite");
+        }
+        CliParseResult const result = Parse_cli_arguments(full_args, false);
+        EXPECT_FALSE(result.ok);
+    }
+}
+
 TEST(cli_options, CLI_parser_AcceptsPaddingSingleValue) {
     std::vector<std::wstring> args = {L"--desktop", L"--padding", L"12"};
     CliParseResult const result = Parse_cli_arguments(args, false);
@@ -168,7 +230,7 @@ TEST(cli_options, CLI_parser_RejectsPaddingWithoutCaptureMode) {
     std::vector<std::wstring> args = {L"--padding", L"4"};
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"--padding requires one capture mode"),
+    EXPECT_NE(result.error_message.find(L"--padding requires one render source"),
               std::wstring::npos);
 }
 
@@ -210,7 +272,7 @@ TEST(cli_options, CLI_parser_RejectsAnnotateWithoutCaptureMode) {
     std::vector<std::wstring> args = {L"--annotate", L"{}"};
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"--annotate requires one capture mode"),
+    EXPECT_NE(result.error_message.find(L"--annotate requires one render source"),
               std::wstring::npos);
 }
 
@@ -357,7 +419,7 @@ TEST(cli_options, CLI_parser_RejectsFormatWithoutCaptureMode) {
     std::vector<std::wstring> args = {L"--format", L"jpg"};
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"--format requires one capture mode"),
+    EXPECT_NE(result.error_message.find(L"--format requires one render source"),
               std::wstring::npos);
 }
 
@@ -365,7 +427,7 @@ TEST(cli_options, CLI_parser_RejectsOutputWithoutCaptureMode) {
     std::vector<std::wstring> args = {L"--output", L"C:\\tmp\\shot"};
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"--output requires one capture mode"),
+    EXPECT_NE(result.error_message.find(L"--output requires one render source"),
               std::wstring::npos);
 }
 
@@ -395,6 +457,18 @@ TEST(cli_options, CLI_parser_RejectsMutuallyExclusiveModes) {
         EXPECT_FALSE(result.ok);
         EXPECT_NE(result.error_message.find(L"Only one mode"), std::wstring::npos);
     }
+}
+
+TEST(cli_options, Has_cli_render_source_TreatsInputAsOneShotSource) {
+    CliOptions options{};
+    EXPECT_FALSE(Has_cli_render_source(options));
+
+    options.capture_mode = CliCaptureMode::Desktop;
+    EXPECT_TRUE(Has_cli_render_source(options));
+
+    options.capture_mode = CliCaptureMode::None;
+    options.input_path = L"shot.png";
+    EXPECT_TRUE(Has_cli_render_source(options));
 }
 
 TEST(cli_options, CLI_parser_AcceptsHelp) {
@@ -443,6 +517,7 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"--window-hwnd"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--monitor"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--desktop"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--input"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--help"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--version"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--output"), std::wstring::npos);

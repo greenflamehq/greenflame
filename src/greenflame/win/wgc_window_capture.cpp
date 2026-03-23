@@ -121,8 +121,8 @@ class ScopedTextureMap final {
                                         reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
     if (length == 0 || buffer == nullptr) {
         constexpr std::array<wchar_t, 16> hex_chars = {
-            L'0', L'1', L'2', L'3', L'4', L'5', L'6', L'7',
-            L'8', L'9', L'A', L'B', L'C', L'D', L'E', L'F'};
+            {L'0', L'1', L'2', L'3', L'4', L'5', L'6', L'7', L'8', L'9', L'A', L'B',
+             L'C', L'D', L'E', L'F'}};
         constexpr int nibbles = 8;
         constexpr uint32_t nibble_mask = 0xFu;
         auto const value = static_cast<uint32_t>(hr);

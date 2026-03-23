@@ -10,6 +10,11 @@ enum class CliAnnotationInputKind : uint8_t {
     FilePath = 1,
 };
 
+enum class CliAnnotationTargetKind : uint8_t {
+    Capture = 0,
+    InputImage = 1,
+};
+
 [[nodiscard]] CliAnnotationInputKind
 Classify_cli_annotation_input(std::wstring_view value) noexcept;
 
@@ -20,6 +25,7 @@ struct CliAnnotationParseContext final {
     RectPx capture_rect_screen = {};
     RectPx virtual_desktop_bounds = {};
     AppConfig const *config = nullptr;
+    CliAnnotationTargetKind target_kind = CliAnnotationTargetKind::Capture;
 
     constexpr bool
     operator==(CliAnnotationParseContext const &) const noexcept = default;

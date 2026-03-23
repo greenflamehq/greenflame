@@ -10,6 +10,9 @@
 namespace {
 
 constexpr std::array<unsigned char, 3> kUtf8BomBytes = {{0xEFu, 0xBBu, 0xBFu}};
+constexpr UINT kBytesPerPixel32 = 4u;
+constexpr wchar_t kInputTransparencyUnsupportedMessage[] =
+    L"--input: image transparency is not supported with --input in V1.";
 
 struct WindowSearchState {
     std::wstring_view needle = {};
@@ -22,6 +25,30 @@ struct MinimizedWindowSearchState {
     std::wstring_view needle = {};
     size_t match_count = 0;
     bool had_exception = false;
+};
+
+struct ScopedComApartment final {
+    explicit ScopedComApartment(bool owns_apartment) noexcept
+        : owns_apartment_(owns_apartment) {}
+    ~ScopedComApartment() {
+        if (owns_apartment_) {
+            CoUninitialize();
+        }
+    }
+
+    ScopedComApartment(ScopedComApartment const &) = delete;
+    ScopedComApartment &operator=(ScopedComApartment const &) = delete;
+
+  private:
+    bool owns_apartment_ = false;
+};
+
+struct DecodedInputImage final {
+    int32_t width = 0;
+    int32_t height = 0;
+    int row_bytes = 0;
+    greenflame::core::ImageSaveFormat format = greenflame::core::ImageSaveFormat::Png;
+    std::vector<uint8_t> pixels = {};
 };
 
 [[nodiscard]] bool Is_window_cloaked(HWND hwnd) noexcept {
@@ -201,6 +228,83 @@ Try_compute_render_sizes(greenflame::core::CaptureSaveRequest const &request,
     std::wstring message(buffer, static_cast<size_t>(length));
     LocalFree(buffer);
     return Trim_trailing_wspace(std::move(message));
+}
+
+[[nodiscard]] bool Ends_with_no_case(std::wstring_view text,
+                                     std::wstring_view suffix) noexcept {
+    if (suffix.size() > text.size()) {
+        return false;
+    }
+
+    size_t const offset = text.size() - suffix.size();
+    for (size_t i = 0; i < suffix.size(); ++i) {
+        wchar_t const text_ch = static_cast<wchar_t>(std::towlower(text[offset + i]));
+        wchar_t const suffix_ch = static_cast<wchar_t>(std::towlower(suffix[i]));
+        if (text_ch != suffix_ch) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] std::wstring Format_hresult_message(HRESULT hr) {
+    LPWSTR buffer = nullptr;
+    DWORD const flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                        FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD const length = FormatMessageW(flags, nullptr, static_cast<DWORD>(hr),
+                                        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                        reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
+    if (length == 0 || buffer == nullptr) {
+        constexpr std::array<wchar_t, 16> hex_chars = {
+            {L'0', L'1', L'2', L'3', L'4', L'5', L'6', L'7', L'8', L'9', L'A', L'B',
+             L'C', L'D', L'E', L'F'}};
+        constexpr int nibbles = 8;
+        constexpr uint32_t nibble_mask = 0xFu;
+        uint32_t const value = static_cast<uint32_t>(hr);
+        std::wstring message = L"HRESULT 0x00000000";
+        for (int i = 0; i < nibbles; ++i) {
+            message[message.size() - 1u - static_cast<size_t>(i)] =
+                hex_chars[(value >> (i * 4)) & nibble_mask];
+        }
+        return message;
+    }
+
+    std::wstring message(buffer, static_cast<size_t>(length));
+    LocalFree(buffer);
+    return Trim_trailing_wspace(std::move(message));
+}
+
+[[nodiscard]] std::wstring Build_hresult_error(std::wstring_view prefix, HRESULT hr) {
+    std::wstring message(prefix);
+    std::wstring const details = Format_hresult_message(hr);
+    if (!details.empty()) {
+        message += L": ";
+        message += details;
+    }
+    return message;
+}
+
+[[nodiscard]] bool Has_supported_input_extension(std::wstring_view path) noexcept {
+    return Ends_with_no_case(path, L".png") || Ends_with_no_case(path, L".jpg") ||
+           Ends_with_no_case(path, L".jpeg") || Ends_with_no_case(path, L".bmp");
+}
+
+[[nodiscard]] bool
+Try_map_container_format(GUID const &container_format,
+                         greenflame::core::ImageSaveFormat &format) noexcept {
+    if (container_format == GUID_ContainerFormatPng) {
+        format = greenflame::core::ImageSaveFormat::Png;
+        return true;
+    }
+    if (container_format == GUID_ContainerFormatJpeg) {
+        format = greenflame::core::ImageSaveFormat::Jpeg;
+        return true;
+    }
+    if (container_format == GUID_ContainerFormatBmp) {
+        format = greenflame::core::ImageSaveFormat::Bmp;
+        return true;
+    }
+    return false;
 }
 
 void Strip_utf8_bom(std::string &utf8_text) {
@@ -388,6 +492,252 @@ Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
 
     final_capture.Free();
     return result;
+}
+
+[[nodiscard]] greenflame::core::InputImageProbeResult
+Make_probe_result(greenflame::core::InputImageProbeStatus status,
+                  std::wstring_view error_message = {}) {
+    return greenflame::core::InputImageProbeResult{
+        status, 0, 0, greenflame::core::ImageSaveFormat::Png,
+        std::wstring(error_message)};
+}
+
+[[nodiscard]] greenflame::core::InputImageSaveResult
+Make_input_save_result(greenflame::core::InputImageSaveStatus status,
+                       std::wstring_view error_message = {}) {
+    return greenflame::core::InputImageSaveResult{status, std::wstring(error_message)};
+}
+
+[[nodiscard]] bool Try_decode_input_image(std::wstring_view path,
+                                          DecodedInputImage &decoded_image,
+                                          std::wstring &error_message) {
+    decoded_image = {};
+    error_message.clear();
+
+    if (path.empty()) {
+        error_message = L"--input: path is empty.";
+        return false;
+    }
+    if (!Has_supported_input_extension(path)) {
+        error_message = L"--input: unsupported input image extension. Supported "
+                        L"extensions are .png, .jpg/.jpeg, and .bmp.";
+        return false;
+    }
+
+    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    bool owns_apartment = SUCCEEDED(hr);
+    if (hr == RPC_E_CHANGED_MODE) {
+        owns_apartment = false;
+    } else if (FAILED(hr)) {
+        error_message =
+            Build_hresult_error(L"Error: Failed to initialize COM for --input.", hr);
+        return false;
+    }
+    ScopedComApartment const apartment(owns_apartment);
+
+    Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
+    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                          IID_PPV_ARGS(factory.GetAddressOf()));
+    if (FAILED(hr) || !factory) {
+        error_message = Build_hresult_error(
+            L"Error: Failed to initialize Windows Imaging Component for --input.", hr);
+        return false;
+    }
+
+    std::wstring const path_string(path);
+    Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
+    hr = factory->CreateDecoderFromFilename(path_string.c_str(), nullptr, GENERIC_READ,
+                                            WICDecodeMetadataCacheOnDemand,
+                                            decoder.GetAddressOf());
+    if (FAILED(hr) || !decoder) {
+        error_message = L"--input: unable to read image file \"" + path_string +
+                        L"\": " + Format_hresult_message(hr);
+        return false;
+    }
+
+    GUID container_format = GUID_ContainerFormatPng;
+    hr = decoder->GetContainerFormat(&container_format);
+    if (FAILED(hr) ||
+        !Try_map_container_format(container_format, decoded_image.format)) {
+        error_message = L"--input: unsupported input image format. Supported formats "
+                        L"are png, jpg/jpeg, and bmp.";
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
+    hr = decoder->GetFrame(0, frame.GetAddressOf());
+    if (FAILED(hr) || !frame) {
+        error_message = L"--input: unable to read image file \"" + path_string +
+                        L"\": " + Format_hresult_message(hr);
+        return false;
+    }
+
+    UINT width_u = 0;
+    UINT height_u = 0;
+    hr = frame->GetSize(&width_u, &height_u);
+    if (FAILED(hr) || width_u == 0 || height_u == 0 ||
+        width_u > static_cast<UINT>(INT32_MAX) ||
+        height_u > static_cast<UINT>(INT32_MAX)) {
+        error_message = L"--input: unable to read image file \"" + path_string +
+                        L"\": invalid image dimensions.";
+        return false;
+    }
+
+    if (width_u > static_cast<UINT>(INT32_MAX) / kBytesPerPixel32) {
+        error_message = L"--input: unable to read image file \"" + path_string +
+                        L"\": image dimensions are too large.";
+        return false;
+    }
+
+    UINT const stride = width_u * kBytesPerPixel32;
+    uint64_t const pixel_bytes64 =
+        static_cast<uint64_t>(stride) * static_cast<uint64_t>(height_u);
+    if (pixel_bytes64 == 0 || pixel_bytes64 > static_cast<uint64_t>(UINT_MAX)) {
+        error_message = L"--input: unable to read image file \"" + path_string +
+                        L"\": image dimensions are too large.";
+        return false;
+    }
+
+    Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
+    hr = factory->CreateFormatConverter(converter.GetAddressOf());
+    if (FAILED(hr) || !converter) {
+        error_message = Build_hresult_error(
+            L"Error: Failed to convert the input image into BGRA pixels.", hr);
+        return false;
+    }
+
+    hr = converter->Initialize(frame.Get(), GUID_WICPixelFormat32bppBGRA,
+                               WICBitmapDitherTypeNone, nullptr, 0.0,
+                               WICBitmapPaletteTypeCustom);
+    if (FAILED(hr)) {
+        error_message = Build_hresult_error(
+            L"Error: Failed to convert the input image into BGRA pixels.", hr);
+        return false;
+    }
+
+    decoded_image.width = static_cast<int32_t>(width_u);
+    decoded_image.height = static_cast<int32_t>(height_u);
+    decoded_image.row_bytes = static_cast<int>(stride);
+    decoded_image.pixels.resize(static_cast<size_t>(pixel_bytes64));
+    hr = converter->CopyPixels(nullptr, stride, static_cast<UINT>(pixel_bytes64),
+                               decoded_image.pixels.data());
+    if (FAILED(hr)) {
+        decoded_image = {};
+        error_message = L"--input: unable to read image file \"" + path_string +
+                        L"\": " + Format_hresult_message(hr);
+        return false;
+    }
+
+    for (size_t i = 3; i < decoded_image.pixels.size(); i += kBytesPerPixel32) {
+        if (decoded_image.pixels[i] != 255u) {
+            decoded_image = {};
+            error_message = kInputTransparencyUnsupportedMessage;
+            return false;
+        }
+    }
+
+    return true;
+}
+
+[[nodiscard]] bool
+Try_create_capture_from_input_image(DecodedInputImage const &decoded_image,
+                                    greenflame::GdiCaptureResult &capture,
+                                    std::wstring &error_message) {
+    capture.Free();
+    error_message.clear();
+
+    if (decoded_image.width <= 0 || decoded_image.height <= 0 ||
+        decoded_image.row_bytes <= 0 || decoded_image.pixels.empty()) {
+        error_message = L"Error: Failed to prepare the input image bitmap.";
+        return false;
+    }
+
+    BITMAPINFO bitmap_info = {};
+    greenflame::Fill_bmi32_top_down(bitmap_info.bmiHeader, decoded_image.width,
+                                    decoded_image.height);
+
+    HDC const screen_dc = GetDC(nullptr);
+    if (screen_dc == nullptr) {
+        error_message = L"Error: Failed to acquire a screen DC while preparing the "
+                        L"input image bitmap.";
+        return false;
+    }
+
+    void *bitmap_bits = nullptr;
+    HBITMAP const bitmap = CreateDIBSection(screen_dc, &bitmap_info, DIB_RGB_COLORS,
+                                            &bitmap_bits, nullptr, 0);
+    ReleaseDC(nullptr, screen_dc);
+    if (bitmap == nullptr || bitmap_bits == nullptr) {
+        error_message = L"Error: Failed to create a 32bpp DIB for the input image.";
+        return false;
+    }
+
+    CLANG_WARN_IGNORE_PUSH("-Wunsafe-buffer-usage-in-container")
+    std::span<uint8_t> destination_bytes{reinterpret_cast<uint8_t *>(bitmap_bits),
+                                         decoded_image.pixels.size()};
+    CLANG_WARN_IGNORE_POP()
+    std::copy(decoded_image.pixels.begin(), decoded_image.pixels.end(),
+              destination_bytes.begin());
+
+    capture.bitmap = bitmap;
+    capture.width = decoded_image.width;
+    capture.height = decoded_image.height;
+    return true;
+}
+
+[[nodiscard]] std::wstring Directory_from_path(std::wstring_view path) {
+    size_t const separator = path.find_last_of(L"\\/");
+    if (separator == std::wstring_view::npos) {
+        return L".";
+    }
+    if (separator == 0) {
+        return std::wstring(path.substr(0, 1));
+    }
+    return std::wstring(path.substr(0, separator));
+}
+
+[[nodiscard]] bool Try_create_sibling_temp_path(std::wstring_view output_path,
+                                                std::wstring &temp_path,
+                                                std::wstring &error_message) {
+    temp_path.clear();
+    error_message.clear();
+
+    std::wstring const parent_dir = Directory_from_path(output_path);
+    constexpr size_t buffer_size = MAX_PATH + 1u;
+    std::array<wchar_t, buffer_size> temp_path_buffer = {};
+    if (GetTempFileNameW(parent_dir.c_str(), L"gfi", 0, temp_path_buffer.data()) == 0) {
+        error_message = L"Error: Failed to create a temporary output file: ";
+        error_message += Format_windows_error_message(GetLastError());
+        return false;
+    }
+
+    temp_path = temp_path_buffer.data();
+    return true;
+}
+
+void Delete_file_if_exists(std::wstring_view path) {
+    if (path.empty()) {
+        return;
+    }
+
+    std::wstring const path_string(path);
+    (void)DeleteFileW(path_string.c_str());
+}
+
+[[nodiscard]] bool Try_replace_file(std::wstring_view source_path,
+                                    std::wstring_view destination_path,
+                                    std::wstring &error_message) {
+    error_message.clear();
+
+    std::wstring const source_path_string(source_path);
+    std::wstring const destination_path_string(destination_path);
+    if (MoveFileExW(source_path_string.c_str(), destination_path_string.c_str(),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) == 0) {
+        error_message = L"Error: Failed to replace the original input image: ";
+        error_message += Format_windows_error_message(GetLastError());
+        return false;
+    }
+    return true;
 }
 
 } // namespace
@@ -667,6 +1017,94 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
         final_capture.Free();
     }
     return save_result;
+}
+
+core::InputImageProbeResult
+Win32InputImageService::Probe_input_image(std::wstring_view path) {
+    DecodedInputImage decoded_image{};
+    std::wstring error_message = {};
+    if (!Try_decode_input_image(path, decoded_image, error_message)) {
+        return Make_probe_result(core::InputImageProbeStatus::SourceReadFailed,
+                                 error_message);
+    }
+
+    core::InputImageProbeResult result{};
+    result.status = core::InputImageProbeStatus::Success;
+    result.width = decoded_image.width;
+    result.height = decoded_image.height;
+    result.format = decoded_image.format;
+    return result;
+}
+
+core::InputImageSaveResult Win32InputImageService::Save_input_image_to_file(
+    core::InputImageSaveRequest const &request, std::wstring_view input_path,
+    std::wstring_view output_path, core::ImageSaveFormat format) {
+    if (input_path.empty() || output_path.empty()) {
+        return Make_input_save_result(
+            core::InputImageSaveStatus::SaveFailed,
+            L"Error: Input and output paths are required for --input.");
+    }
+
+    DecodedInputImage decoded_image{};
+    std::wstring error_message = {};
+    if (!Try_decode_input_image(input_path, decoded_image, error_message)) {
+        return Make_input_save_result(core::InputImageSaveStatus::SourceReadFailed,
+                                      error_message);
+    }
+
+    GdiCaptureResult source_capture{};
+    if (!Try_create_capture_from_input_image(decoded_image, source_capture,
+                                             error_message)) {
+        return Make_input_save_result(core::InputImageSaveStatus::SaveFailed,
+                                      error_message);
+    }
+
+    core::CaptureSaveRequest capture_request{};
+    capture_request.source_rect_screen =
+        core::RectPx::From_ltrb(0, 0, decoded_image.width, decoded_image.height);
+    capture_request.padding_px = request.padding_px;
+    capture_request.fill_color = request.fill_color;
+    capture_request.annotations = request.annotations;
+
+    std::wstring const input_path_string(input_path);
+    std::wstring const output_path_string(output_path);
+    core::CaptureSaveResult save_result{};
+    if (core::Equals_no_case(input_path_string, output_path_string)) {
+        std::wstring temp_path = {};
+        if (!Try_create_sibling_temp_path(output_path_string, temp_path,
+                                          error_message)) {
+            source_capture.Free();
+            return Make_input_save_result(core::InputImageSaveStatus::SaveFailed,
+                                          error_message);
+        }
+
+        save_result = Save_exact_source_capture_to_file(source_capture, capture_request,
+                                                        temp_path, format);
+        if (save_result.status != core::CaptureSaveStatus::Success) {
+            Delete_file_if_exists(temp_path);
+            source_capture.Free();
+            return Make_input_save_result(core::InputImageSaveStatus::SaveFailed,
+                                          save_result.error_message);
+        }
+
+        if (!Try_replace_file(temp_path, output_path_string, error_message)) {
+            Delete_file_if_exists(temp_path);
+            source_capture.Free();
+            return Make_input_save_result(core::InputImageSaveStatus::SaveFailed,
+                                          error_message);
+        }
+    } else {
+        save_result = Save_exact_source_capture_to_file(source_capture, capture_request,
+                                                        output_path_string, format);
+        if (save_result.status != core::CaptureSaveStatus::Success) {
+            source_capture.Free();
+            return Make_input_save_result(core::InputImageSaveStatus::SaveFailed,
+                                          save_result.error_message);
+        }
+    }
+
+    source_capture.Free();
+    return Make_input_save_result(core::InputImageSaveStatus::Success);
 }
 
 core::AnnotationPreparationResult

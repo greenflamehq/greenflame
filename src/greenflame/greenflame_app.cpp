@@ -129,7 +129,8 @@ GreenflameApp::GreenflameApp(HINSTANCE hinstance, core::CliOptions const &cli_op
     : hinstance_(hinstance), tray_window_(this),
       overlay_window_(this, &config_, &window_query_),
       app_controller_(config_, display_queries_, window_inspector_, capture_service_,
-                      annotation_preparation_service_, file_system_service_),
+                      input_image_service_, annotation_preparation_service_,
+                      file_system_service_),
       cli_options_(cli_options) {}
 
 uint8_t GreenflameApp::Run() {
@@ -138,7 +139,7 @@ uint8_t GreenflameApp::Run() {
     config_ = load_result.config;
     overlay_help_content_ = app_controller_.Build_overlay_help_content();
     overlay_window_.Set_hotkey_help_content(&overlay_help_content_);
-    if (core::Is_capture_mode(cli_options_.capture_mode)) {
+    if (core::Has_cli_render_source(cli_options_)) {
         if (load_result.issue.has_value()) {
             Write_console_block(Build_config_issue_stderr_text(load_result), true);
         }

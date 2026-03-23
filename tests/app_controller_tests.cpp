@@ -72,6 +72,23 @@ class MockCaptureService : public ICaptureService {
                 (override));
 };
 
+class MockInputImageService : public IInputImageService {
+  public:
+    MockInputImageService() = default;
+    MockInputImageService(MockInputImageService const &) = delete;
+    MockInputImageService &operator=(MockInputImageService const &) = delete;
+    MockInputImageService(MockInputImageService &&) = delete;
+    MockInputImageService &operator=(MockInputImageService &&) = delete;
+    ~MockInputImageService() override = default;
+
+    MOCK_METHOD(core::InputImageProbeResult, Probe_input_image, (std::wstring_view),
+                (override));
+    MOCK_METHOD(core::InputImageSaveResult, Save_input_image_to_file,
+                (core::InputImageSaveRequest const &, std::wstring_view,
+                 std::wstring_view, core::ImageSaveFormat),
+                (override));
+};
+
 class MockAnnotationPreparationService : public IAnnotationPreparationService {
   public:
     MockAnnotationPreparationService() = default;
@@ -117,13 +134,14 @@ struct ControllerFixture {
     StrictMock<MockDisplayQueries> display = {};
     StrictMock<MockWindowInspector> windows = {};
     StrictMock<MockCaptureService> capture = {};
+    StrictMock<MockInputImageService> input_image = {};
     StrictMock<MockAnnotationPreparationService> annotation_preparation = {};
     StrictMock<MockFileSystemService> file_system = {};
     AppController controller;
 
     ControllerFixture()
-        : controller(config, display, windows, capture, annotation_preparation,
-                     file_system) {}
+        : controller(config, display, windows, capture, input_image,
+                     annotation_preparation, file_system) {}
     ControllerFixture(ControllerFixture const &) = delete;
     ControllerFixture &operator=(ControllerFixture const &) = delete;
     ControllerFixture(ControllerFixture &&) = delete;
@@ -174,6 +192,42 @@ Make_capture_backend_failure(std::wstring_view message) {
     std::wstring_view message = L"Error: Failed to encode or write image file.") {
     return core::CaptureSaveResult{core::CaptureSaveStatus::SaveFailed,
                                    std::wstring(message)};
+}
+
+[[nodiscard]] core::InputImageProbeResult
+Make_input_probe_success(int32_t width, int32_t height, ImageSaveFormat format) {
+    return core::InputImageProbeResult{
+        core::InputImageProbeStatus::Success, width, height, format, {}};
+}
+
+[[nodiscard]] core::InputImageProbeResult
+Make_input_probe_failure(std::wstring_view message) {
+    return core::InputImageProbeResult{core::InputImageProbeStatus::SourceReadFailed, 0,
+                                       0, ImageSaveFormat::Png, std::wstring(message)};
+}
+
+[[nodiscard]] core::InputImageSaveResult Make_input_save_success() {
+    return core::InputImageSaveResult{core::InputImageSaveStatus::Success, {}};
+}
+
+[[nodiscard]] core::InputImageSaveResult
+Make_input_save_source_failure(std::wstring_view message) {
+    return core::InputImageSaveResult{core::InputImageSaveStatus::SourceReadFailed,
+                                      std::wstring(message)};
+}
+
+[[nodiscard]] core::InputImageSaveResult
+Make_input_save_failure(std::wstring_view message) {
+    return core::InputImageSaveResult{core::InputImageSaveStatus::SaveFailed,
+                                      std::wstring(message)};
+}
+
+[[nodiscard]] core::AnnotationPreparationResult
+Make_annotation_prepare_success(std::vector<core::Annotation> annotations = {}) {
+    core::AnnotationPreparationResult result{};
+    result.status = core::AnnotationPreparationStatus::Success;
+    result.annotations = std::move(annotations);
+    return result;
 }
 
 [[nodiscard]] WindowMatch Make_window_match(HWND hwnd, std::wstring_view title,
@@ -1407,4 +1461,319 @@ TEST(app_controller, cli_annotate_preparation_render_failed_returns_exit_11) {
     CliResult const result = fixture.controller.Run_cli_capture_mode(options);
     EXPECT_EQ(result.exit_code, ProcessExitCode::CliCaptureSaveFailed);
     EXPECT_THAT(result.stderr_message, HasSubstr(L"Failed to rasterize"));
+}
+
+TEST(app_controller, cli_input_overwrite_saves_back_to_input_without_capture_state) {
+    ControllerFixture fixture;
+    fixture.config.default_save_dir = L"C:\\before";
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.overwrite_output = true;
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .WillOnce(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(200, 100, ImageSaveFormat::Png)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce([](core::AnnotationPreparationRequest const &request) {
+            EXPECT_TRUE(request.annotations.empty());
+            return Make_annotation_prepare_success();
+        });
+    EXPECT_CALL(fixture.input_image,
+                Save_input_image_to_file(_,
+                                         Eq(std::wstring_view{L"C:\\shots\\issue.png"}),
+                                         Eq(std::wstring_view{L"C:\\shots\\issue.png"}),
+                                         ImageSaveFormat::Png))
+        .WillOnce([&](core::InputImageSaveRequest const &request, std::wstring_view,
+                      std::wstring_view, ImageSaveFormat) {
+            EXPECT_EQ(request.padding_px, InsetsPx{});
+            EXPECT_EQ(request.fill_color, fixture.config.padding_color);
+            EXPECT_TRUE(request.annotations.empty());
+            return Make_input_save_success();
+        });
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_THAT(result.stdout_message, HasSubstr(L"Saved: C:\\shots\\issue.png"));
+    EXPECT_TRUE(result.stderr_message.empty());
+    EXPECT_EQ(fixture.config.default_save_dir, L"C:\\before");
+
+    ClipboardCopyResult const copied =
+        fixture.controller.On_copy_last_region_to_clipboard_requested();
+    EXPECT_FALSE(copied.success);
+    EXPECT_THAT(copied.balloon_message, HasSubstr(L"No previously captured region"));
+}
+
+TEST(app_controller, cli_input_explicit_output_without_overwrite_reserves_and_saves) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .WillOnce(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Png)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce(Return(Make_annotation_prepare_success()));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\annotated.png"})))
+        .WillOnce(Return(L"C:\\shots\\annotated.png"));
+    EXPECT_CALL(fixture.file_system,
+                Try_reserve_exact_file_path(
+                    Eq(std::wstring_view{L"C:\\shots\\annotated.png"}), _))
+        .WillOnce(Return(true));
+    EXPECT_CALL(
+        fixture.input_image,
+        Save_input_image_to_file(_, Eq(std::wstring_view{L"C:\\shots\\issue.png"}),
+                                 Eq(std::wstring_view{L"C:\\shots\\annotated.png"}),
+                                 ImageSaveFormat::Png))
+        .WillOnce(Return(Make_input_save_success()));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_THAT(result.stdout_message, HasSubstr(L"Saved: C:\\shots\\annotated.png"));
+}
+
+TEST(app_controller, cli_input_explicit_output_with_overwrite_skips_reservation) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.overwrite_output = true;
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .WillOnce(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Png)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce(Return(Make_annotation_prepare_success()));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\annotated.png"})))
+        .WillOnce(Return(L"C:\\shots\\annotated.png"));
+    EXPECT_CALL(
+        fixture.input_image,
+        Save_input_image_to_file(_, Eq(std::wstring_view{L"C:\\shots\\issue.png"}),
+                                 Eq(std::wstring_view{L"C:\\shots\\annotated.png"}),
+                                 ImageSaveFormat::Png))
+        .WillOnce(Return(Make_input_save_success()));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller,
+     cli_input_explicit_output_equal_input_without_overwrite_fails_as_conflict) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.output_path = L"issue.png";
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .Times(2)
+        .WillRepeatedly(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Png)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce(Return(Make_annotation_prepare_success()));
+    EXPECT_CALL(
+        fixture.file_system,
+        Try_reserve_exact_file_path(Eq(std::wstring_view{L"C:\\shots\\issue.png"}), _))
+        .WillOnce(DoAll(SetArgReferee<1>(true), Return(false)));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliOutputPathFailure);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"already exists"));
+}
+
+TEST(app_controller, cli_input_probe_failure_returns_exit_16) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"missing.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"missing.png"})))
+        .WillOnce(Return(L"C:\\shots\\missing.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\missing.png"})))
+        .WillOnce(Return(
+            Make_input_probe_failure(L"--input: unable to read image file "
+                                     L"\"C:\\shots\\missing.png\": access denied")));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliInputImageUnreadable);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"access denied"));
+}
+
+TEST(app_controller, cli_input_transparency_rejection_returns_exit_16) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"transparent.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"transparent.png"})))
+        .WillOnce(Return(L"C:\\shots\\transparent.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\transparent.png"})))
+        .WillOnce(Return(Make_input_probe_failure(
+            L"--input: image transparency is not supported with --input in V1.")));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliInputImageUnreadable);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"transparency"));
+}
+
+TEST(app_controller,
+     cli_input_save_source_failure_returns_exit_16_and_deletes_reserved_output) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .WillOnce(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Png)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce(Return(Make_annotation_prepare_success()));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\annotated.png"})))
+        .WillOnce(Return(L"C:\\shots\\annotated.png"));
+    EXPECT_CALL(fixture.file_system,
+                Try_reserve_exact_file_path(
+                    Eq(std::wstring_view{L"C:\\shots\\annotated.png"}), _))
+        .WillOnce(Return(true));
+    EXPECT_CALL(
+        fixture.input_image,
+        Save_input_image_to_file(_, Eq(std::wstring_view{L"C:\\shots\\issue.png"}),
+                                 Eq(std::wstring_view{L"C:\\shots\\annotated.png"}),
+                                 ImageSaveFormat::Png))
+        .WillOnce(Return(Make_input_save_source_failure(
+            L"--input: image transparency is not supported with --input in V1.")));
+    EXPECT_CALL(
+        fixture.file_system,
+        Delete_file_if_exists(Eq(std::wstring_view{L"C:\\shots\\annotated.png"})));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliInputImageUnreadable);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"transparency"));
+}
+
+TEST(app_controller,
+     cli_input_global_coordinate_space_returns_exit_14_before_output_resolution) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.annotate_value = L"{\"coordinate_space\":\"global\",\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .WillOnce(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Png)));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliAnnotationInputInvalid);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"not supported with --input"));
+}
+
+TEST(app_controller, cli_input_extensionless_output_defaults_to_probed_input_format) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.jpg";
+    options.output_path = L"C:\\shots\\annotated";
+    options.overwrite_output = true;
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.jpg"})))
+        .WillOnce(Return(L"C:\\shots\\issue.jpg"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.jpg"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Jpeg)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce(Return(Make_annotation_prepare_success()));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\annotated.jpg"})))
+        .WillOnce(Return(L"C:\\shots\\annotated.jpg"));
+    EXPECT_CALL(
+        fixture.input_image,
+        Save_input_image_to_file(_, Eq(std::wstring_view{L"C:\\shots\\issue.jpg"}),
+                                 Eq(std::wstring_view{L"C:\\shots\\annotated.jpg"}),
+                                 ImageSaveFormat::Jpeg))
+        .WillOnce(Return(Make_input_save_success()));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+    EXPECT_THAT(result.stdout_message, HasSubstr(L"Saved: C:\\shots\\annotated.jpg"));
+}
+
+TEST(app_controller,
+     cli_input_explicit_output_with_overwrite_save_failure_does_not_delete_output) {
+    ControllerFixture fixture;
+
+    CliOptions options{};
+    options.input_path = L"issue.png";
+    options.output_path = L"C:\\shots\\annotated.png";
+    options.overwrite_output = true;
+    options.annotate_value = L"{\"annotations\":[]}";
+
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"issue.png"})))
+        .WillOnce(Return(L"C:\\shots\\issue.png"));
+    EXPECT_CALL(fixture.input_image,
+                Probe_input_image(Eq(std::wstring_view{L"C:\\shots\\issue.png"})))
+        .WillOnce(Return(Make_input_probe_success(80, 60, ImageSaveFormat::Png)));
+    EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+        .WillOnce(Return(Make_annotation_prepare_success()));
+    EXPECT_CALL(
+        fixture.file_system,
+        Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\annotated.png"})))
+        .WillOnce(Return(L"C:\\shots\\annotated.png"));
+    // No Try_reserve_exact_file_path: --overwrite skips reservation.
+    // No Delete_file_if_exists: no reservation means no cleanup on failure.
+    EXPECT_CALL(
+        fixture.input_image,
+        Save_input_image_to_file(_, Eq(std::wstring_view{L"C:\\shots\\issue.png"}),
+                                 Eq(std::wstring_view{L"C:\\shots\\annotated.png"}),
+                                 ImageSaveFormat::Png))
+        .WillOnce(Return(Make_input_save_failure(L"Error: disk full.")));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliCaptureSaveFailed);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"disk full"));
 }

@@ -1,6 +1,6 @@
 ---
 title: CLI Annotations
-summary: User-facing guide for the `--annotate` CLI capture option.
+summary: User-facing guide for the `--annotate` CLI render option.
 audience: users
 status: authoritative
 owners:
@@ -14,7 +14,7 @@ tags:
 
 # CLI Annotations
 
-Greenflame can apply annotations directly to one-shot CLI captures with:
+Greenflame can apply annotations directly to one-shot CLI render flows with:
 
 ```bat
 greenflame.exe --annotate "<JSON object>"
@@ -38,14 +38,24 @@ JSON file:
 greenflame.exe --region 100,100,240,180 --padding 40 --padding-color "#202020" --output "%TEMP%\greenflame-annotated.png" --overwrite --annotate ".\schemas\examples\cli_annotations\local_mixed_edge_cases.json"
 ```
 
+Imported image:
+
+```bat
+greenflame.exe --input "%TEMP%\greenflame-source.png" --overwrite --annotate ".\schemas\examples\cli_annotations\local_mixed_edge_cases.json"
+```
+
 ## Input Rules
 
-- `--annotate` is valid only with CLI capture modes:
+- `--annotate` is valid only with a CLI render source:
   - `--region`
   - `--window`
   - `--window-hwnd`
   - `--monitor`
   - `--desktop`
+  - `--input`
+- `--input` requires `--annotate`.
+- `--input` also requires either `--output` or `--overwrite`.
+- `--input` is incompatible with live capture modes and with `--window-capture`.
 - If the first non-whitespace character is `{`, the value is treated as inline
   JSON.
 - Otherwise, the value is treated as a file path.
@@ -109,9 +119,13 @@ This applies to:
 All coordinates are integer physical pixels.
 
 - `local`
-  - `0,0` is the top-left of the requested capture.
+  - For live capture modes, `0,0` is the top-left of the requested capture.
+  - For `--input`, `0,0` is the top-left of the decoded source image before any
+    padding is added.
 - `global`
   - `0,0` is the top-left of the virtual desktop.
+  - `global` is valid only for live capture modes.
+  - `global` is invalid with `--input` and fails with exit code `14`.
 
 Coordinates may be outside the capture bounds. Negative coordinates and
 coordinates beyond the captured width or height are valid.
@@ -119,6 +133,9 @@ coordinates beyond the captured width or height are valid.
 When `--padding` is used, annotations that extend outside the captured image are
 still rendered over the synthetic padding area. They are not clipped to the
 original capture rectangle.
+
+Imported images must decode fully opaque in V1. If an input image contains any
+non-opaque alpha, the command fails with exit code `16`.
 
 ## Annotation Types
 
@@ -255,10 +272,10 @@ payload is invalid, the command fails.
 
 ## Rendering Order
 
-For CLI captures, Greenflame builds the output in this order:
+For CLI render flows, Greenflame builds the output in this order:
 
-1. Captured screen pixels
-2. Synthetic fill for off-desktop regions, when applicable
+1. Source image pixels
+2. Synthetic fill for off-desktop regions, when applicable for live captures
 3. Outer padding, when applicable
 4. Annotations
 

@@ -20,6 +20,7 @@ Make_context(AppConfig const &config,
     context.capture_rect_screen = capture_rect;
     context.virtual_desktop_bounds = virtual_bounds;
     context.config = &config;
+    context.target_kind = CliAnnotationTargetKind::Capture;
     return context;
 }
 
@@ -73,6 +74,18 @@ TEST(cli_annotation_import, parse_translates_global_coordinates_from_virtual_des
     EXPECT_EQ(bubble.center, (PointPx{-490, -180}));
     EXPECT_EQ(bubble.diameter_px, 25);
     EXPECT_EQ(bubble.counter_value, 1);
+}
+
+TEST(cli_annotation_import, parse_rejects_global_coordinate_space_for_input_image) {
+    AppConfig const config = Make_config();
+    CliAnnotationParseContext context = Make_context(config);
+    context.target_kind = CliAnnotationTargetKind::InputImage;
+
+    CliAnnotationParseResult const result = Parse_cli_annotations_json(
+        R"({"coordinate_space":"global","annotations":[]})", context);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"not supported with --input"),
+              std::wstring::npos);
 }
 
 TEST(cli_annotation_import, parse_assigns_bubble_numbers_only_to_bubbles) {

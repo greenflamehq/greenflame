@@ -31,6 +31,7 @@ class AppController final {
   public:
     AppController(core::AppConfig &config, IDisplayQueries &display_queries,
                   IWindowInspector &window_inspector, ICaptureService &capture_service,
+                  IInputImageService &input_image_service,
                   IAnnotationPreparationService &annotation_preparation_service,
                   IFileSystemService &file_system_service);
     AppController(AppController const &) = delete;
@@ -55,6 +56,7 @@ class AppController final {
     [[nodiscard]] CliResult Run_cli_capture_mode(core::CliOptions const &cli_options);
 
   private:
+    [[nodiscard]] CliResult Run_cli_input_mode(core::CliOptions const &cli_options);
     [[nodiscard]] std::wstring
     Build_default_output_path(core::SaveSelectionSource source,
                               std::optional<size_t> monitor_index_zero_based,
@@ -66,6 +68,7 @@ class AppController final {
     IDisplayQueries &display_queries_;
     IWindowInspector &window_inspector_;
     ICaptureService &capture_service_;
+    IInputImageService &input_image_service_;
     IAnnotationPreparationService &annotation_preparation_service_;
     IFileSystemService &file_system_service_;
 
