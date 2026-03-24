@@ -3,6 +3,47 @@
 
 using namespace greenflame::core;
 
+namespace {
+
+constexpr int kBytesPerPixel = 4;
+constexpr uint8_t kOpaque = 255;
+constexpr uint32_t kBlendRoundBias = 127;
+
+[[nodiscard]] size_t Pixel_offset(int x, int y, int row_bytes) noexcept {
+    return static_cast<size_t>(y) * static_cast<size_t>(row_bytes) +
+           static_cast<size_t>(x) * static_cast<size_t>(kBytesPerPixel);
+}
+
+void Set_bgra_pixel(std::span<uint8_t> pixels, int row_bytes, int x, int y,
+                    uint8_t blue, uint8_t green, uint8_t red, uint8_t alpha) noexcept {
+    size_t const offset = Pixel_offset(x, y, row_bytes);
+    pixels[offset] = blue;
+    pixels[offset + 1] = green;
+    pixels[offset + 2] = red;
+    pixels[offset + 3] = alpha;
+}
+
+[[nodiscard]] uint8_t Expected_source_over_channel(uint8_t dst, uint8_t src,
+                                                   uint8_t alpha) noexcept {
+    uint32_t const dst_term =
+        static_cast<uint32_t>(dst) * (static_cast<uint32_t>(kOpaque) - alpha);
+    uint32_t const blended =
+        static_cast<uint32_t>(src) +
+        ((dst_term + kBlendRoundBias) / static_cast<uint32_t>(kOpaque));
+    return static_cast<uint8_t>(std::min(blended, static_cast<uint32_t>(kOpaque)));
+}
+
+[[nodiscard]] uint8_t Expected_multiply_channel(uint8_t dst, uint8_t src,
+                                                uint8_t alpha) noexcept {
+    uint32_t const coefficient = static_cast<uint32_t>(kOpaque) - alpha + src;
+    uint32_t const blended = static_cast<uint32_t>(dst) *
+                             std::min(coefficient, static_cast<uint32_t>(kOpaque));
+    return static_cast<uint8_t>((blended + kBlendRoundBias) /
+                                static_cast<uint32_t>(kOpaque));
+}
+
+} // namespace
+
 TEST(pixel_ops, DimPixelsOutsideRect_4x4Selection) {
     // 4x4 image, rowBytes = 16
     int const w = 4, h = 4, row_bytes = 16;
@@ -89,4 +130,142 @@ TEST(pixel_ops, BlendRectOntoPixels_HalfAlphaBlends) {
     EXPECT_EQ(pixels[0], 100);
     EXPECT_EQ(pixels[1], 100);
     EXPECT_EQ(pixels[2], 100);
+}
+
+TEST(pixel_ops, BlendPremultipliedLayerOntoOpaquePixels_HonorsAlphaExtremes) {
+    int const width = 2;
+    int const height = 1;
+    int const row_bytes = width * kBytesPerPixel;
+    std::vector<uint8_t> pixels = {
+        10, 20, 30, kOpaque, 40, 50, 60, kOpaque,
+    };
+    std::vector<uint8_t> layer_pixels(static_cast<size_t>(row_bytes) * height, 0);
+    Set_bgra_pixel(layer_pixels, row_bytes, 0, 0, 200, 180, 160, 0);
+    Set_bgra_pixel(layer_pixels, row_bytes, 1, 0, 7, 8, 9, kOpaque);
+
+    Blend_premultiplied_layer_onto_opaque_pixels(
+        pixels, width, height, row_bytes, layer_pixels, row_bytes,
+        RectPx::From_ltrb(0, 0, width, height));
+
+    EXPECT_EQ(pixels[0], 10);
+    EXPECT_EQ(pixels[1], 20);
+    EXPECT_EQ(pixels[2], 30);
+    EXPECT_EQ(pixels[3], kOpaque);
+    EXPECT_EQ(pixels[4], 7);
+    EXPECT_EQ(pixels[5], 8);
+    EXPECT_EQ(pixels[6], 9);
+    EXPECT_EQ(pixels[7], kOpaque);
+}
+
+TEST(pixel_ops, BlendPremultipliedLayerOntoOpaquePixels_UsesSourceOver) {
+    int const width = 1;
+    int const height = 1;
+    int const row_bytes = width * kBytesPerPixel;
+    std::vector<uint8_t> pixels = {100, 150, 200, kOpaque};
+    std::vector<uint8_t> layer_pixels = {16, 32, 64, 128};
+
+    Blend_premultiplied_layer_onto_opaque_pixels(
+        pixels, width, height, row_bytes, layer_pixels, row_bytes,
+        RectPx::From_ltrb(0, 0, width, height));
+
+    EXPECT_EQ(pixels[0], Expected_source_over_channel(100, 16, 128));
+    EXPECT_EQ(pixels[1], Expected_source_over_channel(150, 32, 128));
+    EXPECT_EQ(pixels[2], Expected_source_over_channel(200, 64, 128));
+    EXPECT_EQ(pixels[3], kOpaque);
+}
+
+TEST(pixel_ops, MultiplyPremultipliedLayerOntoOpaquePixels_UsesMultiplyBlend) {
+    int const width = 1;
+    int const height = 1;
+    int const row_bytes = width * kBytesPerPixel;
+    std::vector<uint8_t> pixels = {200, 180, 160, kOpaque};
+    std::vector<uint8_t> layer_pixels = {0, 64, 128, 128};
+
+    Multiply_premultiplied_layer_onto_opaque_pixels(
+        pixels, width, height, row_bytes, layer_pixels, row_bytes,
+        RectPx::From_ltrb(0, 0, width, height));
+
+    EXPECT_EQ(pixels[0], Expected_multiply_channel(200, 0, 128));
+    EXPECT_EQ(pixels[1], Expected_multiply_channel(180, 64, 128));
+    EXPECT_EQ(pixels[2], Expected_multiply_channel(160, 128, 128));
+    EXPECT_EQ(pixels[3], kOpaque);
+}
+
+TEST(pixel_ops, PremultipliedLayerComposition_ClipsToLayerBounds) {
+    int const width = 3;
+    int const height = 2;
+    int const row_bytes = width * kBytesPerPixel;
+    std::vector<uint8_t> pixels(static_cast<size_t>(row_bytes) * height, 20);
+    for (size_t index = 3; index < pixels.size(); index += kBytesPerPixel) {
+        pixels[index] = kOpaque;
+    }
+
+    std::vector<uint8_t> layer_pixels(static_cast<size_t>(row_bytes) * height, 0);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            Set_bgra_pixel(layer_pixels, row_bytes, x, y, 5, 6, 7, kOpaque);
+        }
+    }
+
+    Blend_premultiplied_layer_onto_opaque_pixels(pixels, width, height, row_bytes,
+                                                 layer_pixels, row_bytes,
+                                                 RectPx::From_ltrb(-1, 0, 2, height));
+
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < 2; ++x) {
+            size_t const offset = Pixel_offset(x, y, row_bytes);
+            EXPECT_EQ(pixels[offset], 5);
+            EXPECT_EQ(pixels[offset + 1], 6);
+            EXPECT_EQ(pixels[offset + 2], 7);
+            EXPECT_EQ(pixels[offset + 3], kOpaque);
+        }
+    }
+
+    for (int y = 0; y < height; ++y) {
+        size_t const offset = Pixel_offset(2, y, row_bytes);
+        EXPECT_EQ(pixels[offset], 20);
+        EXPECT_EQ(pixels[offset + 1], 20);
+        EXPECT_EQ(pixels[offset + 2], 20);
+        EXPECT_EQ(pixels[offset + 3], kOpaque);
+    }
+}
+
+TEST(pixel_ops, PremultipliedLayerComposition_PreservesLayerOrder) {
+    int const width = 1;
+    int const height = 1;
+    int const row_bytes = width * kBytesPerPixel;
+    std::vector<uint8_t> pixels = {20, 40, 80, kOpaque};
+    std::vector<uint8_t> first_layer = {128, 0, 0, 128};
+    std::vector<uint8_t> second_layer = {0, 0, 128, 128};
+
+    Blend_premultiplied_layer_onto_opaque_pixels(
+        pixels, width, height, row_bytes, first_layer, row_bytes,
+        RectPx::From_ltrb(0, 0, width, height));
+    Blend_premultiplied_layer_onto_opaque_pixels(
+        pixels, width, height, row_bytes, second_layer, row_bytes,
+        RectPx::From_ltrb(0, 0, width, height));
+
+    uint8_t const after_first_blue = Expected_source_over_channel(20, 128, 128);
+    uint8_t const after_first_green = Expected_source_over_channel(40, 0, 128);
+    uint8_t const after_first_red = Expected_source_over_channel(80, 0, 128);
+    uint8_t const expected_blue =
+        Expected_source_over_channel(after_first_blue, 0, 128);
+    uint8_t const expected_green =
+        Expected_source_over_channel(after_first_green, 0, 128);
+    uint8_t const expected_red =
+        Expected_source_over_channel(after_first_red, 128, 128);
+
+    uint8_t const reverse_first_blue = Expected_source_over_channel(20, 0, 128);
+    uint8_t const reverse_first_red = Expected_source_over_channel(80, 128, 128);
+    uint8_t const reverse_expected_blue =
+        Expected_source_over_channel(reverse_first_blue, 128, 128);
+    uint8_t const reverse_expected_red =
+        Expected_source_over_channel(reverse_first_red, 0, 128);
+
+    EXPECT_EQ(pixels[0], expected_blue);
+    EXPECT_EQ(pixels[1], expected_green);
+    EXPECT_EQ(pixels[2], expected_red);
+    EXPECT_EQ(pixels[3], kOpaque);
+    EXPECT_NE(pixels[0], reverse_expected_blue);
+    EXPECT_NE(pixels[2], reverse_expected_red);
 }

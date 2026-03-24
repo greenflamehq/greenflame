@@ -8,8 +8,8 @@ namespace greenflame::core {
 namespace {
 constexpr int32_t kSnapThresholdPx = 10;
 
-[[nodiscard]] RectPx
-Virtual_desktop_bounds_from_monitors(std::span<const MonitorWithBounds> monitors) noexcept {
+[[nodiscard]] RectPx Virtual_desktop_bounds_from_monitors(
+    std::span<const MonitorWithBounds> monitors) noexcept {
     RectPx bounds = {};
     bool have_bounds = false;
     for (MonitorWithBounds const &monitor : monitors) {
@@ -27,17 +27,17 @@ Virtual_desktop_bounds_from_monitors(std::span<const MonitorWithBounds> monitors
 Resolve_virtual_desktop_client_bounds(RectPx virtual_desktop_bounds,
                                       std::span<const MonitorWithBounds> monitors,
                                       int32_t origin_x, int32_t origin_y) noexcept {
-    RectPx const screen_bounds =
-        virtual_desktop_bounds.Is_empty()
-            ? Virtual_desktop_bounds_from_monitors(monitors)
-            : virtual_desktop_bounds.Normalized();
+    RectPx const screen_bounds = virtual_desktop_bounds.Is_empty()
+                                     ? Virtual_desktop_bounds_from_monitors(monitors)
+                                     : virtual_desktop_bounds.Normalized();
     if (screen_bounds.Is_empty()) {
         return {};
     }
     return Screen_rect_to_client_rect(screen_bounds, origin_x, origin_y);
 }
 
-[[nodiscard]] RectPx Clip_selection_rect_to_bounds(RectPx rect, RectPx bounds) noexcept {
+[[nodiscard]] RectPx Clip_selection_rect_to_bounds(RectPx rect,
+                                                   RectPx bounds) noexcept {
     if (rect.Is_empty() || bounds.Is_empty()) {
         return rect;
     }
@@ -46,7 +46,8 @@ Resolve_virtual_desktop_client_bounds(RectPx virtual_desktop_bounds,
     return clipped.value_or(RectPx::From_ltrb(0, 0, 0, 0));
 }
 
-[[nodiscard]] RectPx Clamp_moved_selection_to_bounds(RectPx rect, RectPx bounds) noexcept {
+[[nodiscard]] RectPx Clamp_moved_selection_to_bounds(RectPx rect,
+                                                     RectPx bounds) noexcept {
     if (rect.Is_empty() || bounds.Is_empty()) {
         return rect;
     }
@@ -697,8 +698,8 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
                 Snap_moved_rect_to_edges(to_commit, state_.vertical_edges,
                                          state_.horizontal_edges, kSnapThresholdPx);
         }
-        to_commit = Clamp_moved_selection_to_bounds(to_commit,
-                                                    state_.virtual_desktop_client_bounds);
+        to_commit = Clamp_moved_selection_to_bounds(
+            to_commit, state_.virtual_desktop_client_bounds);
         PointPx const center = {to_commit.left + to_commit.Width() / 2,
                                 to_commit.top + to_commit.Height() / 2};
         state_.final_selection =

@@ -1,5 +1,6 @@
 #include "win/win32_services.h"
 
+#include "greenflame/win/annotation_capture_renderer.h"
 #include "greenflame/win/d2d_text_layout_engine.h"
 #include "greenflame_core/string_utils.h"
 #include "win/display_queries.h"
@@ -368,41 +369,6 @@ Save_bitmap_to_file(greenflame::GdiCaptureResult const &capture, std::wstring_vi
     return Make_capture_save_result(greenflame::core::CaptureSaveStatus::Success);
 }
 
-[[nodiscard]] bool Composite_annotations_into_capture(
-    greenflame::GdiCaptureResult &capture,
-    std::span<const greenflame::core::Annotation> annotations,
-    greenflame::core::RectPx target_bounds) {
-    if (!capture.Is_valid() || annotations.empty()) {
-        return true;
-    }
-
-    HDC const dc = GetDC(nullptr);
-    if (dc == nullptr) {
-        return false;
-    }
-
-    bool ok = false;
-    int const row_bytes = greenflame::Row_bytes32(capture.width);
-    size_t const buffer_size =
-        static_cast<size_t>(row_bytes) * static_cast<size_t>(capture.height);
-    std::vector<uint8_t> pixels(buffer_size);
-    BITMAPINFOHEADER bmi{};
-    greenflame::Fill_bmi32_top_down(bmi, capture.width, capture.height);
-    if (GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi),
-                  DIB_RGB_COLORS) != 0) {
-        greenflame::core::Blend_annotations_onto_pixels(pixels, capture.width,
-                                                        capture.height, row_bytes,
-                                                        annotations, target_bounds);
-        ok = SetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                       pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi),
-                       DIB_RGB_COLORS) != 0;
-    }
-
-    ReleaseDC(nullptr, dc);
-    return ok;
-}
-
 [[nodiscard]] bool Has_installed_font_family(IDWriteFontCollection *font_collection,
                                              std::wstring_view family) {
     if (font_collection == nullptr || family.empty()) {
@@ -451,8 +417,8 @@ Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
     }
 
     if (request.padding_px.Is_zero()) {
-        if (!Composite_annotations_into_capture(source_capture, request.annotations,
-                                                request.source_rect_screen)) {
+        if (!greenflame::Render_annotations_into_capture(
+                source_capture, request.annotations, request.source_rect_screen)) {
             return Make_capture_save_result(
                 greenflame::core::CaptureSaveStatus::SaveFailed,
                 L"Error: Failed to compose annotations onto the capture.");
@@ -480,8 +446,8 @@ Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
     } else {
         greenflame::core::RectPx annotation_target_bounds = {};
         if (!Try_compute_annotation_target_bounds(request, annotation_target_bounds) ||
-            !Composite_annotations_into_capture(final_capture, request.annotations,
-                                                annotation_target_bounds)) {
+            !greenflame::Render_annotations_into_capture(
+                final_capture, request.annotations, annotation_target_bounds)) {
             result = Make_capture_save_result(
                 greenflame::core::CaptureSaveStatus::SaveFailed,
                 L"Error: Failed to compose annotations onto the capture.");
@@ -908,8 +874,8 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
                                             L"bitmap.");
         }
 
-        if (!Composite_annotations_into_capture(cropped, request.annotations,
-                                                request.source_rect_screen)) {
+        if (!greenflame::Render_annotations_into_capture(cropped, request.annotations,
+                                                         request.source_rect_screen)) {
             cropped.Free();
             return Make_capture_save_result(
                 core::CaptureSaveStatus::SaveFailed,
@@ -996,7 +962,7 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
 
     core::RectPx annotation_target_bounds = {};
     if (!Try_compute_annotation_target_bounds(request, annotation_target_bounds) ||
-        !Composite_annotations_into_capture(
+        !greenflame::Render_annotations_into_capture(
             capture_to_save == &source_canvas ? source_canvas : final_capture,
             request.annotations, annotation_target_bounds)) {
         if (capture_to_save == &source_canvas) {

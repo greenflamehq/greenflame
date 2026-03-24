@@ -1,5 +1,7 @@
 #include "greenflame/win/d2d_paint.h"
 
+#include "greenflame/win/d2d_annotation_draw.h"
+#include "greenflame/win/d2d_draw_helpers.h"
 #include "greenflame/win/d2d_overlay_resources.h"
 #include "greenflame/win/overlay_button.h"
 #include "greenflame/win/overlay_help_overlay.h"
@@ -12,34 +14,14 @@ namespace greenflame {
 
 namespace {
 
-constexpr float kColorChannelMaxF = 255.f;
-constexpr float kArrowBaseWidth = 10.0f;
-constexpr float kArrowBaseLength = 18.0f;
-constexpr float kArrowWidthPerStroke = 2.0f;
-constexpr float kArrowLengthPerStroke = 4.0f;
-constexpr float kArrowOverlapPerStroke = 2.0f;
-constexpr float kHalfPixel = 0.5f;
 constexpr float kTextMeasureMaxExtent = 8192.f;
 constexpr float kMagnifierBorderInset = 0.75f;
 constexpr float kMagnifierBorderStrokeWidth = 1.5f;
 constexpr float kOverlayDimAlpha = 0.5f;
-constexpr float kDefaultDpi = 96.f;
 constexpr float kDraftTextSelectionAlpha = 0.7f;
 constexpr float kDraftTextOverwriteCaretAlpha = 0.65f;
 constexpr float kColorWheelFontPreviewPointSize = 18.f;
 constexpr float kColorWheelFontPreviewLayoutPaddingPx = 4.f;
-// ---------------------------------------------------------------------------
-// Coordinate helpers
-// ---------------------------------------------------------------------------
-
-inline D2D1_POINT_2F Pt(core::PointPx p) {
-    return D2D1::Point2F(static_cast<float>(p.x), static_cast<float>(p.y));
-}
-
-inline D2D1_RECT_F Rect(core::RectPx r) {
-    return D2D1::RectF(static_cast<float>(r.left), static_cast<float>(r.top),
-                       static_cast<float>(r.right), static_cast<float>(r.bottom));
-}
 
 void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot,
                                   core::RectPx restore_rect, int vd_width,
@@ -57,12 +39,6 @@ void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot
     D2D1_RECT_F const visible_f = Rect(*clipped);
     rt->DrawBitmap(screenshot, visible_f, 1.f,
                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, visible_f);
-}
-
-inline D2D1_COLOR_F Colorref_to_d2d(COLORREF c, float alpha = 1.f) {
-    return D2D1::ColorF(static_cast<float>(GetRValue(c)) / kColorChannelMaxF,
-                        static_cast<float>(GetGValue(c)) / kColorChannelMaxF,
-                        static_cast<float>(GetBValue(c)) / kColorChannelMaxF, alpha);
 }
 
 [[nodiscard]] constexpr D2D1_COLOR_F With_alpha(D2D1_COLOR_F color,
@@ -84,386 +60,32 @@ Resolve_text_font_family(core::TextAnnotationBaseStyle const &style,
     return families[index];
 }
 
-[[nodiscard]] float Alpha_from_opacity_percent(int32_t opacity_percent) noexcept {
-    int32_t const clamped =
-        std::clamp(opacity_percent, core::StrokeStyle::kMinOpacityPercent,
-                   core::StrokeStyle::kMaxOpacityPercent);
-    return static_cast<float>(clamped) / 100.f;
-}
-
-[[nodiscard]] float Cross(D2D1_POINT_2F origin, D2D1_POINT_2F a,
-                          D2D1_POINT_2F b) noexcept {
-    float const ax = a.x - origin.x;
-    float const ay = a.y - origin.y;
-    float const bx = b.x - origin.x;
-    float const by = b.y - origin.y;
-    return ax * by - ay * bx;
-}
-
-struct HullResult {
-    std::array<D2D1_POINT_2F, 8> points = {};
-    size_t count = 0;
-};
-
-[[nodiscard]] HullResult Build_convex_hull(std::array<D2D1_POINT_2F, 8> points) {
-    std::sort(points.begin(), points.end(), [](D2D1_POINT_2F a, D2D1_POINT_2F b) {
-        return std::tie(a.x, a.y) < std::tie(b.x, b.y);
-    });
-    auto const last =
-        std::unique(points.begin(), points.end(), [](D2D1_POINT_2F a, D2D1_POINT_2F b) {
-            return !(a.x < b.x) && !(b.x < a.x) && !(a.y < b.y) && !(b.y < a.y);
-        });
-    size_t const count = static_cast<size_t>(std::distance(points.begin(), last));
-    std::array<D2D1_POINT_2F, 16> working = {};
-    size_t working_size = 0;
-
-    for (size_t i = 0; i < count; ++i) {
-        while (working_size >= 2 &&
-               Cross(working[working_size - 2], working[working_size - 1], points[i]) <=
-                   0.f) {
-            --working_size;
-        }
-        working[working_size++] = points[i];
-    }
-
-    size_t const lower_size = working_size;
-    if (count > 1) {
-        for (size_t i = count - 1; i > 0; --i) {
-            while (working_size > lower_size &&
-                   Cross(working[working_size - 2], working[working_size - 1],
-                         points[i - 1]) <= 0.f) {
-                --working_size;
-            }
-            working[working_size++] = points[i - 1];
-        }
-    }
-
-    if (working_size > 1) {
-        --working_size;
-    }
-
-    HullResult result{};
-    result.count = working_size;
-    for (size_t i = 0; i < working_size; ++i) {
-        result.points[i] = working[i];
-    }
-    return result;
-}
-
 // ---------------------------------------------------------------------------
 // Annotation drawing helpers
 // ---------------------------------------------------------------------------
 
+[[nodiscard]] D2DAnnotationDrawContext
+Build_annotation_draw_context(D2DOverlayResources &res) noexcept {
+    return D2DAnnotationDrawContext{
+        .factory = res.factory.Get(),
+        .solid_brush = res.solid_brush.Get(),
+        .round_cap_style = res.round_cap_style.Get(),
+        .flat_cap_style = res.flat_cap_style.Get(),
+        .text_bitmaps = &res.text_bitmaps,
+        .bubble_bitmaps = &res.bubble_bitmaps,
+    };
+}
+
 void Draw_freehand_points(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                           std::span<const core::PointPx> points,
                           core::StrokeStyle style, core::FreehandTipShape tip_shape) {
-    if (points.empty()) {
-        return;
-    }
-    res.solid_brush->SetColor(Colorref_to_d2d(
-        style.color, Alpha_from_opacity_percent(style.opacity_percent)));
-    if (points.size() == 1) {
-        float const half_extent = static_cast<float>(std::max<int32_t>(
-                                      core::StrokeStyle::kMinWidthPx, style.width_px)) /
-                                  2.f;
-        float const cx = static_cast<float>(points.front().x);
-        float const cy = static_cast<float>(points.front().y);
-        if (tip_shape == core::FreehandTipShape::Square) {
-            rt->FillRectangle(D2D1::RectF(cx - half_extent, cy - half_extent,
-                                          cx + half_extent, cy + half_extent),
-                              res.solid_brush.Get());
-        } else {
-            rt->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F(cx, cy), half_extent, half_extent),
-                res.solid_brush.Get());
-        }
-        return;
-    }
-
-    if (tip_shape == core::FreehandTipShape::Square) {
-        // Match the axis-aligned square brush model by filling the convex hull of the
-        // endpoint squares for each segment. This avoids D2D stroke-join artifacts.
-        Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
-        if (FAILED(res.factory->CreatePathGeometry(path.GetAddressOf()))) {
-            return;
-        }
-        Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
-        if (FAILED(path->Open(sink.GetAddressOf()))) {
-            return;
-        }
-        sink->SetFillMode(D2D1_FILL_MODE_WINDING);
-
-        float const half_extent = static_cast<float>(std::max<int32_t>(
-                                      core::StrokeStyle::kMinWidthPx, style.width_px)) /
-                                  2.f;
-        for (size_t i = 1; i < points.size(); ++i) {
-            float const ax = static_cast<float>(points[i - 1].x);
-            float const ay = static_cast<float>(points[i - 1].y);
-            float const bx = static_cast<float>(points[i].x);
-            float const by = static_cast<float>(points[i].y);
-            std::array<D2D1_POINT_2F, 8> const corners = {
-                D2D1::Point2F(ax - half_extent, ay - half_extent),
-                D2D1::Point2F(ax + half_extent, ay - half_extent),
-                D2D1::Point2F(ax + half_extent, ay + half_extent),
-                D2D1::Point2F(ax - half_extent, ay + half_extent),
-                D2D1::Point2F(bx - half_extent, by - half_extent),
-                D2D1::Point2F(bx + half_extent, by - half_extent),
-                D2D1::Point2F(bx + half_extent, by + half_extent),
-                D2D1::Point2F(bx - half_extent, by + half_extent),
-            };
-            HullResult const hull = Build_convex_hull(corners);
-            if (hull.count < 3) {
-                continue;
-            }
-
-            sink->BeginFigure(hull.points[0], D2D1_FIGURE_BEGIN_FILLED);
-            for (size_t hull_index = 1; hull_index < hull.count; ++hull_index) {
-                sink->AddLine(hull.points[hull_index]);
-            }
-            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-        }
-        sink->Close();
-        rt->FillGeometry(path.Get(), res.solid_brush.Get());
-        return;
-    }
-
-    Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
-    if (FAILED(res.factory->CreatePathGeometry(path.GetAddressOf()))) {
-        return;
-    }
-    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
-    if (FAILED(path->Open(sink.GetAddressOf()))) {
-        return;
-    }
-    sink->BeginFigure(Pt(points[0]), D2D1_FIGURE_BEGIN_HOLLOW);
-    for (size_t i = 1; i < points.size(); ++i) {
-        sink->AddLine(Pt(points[i]));
-    }
-    sink->EndFigure(D2D1_FIGURE_END_OPEN);
-    sink->Close();
-
-    rt->DrawGeometry(path.Get(), res.solid_brush.Get(),
-                     static_cast<float>(style.width_px), res.round_cap_style.Get());
-}
-
-void Draw_freehand(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                   core::FreehandStrokeAnnotation const &fh) {
-    Draw_freehand_points(rt, res, fh.points, fh.style, fh.freehand_tip_shape);
-}
-
-void Draw_line(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-               core::LineAnnotation const &line) {
-    res.solid_brush->SetColor(Colorref_to_d2d(
-        line.style.color, Alpha_from_opacity_percent(line.style.opacity_percent)));
-    float const w = static_cast<float>(line.style.width_px);
-
-    if (!line.arrow_head) {
-        // Plain line: square (flat) ends to match annotation_hit_test geometry.
-        rt->DrawLine(Pt(line.start), Pt(line.end), res.solid_brush.Get(), w,
-                     res.flat_cap_style.Get());
-        return;
-    }
-
-    float const dx = static_cast<float>(line.end.x - line.start.x);
-    float const dy = static_cast<float>(line.end.y - line.start.y);
-    float const len = std::sqrtf(dx * dx + dy * dy);
-    if (len < 1.f) {
-        rt->DrawLine(Pt(line.start), Pt(line.end), res.solid_brush.Get(), w,
-                     res.flat_cap_style.Get());
-        return;
-    }
-    float const ux = dx / len; // unit vector along line
-    float const uy = dy / len;
-
-    float const raw_head_length = kArrowBaseLength + w * kArrowLengthPerStroke;
-    float const head_length =
-        std::min(len, std::max(w, raw_head_length - w * kArrowOverlapPerStroke));
-    float const head_half = (kArrowBaseWidth + w * kArrowWidthPerStroke) / 2.f;
-
-    // Tip is 0.5 px past line.end along the axis (matching annotation_hit_test.cpp).
-    float const ex = static_cast<float>(line.end.x);
-    float const ey = static_cast<float>(line.end.y);
-    D2D1_POINT_2F const tip = D2D1::Point2F(ex + ux * kHalfPixel, ey + uy * kHalfPixel);
-    D2D1_POINT_2F const base_center =
-        D2D1::Point2F(ex - ux * head_length, ey - uy * head_length);
-    D2D1_POINT_2F const bl =
-        D2D1::Point2F(base_center.x + uy * head_half, base_center.y - ux * head_half);
-    D2D1_POINT_2F const br =
-        D2D1::Point2F(base_center.x - uy * head_half, base_center.y + ux * head_half);
-
-    // Extend shaft w/2 past base_center into the head. The triangle is drawn on top
-    // and covers the overlap, preventing the 1-px antialiasing gap at the junction.
-    D2D1_POINT_2F const shaft_end = D2D1::Point2F(base_center.x + ux * w * kHalfPixel,
-                                                  base_center.y + uy * w * kHalfPixel);
-    rt->DrawLine(Pt(line.start), shaft_end, res.solid_brush.Get(), w,
-                 res.flat_cap_style.Get());
-
-    // Filled arrowhead triangle (drawn after shaft so it covers the overlap).
-    Microsoft::WRL::ComPtr<ID2D1PathGeometry> arrow;
-    if (FAILED(res.factory->CreatePathGeometry(arrow.GetAddressOf()))) {
-        return;
-    }
-    Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
-    if (FAILED(arrow->Open(sink.GetAddressOf()))) {
-        return;
-    }
-    sink->BeginFigure(tip, D2D1_FIGURE_BEGIN_FILLED);
-    sink->AddLine(bl);
-    sink->AddLine(br);
-    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-    sink->Close();
-    rt->FillGeometry(arrow.Get(), res.solid_brush.Get());
-}
-
-void Draw_rectangle(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                    core::RectangleAnnotation const &rect) {
-    res.solid_brush->SetColor(Colorref_to_d2d(
-        rect.style.color, Alpha_from_opacity_percent(rect.style.opacity_percent)));
-    D2D1_RECT_F const rf = Rect(rect.outer_bounds);
-    if (rect.filled) {
-        rt->FillRectangle(rf, res.solid_brush.Get());
-    } else {
-        float const hw = static_cast<float>(rect.style.width_px) * 0.5f;
-        D2D1_RECT_F const inset =
-            D2D1::RectF(rf.left + hw, rf.top + hw, rf.right - hw, rf.bottom - hw);
-        if (inset.left >= inset.right || inset.top >= inset.bottom) {
-            rt->FillRectangle(rf, res.solid_brush.Get());
-        } else {
-            rt->DrawRectangle(inset, res.solid_brush.Get(),
-                              static_cast<float>(rect.style.width_px),
-                              res.flat_cap_style.Get());
-        }
-    }
-}
-
-void Draw_ellipse(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                  core::EllipseAnnotation const &ellipse) {
-    res.solid_brush->SetColor(
-        Colorref_to_d2d(ellipse.style.color,
-                        Alpha_from_opacity_percent(ellipse.style.opacity_percent)));
-    D2D1_RECT_F const rf = Rect(ellipse.outer_bounds);
-    float const rx = (rf.right - rf.left) * 0.5f;
-    float const ry = (rf.bottom - rf.top) * 0.5f;
-    D2D1_ELLIPSE const shape = D2D1::Ellipse(D2D1::Point2F(rf.left + rx, rf.top + ry),
-                                             std::max(0.0f, rx), std::max(0.0f, ry));
-
-    if (ellipse.filled) {
-        rt->FillEllipse(shape, res.solid_brush.Get());
-        return;
-    }
-
-    float const stroke_width = static_cast<float>(ellipse.style.width_px);
-    float const inset_rx = rx - (stroke_width * 0.5f);
-    float const inset_ry = ry - (stroke_width * 0.5f);
-    if (inset_rx <= 0.0f || inset_ry <= 0.0f) {
-        rt->FillEllipse(shape, res.solid_brush.Get());
-        return;
-    }
-
-    rt->DrawEllipse(D2D1::Ellipse(shape.point, inset_rx, inset_ry),
-                    res.solid_brush.Get(), stroke_width, res.flat_cap_style.Get());
-}
-
-[[nodiscard]] bool
-Text_bitmap_is_valid(core::TextAnnotation const &annotation) noexcept {
-    if (annotation.bitmap_width_px <= 0 || annotation.bitmap_height_px <= 0 ||
-        annotation.bitmap_row_bytes < annotation.bitmap_width_px * 4) {
-        return false;
-    }
-    size_t const required_size = static_cast<size_t>(annotation.bitmap_row_bytes) *
-                                 static_cast<size_t>(annotation.bitmap_height_px);
-    return annotation.premultiplied_bgra.size() >= required_size;
-}
-
-void Draw_text(ID2D1RenderTarget *rt, D2DOverlayResources &res, uint64_t annotation_id,
-               core::TextAnnotation const &annotation) {
-    if (!rt || !Text_bitmap_is_valid(annotation)) {
-        return;
-    }
-
-    auto it = res.text_bitmaps.find(annotation_id);
-    if (it == res.text_bitmaps.end()) {
-        D2D1_BITMAP_PROPERTIES props{};
-        props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                                              D2D1_ALPHA_MODE_PREMULTIPLIED);
-        props.dpiX = kDefaultDpi;
-        props.dpiY = kDefaultDpi;
-
-        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
-        HRESULT const hr = rt->CreateBitmap(
-            D2D1::SizeU(static_cast<UINT32>(annotation.bitmap_width_px),
-                        static_cast<UINT32>(annotation.bitmap_height_px)),
-            annotation.premultiplied_bgra.data(),
-            static_cast<UINT32>(annotation.bitmap_row_bytes), props,
-            bitmap.GetAddressOf());
-        if (FAILED(hr) || !bitmap) {
-            return;
-        }
-        it = res.text_bitmaps.emplace(annotation_id, std::move(bitmap)).first;
-    }
-
-    rt->DrawBitmap(it->second.Get(), Rect(annotation.visual_bounds), 1.f,
-                   D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
-}
-
-void Draw_bubble(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                 uint64_t annotation_id, core::BubbleAnnotation const &annotation) {
-    if (rt == nullptr || annotation.bitmap_width_px <= 0 ||
-        annotation.bitmap_height_px <= 0 || annotation.premultiplied_bgra.empty()) {
-        return;
-    }
-
-    int32_t const r = annotation.diameter_px / 2;
-    core::RectPx const bounds =
-        core::RectPx::From_ltrb(annotation.center.x - r, annotation.center.y - r,
-                                annotation.center.x - r + annotation.diameter_px,
-                                annotation.center.y - r + annotation.diameter_px);
-
-    auto it = res.bubble_bitmaps.find(annotation_id);
-    if (it == res.bubble_bitmaps.end()) {
-        D2D1_BITMAP_PROPERTIES props{};
-        props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
-                                              D2D1_ALPHA_MODE_PREMULTIPLIED);
-        props.dpiX = kDefaultDpi;
-        props.dpiY = kDefaultDpi;
-
-        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
-        HRESULT const hr = rt->CreateBitmap(
-            D2D1::SizeU(static_cast<UINT32>(annotation.bitmap_width_px),
-                        static_cast<UINT32>(annotation.bitmap_height_px)),
-            annotation.premultiplied_bgra.data(),
-            static_cast<UINT32>(annotation.bitmap_row_bytes), props,
-            bitmap.GetAddressOf());
-        if (FAILED(hr) || !bitmap) {
-            return;
-        }
-        it = res.bubble_bitmaps.emplace(annotation_id, std::move(bitmap)).first;
-    }
-
-    rt->DrawBitmap(it->second.Get(), Rect(bounds), 1.f,
-                   D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    Draw_d2d_freehand_points(rt, Build_annotation_draw_context(res), points, style,
+                             tip_shape);
 }
 
 void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                      core::Annotation const &ann) {
-    std::visit(
-        core::Overloaded{
-            [&](core::FreehandStrokeAnnotation const &fh) {
-                Draw_freehand(rt, res, fh);
-            },
-            [&](core::LineAnnotation const &line) { Draw_line(rt, res, line); },
-            [&](core::RectangleAnnotation const &rect) {
-                Draw_rectangle(rt, res, rect);
-            },
-            [&](core::EllipseAnnotation const &ellipse) {
-                Draw_ellipse(rt, res, ellipse);
-            },
-            [&](core::TextAnnotation const &text) { Draw_text(rt, res, ann.id, text); },
-            [&](core::BubbleAnnotation const &bubble) {
-                Draw_bubble(rt, res, ann.id, bubble);
-            },
-        },
-        ann.data);
+    Draw_d2d_annotation(rt, Build_annotation_draw_context(res), ann);
 }
 
 // ---------------------------------------------------------------------------

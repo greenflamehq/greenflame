@@ -116,12 +116,5 @@ struct AnnotationDocument final {
 };
 
 [[nodiscard]] bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept;
-void Blend_annotation_onto_pixels(std::span<uint8_t> pixels, int width, int height,
-                                  int row_bytes, Annotation const &annotation,
-                                  RectPx target_bounds) noexcept;
-void Blend_annotations_onto_pixels(std::span<uint8_t> pixels, int width, int height,
-                                   int row_bytes,
-                                   std::span<const Annotation> annotations,
-                                   RectPx target_bounds) noexcept;
 
 } // namespace greenflame::core

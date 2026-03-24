@@ -98,9 +98,6 @@ class OverlayWindow final {
     void Copy_to_clipboard_and_close();
     void Notify_save_and_close(GdiCaptureResult &cropped, std::wstring_view saved_path,
                                bool file_copied_to_clipboard);
-    [[nodiscard]] bool
-    Composite_annotations_into_capture(GdiCaptureResult &capture,
-                                       core::RectPx target_bounds) const;
 
     LRESULT On_paint();
     LRESULT On_destroy();

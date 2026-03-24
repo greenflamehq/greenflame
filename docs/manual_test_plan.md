@@ -676,7 +676,9 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - The overlay closes after copy.
   - The pasted image contains the selected crop plus committed annotations.
+  - Diagonal and curved annotation edges remain anti-aliased in the pasted image and match the live overlay appearance.
   - Highlighter annotations remain semi-transparent in the pasted image and preserve the marker-like darkening effect over the captured content.
+  - Highlighter edges remain anti-aliased in the pasted image.
   - Overlay chrome, labels, toolbar, help, and color wheel are absent from the pasted image.
 
 ### GF-MAN-OUT-002 - Direct Save
@@ -691,6 +693,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The default save directory is created automatically.
   - A file is saved using the configured default format.
   - The overlay closes after save.
+  - The saved image preserves the live overlay's anti-aliased rendering for brush, line, arrow, ellipse, and filled ellipse annotations.
   - The success toast shows the saved filename and a thumbnail.
   - Clicking the toast path opens Explorer with the file selected.
   - On `ENV-B`, the toast appears on the monitor containing the pointer.
@@ -707,6 +710,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - Cancel leaves the overlay open.
   - Each supported format saves successfully and opens correctly in Windows.
+  - Each saved format preserves the same anti-aliased annotation rendering seen in the live overlay.
   - The next Save As session starts in the last folder used for Save As.
 
 ### GF-MAN-OUT-004 - Save-And-Copy-File Variants
@@ -1054,6 +1058,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - Step 1 exits successfully and draws a red diagonal line across the saved capture.
   - Step 2 exits successfully and draws both annotations over the final padded image, including the portions that extend into the padding fill.
+  - The saved outputs keep the same anti-aliased annotation edges as interactive export, including the diagonal line in step 1.
   - The output images are written exactly to the requested paths.
   - No tray instance remains running after either one-shot command.
 
@@ -1069,6 +1074,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The local-space fixture renders the mixed annotation set relative to the capture origin, including text, bubbles, and out-of-bounds geometry.
   - The global-space fixture renders annotations relative to the virtual-desktop origin, including negative or off-screen coordinates where applicable.
   - The brush fixture renders a continuous neon-magenta stroke that starts in the upper-left padding, passes through the captured content, and exits into the lower-right padding without being clipped at the original capture boundary.
+  - Diagonal and curved annotation edges remain anti-aliased in all three outputs, including where geometry extends into padding.
   - In all three cases, annotations that land in padded areas remain visible on top of the padding color.
   - Bubble numbering matches annotation order among bubbles only: first bubble is `1`, second bubble is `2`, and so on.
 
@@ -1154,6 +1160,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Step 2 succeeds and overwrites the input file in place.
   - Step 3 succeeds and writes only the explicit output path.
   - Step 4 succeeds and writes `%TEMP%\greenflame-annotated.jpg`, preserving the probed input format for the extensionless explicit output path.
+  - The annotated `--input` outputs preserve the same anti-aliased annotation rendering semantics as interactive export.
   - The commands exit without starting a tray instance.
 
 ### GF-MAN-CLI-014 - `--input` Transparent Image Rejection

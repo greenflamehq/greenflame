@@ -3,6 +3,7 @@
 #include "win/overlay_window.h"
 
 #include "app_config_store.h"
+#include "greenflame/win/annotation_capture_renderer.h"
 #include "greenflame_core/app_config.h"
 #include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
@@ -2284,38 +2285,6 @@ core::RectPx OverlayWindow::Selection_screen_rect() const {
                                    sel.bottom + static_cast<int32_t>(overlay_rect.top));
 }
 
-bool OverlayWindow::Composite_annotations_into_capture(
-    GdiCaptureResult &capture, core::RectPx target_bounds) const {
-    std::span<const core::Annotation> const annotations = controller_.Annotations();
-    if (!capture.Is_valid() || annotations.empty()) {
-        return true;
-    }
-
-    HDC const dc = GetDC(nullptr);
-    if (dc == nullptr) {
-        return false;
-    }
-
-    bool ok = false;
-    int const row_bytes = Row_bytes32(capture.width);
-    size_t const buffer_size =
-        static_cast<size_t>(row_bytes) * static_cast<size_t>(capture.height);
-    std::vector<uint8_t> pixels(buffer_size);
-    BITMAPINFOHEADER bmi{};
-    Fill_bmi32_top_down(bmi, capture.width, capture.height);
-    if (GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi),
-                  DIB_RGB_COLORS) != 0) {
-        core::Blend_annotations_onto_pixels(pixels, capture.width, capture.height,
-                                            row_bytes, annotations, target_bounds);
-        ok = SetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                       pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi),
-                       DIB_RGB_COLORS) != 0;
-    }
-    ReleaseDC(nullptr, dc);
-    return ok;
-}
-
 void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
     if (!resources_->capture.Is_valid()) {
         return;
@@ -2331,7 +2300,8 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
         Destroy();
         return;
     }
-    if (!Composite_annotations_into_capture(cropped, selection)) {
+    if (!Render_annotations_into_capture(cropped, controller_.Annotations(),
+                                         selection)) {
         cropped.Free();
         Destroy();
         return;
@@ -2398,7 +2368,8 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         Destroy();
         return;
     }
-    if (!Composite_annotations_into_capture(cropped, selection)) {
+    if (!Render_annotations_into_capture(cropped, controller_.Annotations(),
+                                         selection)) {
         cropped.Free();
         return;
     }
@@ -2497,7 +2468,8 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
         Destroy();
         return;
     }
-    if (!Composite_annotations_into_capture(cropped, selection)) {
+    if (!Render_annotations_into_capture(cropped, controller_.Annotations(),
+                                         selection)) {
         cropped.Free();
         Destroy();
         return;

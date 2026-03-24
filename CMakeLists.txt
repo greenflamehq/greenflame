@@ -291,6 +291,8 @@ add_executable(greenflame WIN32
     src/greenflame/win/save_image.cpp
     src/greenflame/win/wgc_window_capture.cpp
     src/greenflame/win/wgc_window_capture.h
+    src/greenflame/win/annotation_capture_renderer.h
+    src/greenflame/win/annotation_capture_renderer.cpp
     src/greenflame/win/overlay_help_overlay.cpp
     src/greenflame/win/overlay_help_overlay.h
     src/greenflame/win/overlay_window.cpp
@@ -311,6 +313,9 @@ add_executable(greenflame WIN32
     src/greenflame/win/d2d_overlay_resources.cpp
     src/greenflame/win/d2d_text_layout_engine.h
     src/greenflame/win/d2d_text_layout_engine.cpp
+    src/greenflame/win/d2d_annotation_draw.h
+    src/greenflame/win/d2d_annotation_draw.cpp
+    src/greenflame/win/d2d_draw_helpers.h
     src/greenflame/win/d2d_paint.h
     src/greenflame/win/d2d_paint.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/app.manifest
