@@ -122,6 +122,13 @@ void OverlayController::Refresh_snap_edges(SnapEdges const &visible_snap_edges,
 
 void OverlayController::Update_virtual_desktop_client_bounds(
     RectPx virtual_desktop_bounds, int32_t origin_x, int32_t origin_y) {
+    bool const has_explicit_bounds = !virtual_desktop_bounds.Is_empty();
+    bool const has_explicit_origin = origin_x != 0 || origin_y != 0;
+    if (!has_explicit_bounds && !has_explicit_origin &&
+        !state_.virtual_desktop_client_bounds.Is_empty()) {
+        return;
+    }
+
     state_.virtual_desktop_client_bounds = Resolve_virtual_desktop_client_bounds(
         virtual_desktop_bounds, state_.cached_monitors, origin_x, origin_y);
 }

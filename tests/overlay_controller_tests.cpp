@@ -33,6 +33,11 @@ std::vector<MonitorWithBounds> Dual_diff_dpi() {
             Make_monitor(1920, 0, 1920, 1080, 150)};
 }
 
+std::vector<MonitorWithBounds> Triple_with_left_monitor() {
+    return {Make_monitor(-1920, 0, 1920, 1080), Make_monitor(0, 0, 1920, 1080),
+            Make_monitor(1920, 0, 1920, 1080)};
+}
+
 OverlayController
 Make_controller(std::vector<MonitorWithBounds> monitors = Single_monitor()) {
     OverlayController c;
@@ -159,6 +164,20 @@ TEST(overlay_controller, B_DragPastDesktop_ClipsSelectionToDesktopBounds) {
     OverlayAction action = Release(c, {2500, 1400});
     EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(100, 200, 1920, 1080)));
+}
+
+TEST(overlay_controller, B_NegativeOriginDrag_StillReachesRightmostMonitor) {
+    auto c = Make_controller(Triple_with_left_monitor());
+    OverlayAction action = Press(c, {4000, 100}, No_mods(), -1920, 0);
+    EXPECT_EQ(action, OverlayAction::Repaint);
+    ASSERT_TRUE(c.State().dragging);
+
+    Move(c, {5000, 300});
+    EXPECT_EQ(c.State().live_rect, (RectPx::From_ltrb(4000, 100, 5000, 300)));
+
+    action = Release(c, {5000, 300});
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(4000, 100, 5000, 300)));
 }
 
 TEST(overlay_controller, B_Release_SelectionWindowIsNullopt) {
