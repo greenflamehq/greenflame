@@ -4,6 +4,8 @@
 
 namespace greenflame {
 
+[[nodiscard]] bool Is_window_excluded_from_capture(HWND hwnd) noexcept;
+
 class Win32WindowQuery final : public IWindowQuery {
   public:
     [[nodiscard]] std::optional<HWND>

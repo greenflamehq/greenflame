@@ -479,6 +479,35 @@ TEST(app_controller, cli_window_mode_ambiguous_output_includes_hwnd_class_and_re
     EXPECT_THAT(result.stderr_message, HasSubstr(L"(x=10, y=20, w=200, h=200)"));
 }
 
+TEST(app_controller, cli_window_mode_ambiguous_list_annotates_uncapturable_candidates) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_name = L"signal";
+
+    // Neither title is an exact case-insensitive match for "signal", so
+    // disambiguation produces CliWindowAmbiguous. The uncapturable candidate
+    // must appear annotated with [uncapturable] in the listing.
+    WindowMatch signal_match = Make_window_match(
+        reinterpret_cast<HWND>(static_cast<uintptr_t>(0xABCDu)), L"Signal Messenger",
+        L"Chrome_WidgetWin_1", RectPx::From_ltrb(0, 0, 800, 600));
+    signal_match.info.uncapturable = true;
+    WindowMatch const paint_match = Make_window_match(
+        reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1234u)),
+        L"test-signal.png - Paint.NET 5.1.12", L"WindowsForms10.Window.8.app.0",
+        RectPx::From_ltrb(100, 100, 900, 700));
+
+    EXPECT_CALL(fixture.windows,
+                Find_windows_by_title(Eq(std::wstring_view{L"signal"})))
+        .WillOnce(Return(std::vector<WindowMatch>{signal_match, paint_match}));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowAmbiguous);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"[uncapturable]"));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"Signal Messenger"));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"Paint.NET"));
+}
+
 TEST(app_controller, cli_window_hwnd_mode_selects_exact_window) {
     ControllerFixture fixture;
     CliOptions options{};
@@ -903,6 +932,79 @@ TEST(app_controller, cli_window_hwnd_mode_fails_when_not_visible_toplevel) {
     CliResult const result = fixture.controller.Run_cli_capture_mode(options);
     EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowUnavailable);
     EXPECT_FALSE(result.stderr_message.empty());
+}
+
+TEST(app_controller, cli_window_hwnd_mode_fails_when_uncapturable) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_hwnd = static_cast<std::uintptr_t>(0xDEADu);
+
+    HWND const hwnd = reinterpret_cast<HWND>(*options.window_hwnd);
+    core::WindowCandidateInfo info{};
+    info.title = L"Signal";
+    info.class_name = L"Chrome_WidgetWin_1";
+    info.rect = RectPx::From_ltrb(0, 0, 800, 600);
+    info.hwnd_value = *options.window_hwnd;
+    info.uncapturable = true;
+
+    EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_window_info(hwnd)).WillOnce(Return(info));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowUncapturable);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"protected from screen capture"));
+}
+
+TEST(app_controller, cli_window_mode_single_uncapturable_match_returns_exit_17) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_name = L"Signal";
+
+    HWND const signal_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xABCDu));
+    WindowMatch signal_match =
+        Make_window_match(signal_hwnd, L"Signal", L"Chrome_WidgetWin_1",
+                          RectPx::From_ltrb(0, 0, 800, 600));
+    signal_match.info.uncapturable = true;
+
+    EXPECT_CALL(fixture.windows,
+                Find_windows_by_title(Eq(std::wstring_view{L"Signal"})))
+        .WillOnce(Return(std::vector<WindowMatch>{signal_match}));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowUncapturable);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"protected from screen capture"));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"Signal"));
+}
+
+TEST(app_controller,
+     cli_window_mode_uncapturable_exact_match_shows_annotated_candidate_list) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Window;
+    options.window_name = L"Signal";
+
+    HWND const signal_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xABCDu));
+    HWND const other_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1234u));
+    WindowMatch signal_match =
+        Make_window_match(signal_hwnd, L"Signal", L"Chrome_WidgetWin_1",
+                          RectPx::From_ltrb(0, 0, 800, 600));
+    signal_match.info.uncapturable = true;
+    WindowMatch const other_match =
+        Make_window_match(other_hwnd, L"Signal Beta", L"Chrome_WidgetWin_1",
+                          RectPx::From_ltrb(0, 0, 400, 300));
+
+    EXPECT_CALL(fixture.windows,
+                Find_windows_by_title(Eq(std::wstring_view{L"Signal"})))
+        .WillOnce(Return(std::vector<WindowMatch>{signal_match, other_match}));
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::CliWindowUncapturable);
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"protected from screen capture"));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"[uncapturable]"));
+    EXPECT_THAT(result.stderr_message, HasSubstr(L"Signal Beta"));
 }
 
 TEST(app_controller,

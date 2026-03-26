@@ -271,6 +271,7 @@ codes are unique and not reused.
 | `14` | `--annotate` input is invalid (file read, JSON, validation, or missing explicit font family) |
 | `15` | Forced `--window-capture wgc` failed (unsupported, setup/frame failure, or WGC/window size mismatch) |
 | `16` | `--input` image is unreadable or unsupported (decode failure, unsupported image format, or transparency rejection) |
+| `17` | `--window` or `--window-hwnd` matched a window with `WDA_EXCLUDEFROMCAPTURE` display affinity; it cannot be captured |
 
 ---
 

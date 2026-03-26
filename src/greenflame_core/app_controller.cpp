@@ -69,6 +69,15 @@ void Append_line(std::wstring &text, std::wstring_view line) {
     text += line;
 }
 
+void Append_window_candidate_list(std::wstring &text,
+                                  std::vector<greenflame::WindowMatch> const &matches) {
+    Append_line(text, L"Matching windows:");
+    for (size_t i = 0; i < matches.size(); ++i) {
+        Append_line(text,
+                    greenflame::core::Format_window_candidate_line(matches[i].info, i));
+    }
+}
+
 [[nodiscard]] std::wstring_view Trim_wspace(std::wstring_view text) noexcept {
     size_t begin = 0;
     size_t end = text.size();
@@ -501,6 +510,12 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
                     L"Error: Specified window handle is not a visible top-level "
                     L"window. Try again.");
             }
+            if (window_info->uncapturable) {
+                return Make_cli_error(
+                    ProcessExitCode::CliWindowUncapturable,
+                    L"Error: Specified window is protected from screen capture by the "
+                    L"application.");
+            }
 
             captured_window = requested_hwnd;
             target_rect = window_info->rect;
@@ -553,13 +568,19 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
                 stderr_text += std::to_wstring(matches.size());
                 stderr_text += L" matches): ";
                 stderr_text += cli_options.window_name;
-                Append_line(stderr_text, L"Matching windows:");
-                for (size_t i = 0; i < matches.size(); ++i) {
-                    Append_line(stderr_text,
-                                core::Format_window_candidate_line(matches[i].info, i));
-                }
+                Append_window_candidate_list(stderr_text, matches);
                 return Make_cli_error(ProcessExitCode::CliWindowAmbiguous, stderr_text);
             }
+        }
+
+        if (matches[selected_match_index].info.uncapturable) {
+            std::wstring stderr_text = L"Error: Window \"";
+            stderr_text += cli_options.window_name;
+            stderr_text += L"\" is protected from screen capture by the application.";
+            if (matches.size() > 1) {
+                Append_window_candidate_list(stderr_text, matches);
+            }
+            return Make_cli_error(ProcessExitCode::CliWindowUncapturable, stderr_text);
         }
 
         captured_window = matches[selected_match_index].hwnd;

@@ -218,6 +218,12 @@ void Append_visible_window_snap_edges(RECT const &window_rect, HRGN visible_regi
 
 } // namespace
 
+bool Is_window_excluded_from_capture(HWND hwnd) noexcept {
+    DWORD affinity = WDA_NONE;
+    return GetWindowDisplayAffinity(hwnd, &affinity) != 0 &&
+           affinity == WDA_EXCLUDEFROMCAPTURE;
+}
+
 std::optional<HWND> Win32WindowQuery::Get_window_under_cursor(POINT screen_pt,
                                                               HWND exclude_hwnd) const {
     HWND hwnd = nullptr;
@@ -228,8 +234,9 @@ std::optional<HWND> Win32WindowQuery::Get_window_under_cursor(POINT screen_pt,
     }
     while (hwnd != nullptr) {
         RECT rect{};
-        if (Is_visible_top_level_window(hwnd) && Try_get_window_bounds(hwnd, rect) &&
-            PtInRect(&rect, screen_pt)) {
+        if (Is_visible_top_level_window(hwnd) &&
+            !Is_window_excluded_from_capture(hwnd) &&
+            Try_get_window_bounds(hwnd, rect) && PtInRect(&rect, screen_pt)) {
             return hwnd;
         }
         hwnd = GetWindow(hwnd, GW_HWNDNEXT);
@@ -256,7 +263,8 @@ std::optional<greenflame::core::RectPx>
 Win32WindowQuery::Get_foreground_window_rect(HWND exclude_hwnd) const {
     HWND const window = GetForegroundWindow();
     if (window == nullptr || window == exclude_hwnd ||
-        !Is_visible_top_level_window(window)) {
+        !Is_visible_top_level_window(window) ||
+        Is_window_excluded_from_capture(window)) {
         return std::nullopt;
     }
 
@@ -291,7 +299,12 @@ void Win32WindowQuery::Get_visible_top_level_window_snap_edges(
     std::vector<RECT> occluders;
     while (hwnd != nullptr) {
         RECT rect{};
-        if (Is_visible_top_level_window(hwnd) && Try_get_window_bounds(hwnd, rect)) {
+        // Uncapturable windows are excluded from both snap edges and the
+        // occluder list: they render no visible content, so they should not
+        // clip snap edges of windows behind them.
+        if (Is_visible_top_level_window(hwnd) &&
+            !Is_window_excluded_from_capture(hwnd) &&
+            Try_get_window_bounds(hwnd, rect)) {
             HRGN const visible_region = Build_visible_region(rect, occluders);
             if (visible_region != nullptr) {
                 Append_visible_window_snap_edges(rect, visible_region, out);

@@ -1174,3 +1174,21 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The command fails with exit code `16`.
   - `stderr` reports that image transparency is not supported with `--input` in V1.
   - The source image is left unchanged.
+
+### GF-MAN-CLI-015 - Uncapturable Window Rejection
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Setup: Have Signal Desktop (or any app that sets `WDA_EXCLUDEFROMCAPTURE`) running and visible.
+- Steps:
+  1. Run `greenflame.exe --window "Signal" --output "%TEMP%\signal.png"`.
+  2. Run `greenflame.exe --window "Signal" --output "%TEMP%\signal.png"` while another window with "Signal" in its title is also open (e.g. "Signal Beta").
+  3. Note the HWND printed in the candidate list from step 2, then run `greenflame.exe --window-hwnd <hex-hwnd> --output "%TEMP%\signal.png"` using the Signal HWND.
+  4. Start an interactive capture and move the cursor over the Signal window; try Ctrl+click on it.
+  5. Start an interactive capture and drag the selection border near the Signal window edge.
+- Expected:
+  1. Exits with code `17`. `stderr` says the window is protected from screen capture by the application.
+  2. Exits with code `17`. `stderr` includes `[uncapturable]` on the Signal candidate line and lists the other candidate without the marker.
+  3. Exits with code `17`. `stderr` says the window is protected from screen capture by the application.
+  4. Ctrl+click does not select the Signal window; either the window behind it is selected or no window preview appears.
+  5. Signal's window edges do not appear as snap candidates during border dragging.

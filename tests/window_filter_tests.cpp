@@ -67,3 +67,26 @@ TEST(window_filter, Format_window_candidate_line_FormatsRectAndIndex) {
               L"  [2] hwnd=0x5151 class=\"Notepad\" title=\"Notepad\" "
               L"(x=10, y=20, w=300, h=200)");
 }
+
+TEST(window_filter, Format_window_candidate_line_AppendsUncapturableMarker) {
+    WindowCandidateInfo candidate{};
+    candidate.title = L"Signal";
+    candidate.class_name = L"Chrome_WidgetWin_1";
+    candidate.rect = RectPx::From_ltrb(0, 0, 800, 600);
+    candidate.hwnd_value = static_cast<std::uintptr_t>(0xABCDu);
+    candidate.uncapturable = true;
+    EXPECT_EQ(Format_window_candidate_line(candidate, 0),
+              L"  [1] hwnd=0xABCD class=\"Chrome_WidgetWin_1\" title=\"Signal\" "
+              L"(x=0, y=0, w=800, h=600) [uncapturable]");
+}
+
+TEST(window_filter, Format_window_candidate_line_OmitsUncapturableMarkerWhenFalse) {
+    WindowCandidateInfo candidate{};
+    candidate.title = L"Notepad";
+    candidate.class_name = L"Notepad";
+    candidate.rect = RectPx::From_ltrb(10, 20, 310, 220);
+    candidate.hwnd_value = static_cast<std::uintptr_t>(0x5151u);
+    candidate.uncapturable = false;
+    std::wstring const line = Format_window_candidate_line(candidate, 0);
+    EXPECT_EQ(line.find(L"[uncapturable]"), std::wstring::npos);
+}

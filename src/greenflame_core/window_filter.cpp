@@ -97,6 +97,9 @@ std::wstring Format_window_candidate_line(WindowCandidateInfo const &candidate,
     line += L", h=";
     line += std::to_wstring(normalized.Height());
     line += L")";
+    if (candidate.uncapturable) {
+        line += L" [uncapturable]";
+    }
     return line;
 }
 

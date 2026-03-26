@@ -114,6 +114,7 @@ Try_get_window_candidate_info(HWND hwnd, greenflame::IWindowQuery const *window_
     info.class_name = std::move(class_name);
     info.rect = rect;
     info.hwnd_value = reinterpret_cast<std::uintptr_t>(hwnd);
+    info.uncapturable = greenflame::Is_window_excluded_from_capture(hwnd);
     return info;
 }
 
