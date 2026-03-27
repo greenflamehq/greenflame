@@ -7,7 +7,7 @@ audience:
 status: reference
 owners:
   - core-team
-last_updated: 2026-03-22
+last_updated: 2026-03-26
 tags:
   - testing
   - manual
@@ -368,7 +368,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Run on: `ENV-A`
 - Steps:
   1. Create a selection.
-  2. Toggle `B`, `H`, `L`, `A`, `R`, `F`, `E`, `G`, `T`, and `N` from the keyboard.
+  2. Toggle `B`, `H`, `L`, `A`, `R`, `Shift+R`, `E`, `Shift+E`, `O`, `T`, and `N` from the keyboard.
   3. Toggle the same tools from the toolbar.
   4. Activate the same tool twice in a row.
 - Expected:
@@ -461,6 +461,47 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Filled ellipses render as filled shapes and remain movable.
   - Resizing follows the dragged handle correctly for both outlined shapes.
 
+### GF-MAN-ANN-004A - Obfuscate Creation, Modes, And Editing
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Create a selection and activate the Obfuscate tool.
+  2. Move the cursor without drawing, then right-click once.
+  3. Set a non-default block size greater than `1` and drag out an obfuscate over detailed content.
+  4. Release the mouse and compare the committed block-pixelated result to the preview visible at mouse-up.
+  5. Change the block size to `1` and drag out a second obfuscate over different detailed content.
+  6. Release the mouse and compare the committed blur result to the preview visible at mouse-up.
+  7. Return to default mode, select each committed obfuscate, move one, and resize the other from both a corner and a side handle.
+- Expected:
+  - The Obfuscate tool shows an axis-aligned square cursor preview while armed.
+  - Right-click does not open a color wheel for Obfuscate.
+  - During the initial drag, the live obfuscate preview includes any already-committed annotations underneath the dragged bounds instead of sampling only the raw screenshot.
+  - The first obfuscate commits as block pixelation, with visibly discrete square cells.
+  - The committed block-pixelated result matches the preview state at mouse-up aside from minor GPU-vs-CPU sampling differences.
+  - The second obfuscate commits as blur rather than block pixelation.
+  - The committed blur result matches the preview state at mouse-up aside from minor GPU-vs-CPU sampling differences.
+  - Selected obfuscates show resize handles when space permits and no L-bracket corner markers.
+  - Moving and resizing keep the live preview aligned to the dragged bounds, and the committed result matches the final bounds after release.
+
+### GF-MAN-ANN-004B - Reactive Obfuscate Preview, Stacking, And Output
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Draw a normal annotation over detailed content, then place an obfuscate above part of it.
+  2. Return to default mode and drag the lower annotation beneath the obfuscate.
+  3. Undo and redo that drag.
+  4. Save once and copy once, then inspect the output in an external viewer or Paint.
+  5. If practical, add a second obfuscate that overlaps the first, then drag the same lower annotation again beneath both.
+- Expected:
+  - While the lower annotation is moving, the obfuscate preview updates live instead of showing stale committed pixels.
+  - A single live obfuscate preview continues to include the current lower annotation state underneath it during the drag.
+  - Undo and redo restore both the lower annotation change and the recomputed obfuscate content together.
+  - The saved and copied outputs match the final on-screen obfuscate result for the single-obfuscate case.
+  - When two obfuscates overlap, the stacked preview updates in z-order without leaving stale intermediate content.
+  - When two obfuscates overlap, each live preview still includes the current lower annotation state rather than regressing to raw-capture sampling.
+
 ### GF-MAN-ANN-005 - Overlap And Topmost Selection
 
 - Priority: `P1`
@@ -492,7 +533,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Priority: `P1`
 - Run on: `ENV-A`
 - Steps:
-  1. Activate any annotation tool.
+  1. Activate any annotation tool except Obfuscate.
   2. Right-click to open the color wheel.
   3. Hover different segments.
   4. Pick a segment once, then reopen and dismiss with `Esc`.
@@ -505,20 +546,21 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Highlighter shows the 6-slot highlighter palette.
   - `Esc` closes the wheel without changing the current color.
 
-### GF-MAN-ANN-008 - Stroke Width Adjustment And Clamp
+### GF-MAN-ANN-008 - Tool Size Adjustment And Clamp
 
 - Priority: `P1`
 - Run on: `ENV-A`
 - Steps:
-  1. Activate Brush, Highlighter, Line, Arrow, Rectangle, and Ellipse in turn.
-  2. Adjust width with mouse wheel and with `Ctrl + =` and `Ctrl + -`.
+  1. Activate Brush, Highlighter, Line, Arrow, Rectangle, Ellipse, Bubble, and Obfuscate in turn.
+  2. Adjust size with mouse wheel and with `Ctrl + =` and `Ctrl + -`.
   3. Attempt to go below the minimum and above the maximum.
   4. Repeat once with Filled Rectangle active.
   5. Repeat once with Filled Ellipse active.
 - Expected:
-  - Width changes affect Brush, Highlighter, Line, Arrow, outlined Rectangle, and outlined Ellipse.
+  - Size changes affect Brush, Highlighter, Line, Arrow, outlined Rectangle, outlined Ellipse, Bubble, and Obfuscate.
   - The value clamps at `1..50`.
   - A centered size overlay appears when enabled.
+  - With Obfuscate active, `1` produces blur mode and values above `1` produce block pixelation.
   - Filled Rectangle rendering does not depend on stroke width.
   - Filled Ellipse rendering does not depend on stroke width.
 
@@ -801,7 +843,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Run on: `ENV-A`
 - Steps:
   1. Start a capture and set distinct non-default size steps for Brush, Highlighter,
-     Line, Arrow, Rectangle, Bubble, and Text.
+     Line, Arrow, Rectangle, Bubble, Obfuscate, and Text.
   2. Switch back through those tools during the same capture and note the displayed
      size step and visible preview size for each one.
   3. Close the overlay and exit the app.
@@ -810,6 +852,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Each tool keeps its own independent size step instead of reusing one shared value.
   - Switching tools within the same session restores that tool's last-used size step immediately.
   - After relaunch, each tool restores the same size step it had before exit.
+  - Obfuscate restores its previous `block_size`, including blur mode when it was left at `1`.
   - Filled Rectangle still ignores size stepping.
 
 ### GF-MAN-CFG-006 - Tool Color Persistence
@@ -926,11 +969,12 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Steps:
   1. Create a selection spanning a monitor boundary.
   2. Ensure part of the selection sits on a monitor with negative virtual coordinates.
-  3. Save or copy the result.
+  3. Add at least one annotation that crosses the boundary, including an obfuscate if practical.
+  4. Save or copy the result.
 - Expected:
   - The saved image dimensions match the visible selection.
   - No seam, jump, or clipping appears at the monitor boundary.
-  - Annotations and selection handles remain aligned across the full selection.
+  - Annotations, obfuscate content, and selection handles remain aligned across the full selection.
 
 ### GF-MAN-DPI-003 - Non-Primary Monitor Quick Select And Hotkeys
 
@@ -1070,12 +1114,18 @@ unless a real end-to-end bug escapes into the Win32 shell:
 1. Run `greenflame.exe --region 100,100,240,180 --padding 40 --padding-color "#202020" --output "%TEMP%\greenflame-local-mixed.png" --overwrite --annotate ".\schemas\examples\cli_annotations\local_mixed_edge_cases.json"`.
 2. Run `greenflame.exe --desktop --padding 64 --padding-color "#101010" --output "%TEMP%\greenflame-global-padding.png" --overwrite --annotate ".\schemas\examples\cli_annotations\global_padding_edge_cases.json"`.
 3. Run `greenflame.exe --region 100,100,240,180 --padding 48 --padding-color "#202020" --output "%TEMP%\greenflame-brush-padding.png" --overwrite --annotate ".\schemas\examples\cli_annotations\brush_padding_edge_cases.json"`.
+4. Run `greenflame.exe --region 100,100,240,180 --output "%TEMP%\greenflame-single-obfuscate.png" --overwrite --annotate ".\schemas\examples\cli_annotations\single_obfuscate.json"`.
+5. Run `greenflame.exe --region 100,100,240,180 --output "%TEMP%\greenflame-brush-obfuscate.png" --overwrite --annotate ".\schemas\examples\cli_annotations\brush_with_obfuscate_overlay.json"`.
+6. Run `greenflame.exe --region 100,100,240,180 --output "%TEMP%\greenflame-obfuscate-stack.png" --overwrite --annotate ".\schemas\examples\cli_annotations\alternating_obfuscate_stack.json"`.
 - Expected:
   - The local-space fixture renders the mixed annotation set relative to the capture origin, including text, bubbles, and out-of-bounds geometry.
   - The global-space fixture renders annotations relative to the virtual-desktop origin, including negative or off-screen coordinates where applicable.
   - The brush fixture renders a continuous neon-magenta stroke that starts in the upper-left padding, passes through the captured content, and exits into the lower-right padding without being clipped at the original capture boundary.
-  - Diagonal and curved annotation edges remain anti-aliased in all three outputs, including where geometry extends into padding.
-  - In all three cases, annotations that land in padded areas remain visible on top of the padding color.
+  - The single-obfuscate fixture renders one committed obfuscate rectangle using block pixelation over the captured image.
+  - The brush-plus-obfuscate fixture renders the brush squiggle first, then obfuscates the covered portion of that squiggle rather than drawing the squiggle on top of the obfuscation.
+  - The alternating fixture preserves paint order across `annotation -> obfuscate -> annotation -> obfuscate`, including blur mode when `size == 1` on the final obfuscate.
+  - Diagonal and curved annotation edges remain anti-aliased in all six outputs, including where geometry extends into padding.
+  - In all six cases, annotations that land in padded areas remain visible on top of the padding color.
   - Bubble numbering matches annotation order among bubbles only: first bubble is `1`, second bubble is `2`, and so on.
 
 ### GF-MAN-CLI-010 - Invalid `--annotate` Inputs Fail With Exit `14`

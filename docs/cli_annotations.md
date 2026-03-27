@@ -5,7 +5,7 @@ audience: users
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-22
+last_updated: 2026-03-27
 tags:
   - cli
   - annotations
@@ -38,6 +38,12 @@ JSON file:
 greenflame.exe --region 100,100,240,180 --padding 40 --padding-color "#202020" --output "%TEMP%\greenflame-annotated.png" --overwrite --annotate ".\schemas\examples\cli_annotations\local_mixed_edge_cases.json"
 ```
 
+Obfuscate fixture:
+
+```bat
+greenflame.exe --region 100,100,240,180 --output "%TEMP%\greenflame-obfuscate.png" --overwrite --annotate ".\schemas\examples\cli_annotations\brush_with_obfuscate_overlay.json"
+```
+
 Imported image:
 
 ```bat
@@ -68,7 +74,8 @@ greenflame.exe --input "%TEMP%\greenflame-source.png" --overwrite --annotate ".\
 - Example payloads: `schemas/examples/cli_annotations/`
 
 The checked-in examples include valid local/global fixtures, a padding-focused
-brush fixture, and invalid payloads for manual failure testing.
+brush fixture, three obfuscate-focused fixtures, and invalid payloads for
+manual failure testing.
 
 ## Top-Level Shape
 
@@ -158,6 +165,8 @@ Supported annotation types:
   - `center`, `width`, `height`, `size`, optional `color`
 - `filled_ellipse`
   - `center`, `width`, `height`, optional `color`
+- `obfuscate`
+  - `left`, `top`, `width`, `height`, `size`
 - `text`
   - `origin`, `size`, optional `color`, optional `font`, plus either `text` or
     `spans`
@@ -168,6 +177,7 @@ Rules:
 
 - `size` is valid only for annotations that support sizing.
 - Filled shapes do not accept `size`.
+- Obfuscate does not accept `color`, `font`, or highlighter opacity settings.
 - Brush and point-list highlighter rendering uses the current pass-through
   stroke behavior. No extra smoothing is applied.
 - Bubble numbering is assigned automatically by bubble order only:
@@ -189,6 +199,9 @@ Size behavior by annotation family:
   - `size` controls the highlighter stroke width using the same GUI mapping.
 - Bubble
   - `size` controls bubble size using the same GUI mapping.
+- Obfuscate
+  - `size == 1` uses blur mode.
+  - `size == 2..50` uses block pixelation.
 - Text
   - `size` controls text size using the same GUI text-size mapping.
 

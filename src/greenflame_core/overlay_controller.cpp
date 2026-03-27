@@ -218,6 +218,11 @@ void OverlayController::Set_text_layout_engine(ITextLayoutEngine *engine) noexce
     annotation_controller_.Set_text_layout_engine(engine);
 }
 
+void OverlayController::Set_obfuscate_source_provider(
+    IObfuscateSourceProvider *provider) noexcept {
+    annotation_controller_.Set_obfuscate_source_provider(provider);
+}
+
 bool OverlayController::Has_active_text_edit() const noexcept {
     return annotation_controller_.Has_active_text_edit();
 }
@@ -267,6 +272,10 @@ bool OverlayController::Has_active_annotation_edit() const noexcept {
 std::optional<AnnotationEditHandleKind>
 OverlayController::Active_annotation_edit_handle() const noexcept {
     return annotation_controller_.Active_annotation_edit_handle();
+}
+
+std::vector<size_t> OverlayController::Active_obfuscate_preview_indices() const {
+    return annotation_controller_.Active_obfuscate_preview_indices();
 }
 
 COLORREF OverlayController::Annotation_color() const noexcept {
@@ -330,6 +339,7 @@ std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) 
     case AnnotationToolId::Rectangle:
     case AnnotationToolId::Ellipse:
     case AnnotationToolId::Bubble:
+    case AnnotationToolId::Obfuscate:
         break;
     case AnnotationToolId::Text:
         if (annotation_controller_.Has_active_text_edit()) {

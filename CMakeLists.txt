@@ -85,6 +85,11 @@ set(GREENFLAME_FILLED_ELLIPSE_TOOL_GLYPH_PATH
 )
 file(TO_CMAKE_PATH "${GREENFLAME_FILLED_ELLIPSE_TOOL_GLYPH_PATH}"
      GREENFLAME_FILLED_ELLIPSE_TOOL_GLYPH_PATH)
+set(GREENFLAME_OBFUSCATE_TOOL_GLYPH_PATH
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/obfuscate-mask.png"
+)
+file(TO_CMAKE_PATH "${GREENFLAME_OBFUSCATE_TOOL_GLYPH_PATH}"
+     GREENFLAME_OBFUSCATE_TOOL_GLYPH_PATH)
 set(GREENFLAME_TEXT_TOOL_GLYPH_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/text-mask.png"
 )
@@ -162,6 +167,9 @@ add_library(greenflame_core STATIC
     src/greenflame_core/annotation_hit_test.h
     src/greenflame_core/annotation_types.h
     src/greenflame_core/annotation_tool.h
+    src/greenflame_core/obfuscate_annotation_types.h
+    src/greenflame_core/obfuscate_raster.cpp
+    src/greenflame_core/obfuscate_raster.h
     src/greenflame_core/text_annotation_types.h
     src/greenflame_core/text_layout_engine.h
     src/greenflame_core/text_edit_controller.cpp
@@ -176,6 +184,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/freehand_annotation_tool.h
     src/greenflame_core/line_annotation_tool.cpp
     src/greenflame_core/line_annotation_tool.h
+    src/greenflame_core/obfuscate_annotation_tool.cpp
+    src/greenflame_core/obfuscate_annotation_tool.h
     src/greenflame_core/ellipse_annotation_tool.cpp
     src/greenflame_core/ellipse_annotation_tool.h
     src/greenflame_core/rectangle_annotation_tool.cpp

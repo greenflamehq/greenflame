@@ -4,6 +4,22 @@
 
 namespace greenflame::core {
 
+CompoundCommand::CompoundCommand(std::vector<std::unique_ptr<ICommand>> commands,
+                                 std::string_view description)
+    : commands_(std::move(commands)), description_(description) {}
+
+void CompoundCommand::Undo() {
+    for (size_t index = commands_.size(); index > 0; --index) {
+        commands_[index - 1u]->Undo();
+    }
+}
+
+void CompoundCommand::Redo() {
+    for (auto &command : commands_) {
+        command->Redo();
+    }
+}
+
 AddAnnotationCommand::AddAnnotationCommand(AnnotationController *controller,
                                            size_t index, Annotation annotation,
                                            std::optional<uint64_t> selection_before,

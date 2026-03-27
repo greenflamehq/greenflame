@@ -7,6 +7,21 @@ namespace greenflame::core {
 
 class AnnotationController;
 
+class CompoundCommand final : public ICommand {
+  public:
+    explicit CompoundCommand(
+        std::vector<std::unique_ptr<ICommand>> commands,
+        std::string_view description = "Compound annotation change");
+
+    void Undo() override;
+    void Redo() override;
+    std::string_view Description() const override { return description_; }
+
+  private:
+    std::vector<std::unique_ptr<ICommand>> commands_ = {};
+    std::string_view description_ = {};
+};
+
 class AddAnnotationCommand final : public ICommand {
   public:
     AddAnnotationCommand(AnnotationController *controller, size_t index,

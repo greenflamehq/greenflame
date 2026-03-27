@@ -127,6 +127,11 @@ class MoveAnnotationEditInteraction final : public IAnnotationEditInteraction {
 
     [[nodiscard]] bool Is_move_drag() const noexcept override { return true; }
 
+    [[nodiscard]] std::optional<AnnotationEditPreview>
+    Preview() const noexcept override {
+        return AnnotationEditPreview{index_, annotation_before_, annotation_after_};
+    }
+
   private:
     uint64_t annotation_id_ = 0;
     size_t index_ = 0;
@@ -189,6 +194,11 @@ class EndpointEditInteractionBase : public IAnnotationEditInteraction {
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_handle() const noexcept override {
         return active_handle_;
+    }
+
+    [[nodiscard]] std::optional<AnnotationEditPreview>
+    Preview() const noexcept override {
+        return AnnotationEditPreview{index_, annotation_before_, annotation_after_};
     }
 
   protected:
@@ -288,6 +298,11 @@ class BoundsResizeEditInteraction final : public IAnnotationEditInteraction {
                                ellipse.outer_bounds, handle_, cursor);
                            updated = true;
                        },
+                       [&](ObfuscateAnnotation &obfuscate) noexcept {
+                           obfuscate.bounds = Resize_rectangle_from_handle(
+                               obfuscate.bounds, handle_, cursor);
+                           updated = true;
+                       },
                        [&](auto &) noexcept {},
                    },
                    edited.data);
@@ -310,7 +325,9 @@ class BoundsResizeEditInteraction final : public IAnnotationEditInteraction {
         std::string_view const description =
             std::holds_alternative<EllipseAnnotation>(annotation_before_.data)
                 ? "Resize ellipse annotation"
-                : "Resize rectangle annotation";
+                : (std::holds_alternative<ObfuscateAnnotation>(annotation_before_.data)
+                       ? "Resize obfuscate annotation"
+                       : "Resize rectangle annotation");
         return AnnotationEditCommandData{
             index_,         annotation_before_, annotation_after_,
             annotation_id_, annotation_id_,     description};
@@ -330,6 +347,11 @@ class BoundsResizeEditInteraction final : public IAnnotationEditInteraction {
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_handle() const noexcept override {
         return Handle_kind_for_rectangle_handle(handle_);
+    }
+
+    [[nodiscard]] std::optional<AnnotationEditPreview>
+    Preview() const noexcept override {
+        return AnnotationEditPreview{index_, annotation_before_, annotation_after_};
     }
 
   private:
@@ -395,6 +417,16 @@ Hit_test_annotation_edit_target(Annotation const *selected_annotation,
             return AnnotationEditTarget{selected_annotation->id,
                                         Target_kind_for_rectangle_handle(*handle)};
         }
+    } else if (ObfuscateAnnotation const *const sel_obfuscate =
+                   selected_annotation
+                       ? std::get_if<ObfuscateAnnotation>(&selected_annotation->data)
+                       : nullptr) {
+        if (std::optional<SelectionHandle> const handle =
+                Hit_test_rectangle_resize_handles(sel_obfuscate->bounds, cursor);
+            handle.has_value()) {
+            return AnnotationEditTarget{selected_annotation->id,
+                                        Target_kind_for_rectangle_handle(*handle)};
+        }
     }
 
     std::optional<size_t> const index =
@@ -449,7 +481,8 @@ Create_annotation_edit_interaction(AnnotationEditTarget target, size_t index,
     case AnnotationEditTargetKind::RectangleBottomHandle:
     case AnnotationEditTargetKind::RectangleLeftHandle:
         if (!std::holds_alternative<RectangleAnnotation>(annotation_before.data) &&
-            !std::holds_alternative<EllipseAnnotation>(annotation_before.data)) {
+            !std::holds_alternative<EllipseAnnotation>(annotation_before.data) &&
+            !std::holds_alternative<ObfuscateAnnotation>(annotation_before.data)) {
             return {};
         }
         if (std::optional<SelectionHandle> const handle =

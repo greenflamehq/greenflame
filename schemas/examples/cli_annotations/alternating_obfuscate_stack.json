@@ -1,0 +1,57 @@
+{
+  "coordinate_space": "local",
+  "annotations": [
+    {
+      "type": "brush",
+      "color": "#12b5ff",
+      "size": 6,
+      "points": [
+        {
+          "x": 18,
+          "y": 40
+        },
+        {
+          "x": 44,
+          "y": 24
+        },
+        {
+          "x": 70,
+          "y": 52
+        },
+        {
+          "x": 94,
+          "y": 34
+        }
+      ]
+    },
+    {
+      "type": "obfuscate",
+      "left": 16,
+      "top": 18,
+      "width": 92,
+      "height": 46,
+      "size": 8
+    },
+    {
+      "type": "line",
+      "start": {
+        "x": 62,
+        "y": 72
+      },
+      "end": {
+        "x": 178,
+        "y": 118
+      },
+      "size": 4,
+      "color": "#7fff00"
+    },
+    {
+      "type": "obfuscate",
+      "left": 74,
+      "top": 64,
+      "width": 88,
+      "height": 54,
+      "size": 1
+    }
+  ]
+}

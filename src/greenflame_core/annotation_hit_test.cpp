@@ -496,6 +496,9 @@ AnnotationKind Annotation::Kind() const noexcept {
                 return AnnotationKind::Rectangle;
             },
             [](EllipseAnnotation const &) noexcept { return AnnotationKind::Ellipse; },
+            [](ObfuscateAnnotation const &) noexcept {
+                return AnnotationKind::Obfuscate;
+            },
             [](TextAnnotation const &) noexcept { return AnnotationKind::Text; },
             [](BubbleAnnotation const &) noexcept { return AnnotationKind::Bubble; },
         },
@@ -547,6 +550,9 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
             [](EllipseAnnotation const &ellipse) -> RectPx {
                 return ellipse.outer_bounds.Normalized();
             },
+            [](ObfuscateAnnotation const &obfuscate) -> RectPx {
+                return obfuscate.bounds.Normalized();
+            },
             [](TextAnnotation const &text) -> RectPx {
                 return text.visual_bounds.Normalized();
             },
@@ -565,6 +571,7 @@ bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept {
         return true;
     case AnnotationKind::Rectangle:
     case AnnotationKind::Ellipse:
+    case AnnotationKind::Obfuscate:
         return false;
     case AnnotationKind::Bubble:
         return true;
@@ -597,6 +604,9 @@ RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept {
                 return Annotation_bounds(annotation);
             },
             [&](EllipseAnnotation const &) -> RectPx {
+                return Annotation_bounds(annotation);
+            },
+            [&](ObfuscateAnnotation const &) -> RectPx {
                 return Annotation_bounds(annotation);
             },
             [](TextAnnotation const &text) -> RectPx {
@@ -682,6 +692,9 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                 return Point_inside_ellipse_outline(static_cast<float>(point.x) + kHalf,
                                                     static_cast<float>(point.y) + kHalf,
                                                     ellipse);
+            },
+            [&](ObfuscateAnnotation const &obfuscate) -> bool {
+                return obfuscate.bounds.Normalized().Contains(point);
             },
             [&](TextAnnotation const &text) -> bool {
                 std::optional<size_t> const offset =
@@ -923,6 +936,13 @@ Annotation Translate_annotation(Annotation annotation, PointPx delta) noexcept {
                                              ellipse.outer_bounds.top + delta.y,
                                              ellipse.outer_bounds.right + delta.x,
                                              ellipse.outer_bounds.bottom + delta.y);
+                   },
+                   [&](ObfuscateAnnotation &obfuscate) noexcept {
+                       obfuscate.bounds =
+                           RectPx::From_ltrb(obfuscate.bounds.left + delta.x,
+                                             obfuscate.bounds.top + delta.y,
+                                             obfuscate.bounds.right + delta.x,
+                                             obfuscate.bounds.bottom + delta.y);
                    },
                    [&](TextAnnotation &text) noexcept {
                        text.origin.x += delta.x;

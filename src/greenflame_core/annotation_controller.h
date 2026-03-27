@@ -2,11 +2,27 @@
 
 #include "greenflame_core/annotation_edit_interaction.h"
 #include "greenflame_core/annotation_tool_registry.h"
+#include "greenflame_core/command.h"
+#include "greenflame_core/obfuscate_raster.h"
 #include "greenflame_core/text_edit_controller.h"
 
 namespace greenflame::core {
 
 class UndoStack;
+
+class IObfuscateSourceProvider {
+  public:
+    IObfuscateSourceProvider() = default;
+    IObfuscateSourceProvider(IObfuscateSourceProvider const &) = default;
+    IObfuscateSourceProvider &operator=(IObfuscateSourceProvider const &) = default;
+    IObfuscateSourceProvider(IObfuscateSourceProvider &&) = default;
+    IObfuscateSourceProvider &operator=(IObfuscateSourceProvider &&) = default;
+    virtual ~IObfuscateSourceProvider() = default;
+
+    [[nodiscard]] virtual std::optional<BgraBitmap>
+    Build_composited_source(RectPx bounds,
+                            std::span<const Annotation> lower_annotations) = 0;
+};
 
 class IStrokeSmoother {
   public:
@@ -88,6 +104,7 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] bool Has_active_edit_interaction() const noexcept;
     [[nodiscard]] bool Has_active_gesture() const noexcept;
     void Set_text_layout_engine(ITextLayoutEngine *engine) noexcept;
+    void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
     [[nodiscard]] bool Has_active_text_edit() const noexcept;
     [[nodiscard]] TextEditController *Active_text_edit() noexcept;
     [[nodiscard]] TextEditController const *Active_text_edit() const noexcept;
@@ -108,6 +125,9 @@ class AnnotationController final : public IAnnotationToolHost,
     }
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_annotation_edit_handle() const noexcept;
+    [[nodiscard]] std::optional<AnnotationEditPreview>
+    Active_annotation_edit_preview() const noexcept;
+    [[nodiscard]] std::vector<size_t> Active_obfuscate_preview_indices() const;
 
     [[nodiscard]] bool Straighten_highlighter_stroke() noexcept;
 
@@ -151,14 +171,30 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] uint64_t Next_annotation_id() const noexcept override;
     [[nodiscard]] std::vector<PointPx>
     Smooth_points(std::span<const PointPx> points) const override;
+    [[nodiscard]] int32_t Current_obfuscate_block_size() const noexcept override;
     [[nodiscard]] std::optional<Annotation>
     Build_bubble_annotation(PointPx cursor) const override;
+    [[nodiscard]] std::optional<Annotation>
+    Build_obfuscate_annotation(RectPx bounds) const override;
     void Commit_new_annotation(UndoStack &undo_stack, Annotation annotation) override;
     [[nodiscard]] Annotation const *Annotation_at(size_t index) const noexcept override;
 
     [[nodiscard]] IAnnotationTool *Active_tool_impl() noexcept;
     [[nodiscard]] IAnnotationTool const *Active_tool_impl() const noexcept;
     [[nodiscard]] std::optional<size_t> Selected_annotation_index() const noexcept;
+    [[nodiscard]] std::optional<Annotation>
+    Rebuild_obfuscate_annotation(std::span<const Annotation> annotations, size_t index,
+                                 Annotation annotation) const;
+    [[nodiscard]] std::vector<std::unique_ptr<ICommand>>
+    Build_reactive_obfuscate_update_commands(
+        std::vector<Annotation> const &before_annotations,
+        std::vector<Annotation> after_annotations, size_t changed_index,
+        std::optional<RectPx> old_bounds, std::optional<RectPx> new_bounds,
+        std::optional<uint64_t> selection_before,
+        std::optional<uint64_t> selection_after);
+    void Push_annotation_command(
+        UndoStack &undo_stack, std::unique_ptr<ICommand> primary_command,
+        std::vector<std::unique_ptr<ICommand>> reactive_commands) const;
 
     AnnotationDocument document_ = {};
     AnnotationToolRegistry registry_ = {};
@@ -172,8 +208,10 @@ class AnnotationController final : public IAnnotationToolHost,
     StrokeStyle highlighter_style_ = {};
     int32_t bubble_size_step_ = 10;
     int32_t text_size_step_ = 10;
+    int32_t obfuscate_block_size_ = kObfuscateDefaultBlockSize;
     std::unique_ptr<IAnnotationEditInteraction> active_edit_interaction_ = {};
     ITextLayoutEngine *text_layout_engine_ = nullptr;
+    IObfuscateSourceProvider *obfuscate_source_provider_ = nullptr;
     std::optional<TextEditController> text_edit_ctrl_ = std::nullopt;
     TextFontChoice text_current_font_ = TextFontChoice::Sans;
     int32_t bubble_counter_ = 1;

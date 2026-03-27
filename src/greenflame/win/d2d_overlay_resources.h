@@ -55,6 +55,7 @@ struct D2DOverlayResources final {
 
     // Per-annotation bitmap caches: keyed by annotation ID.
     // Cleared on Invalidate_annotations() and Release_device_resources().
+    std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> obfuscate_bitmaps;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> text_bitmaps;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> bubble_bitmaps;
 

@@ -33,6 +33,7 @@ enum class OverlayToolbarGlyphId : uint8_t {
     FilledRectangle,
     Ellipse,
     FilledEllipse,
+    Obfuscate,
     Text,
     Bubble,
     Help,

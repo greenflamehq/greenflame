@@ -4,6 +4,7 @@
 #include "greenflame_core/ellipse_annotation_tool.h"
 #include "greenflame_core/freehand_annotation_tool.h"
 #include "greenflame_core/line_annotation_tool.h"
+#include "greenflame_core/obfuscate_annotation_tool.h"
 #include "greenflame_core/rectangle_annotation_tool.h"
 #include "greenflame_core/text_annotation_tool.h"
 
@@ -77,6 +78,7 @@ AnnotationToolRegistry::AnnotationToolRegistry() {
                                  L"Filled ellipse tool", L'E', L"\u21e7E",
                                  AnnotationToolbarGlyph::FilledEllipse, true},
         true));
+    tools_.push_back(std::make_unique<ObfuscateAnnotationTool>());
     tools_.push_back(std::make_unique<TextAnnotationTool>());
     tools_.push_back(std::make_unique<BubbleAnnotationTool>());
 }

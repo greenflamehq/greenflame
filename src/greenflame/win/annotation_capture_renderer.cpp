@@ -2,6 +2,7 @@
 
 #include "greenflame/win/d2d_annotation_draw.h"
 #include "greenflame_core/annotation_hit_test.h"
+#include "greenflame_core/obfuscate_raster.h"
 #include "greenflame_core/pixel_ops.h"
 
 namespace greenflame {
@@ -39,6 +40,83 @@ Annotation_local_bounds(core::Annotation const &annotation,
     return core::RectPx::From_ltrb(
         bounds.left - target_bounds.left, bounds.top - target_bounds.top,
         bounds.right - target_bounds.left, bounds.bottom - target_bounds.top);
+}
+
+struct DynamicObfuscateLayer final {
+    core::RectPx bounds = {};
+    core::BgraBitmap bitmap = {};
+};
+
+[[nodiscard]] core::RectPx
+Local_bounds_for_obfuscate(core::ObfuscateAnnotation const &annotation,
+                           core::RectPx target_bounds) noexcept {
+    core::RectPx const bounds = annotation.bounds.Normalized();
+    return core::RectPx::From_ltrb(
+        bounds.left - target_bounds.left, bounds.top - target_bounds.top,
+        bounds.right - target_bounds.left, bounds.bottom - target_bounds.top);
+}
+
+[[nodiscard]] std::optional<core::BgraBitmap>
+Extract_bitmap_from_pixels(std::span<const uint8_t> pixels, int width, int height,
+                           int row_bytes, core::RectPx bounds) {
+    std::optional<core::RectPx> const clipped_bounds =
+        core::RectPx::Clip(bounds, core::RectPx::From_ltrb(0, 0, width, height));
+    if (!clipped_bounds.has_value()) {
+        return std::nullopt;
+    }
+
+    int32_t const clipped_width = clipped_bounds->Width();
+    int32_t const clipped_height = clipped_bounds->Height();
+    int32_t const clipped_row_bytes = clipped_width * 4;
+    core::BgraBitmap bitmap{
+        .width_px = clipped_width,
+        .height_px = clipped_height,
+        .row_bytes = clipped_row_bytes,
+        .premultiplied_bgra =
+            std::vector<uint8_t>(static_cast<size_t>(clipped_row_bytes) *
+                                 static_cast<size_t>(clipped_height)),
+    };
+    std::span<uint8_t> const destination_pixels(bitmap.premultiplied_bgra);
+    for (int32_t row = 0; row < clipped_height; ++row) {
+        size_t const source_offset = (static_cast<size_t>(clipped_bounds->top + row) *
+                                      static_cast<size_t>(row_bytes)) +
+                                     (static_cast<size_t>(clipped_bounds->left) * 4u);
+        size_t const destination_offset =
+            static_cast<size_t>(row) * static_cast<size_t>(clipped_row_bytes);
+        std::span<const uint8_t> const source_row =
+            pixels.subspan(source_offset, static_cast<size_t>(clipped_row_bytes));
+        std::span<uint8_t> const destination_row = destination_pixels.subspan(
+            destination_offset, static_cast<size_t>(clipped_row_bytes));
+        std::ranges::copy(source_row, destination_row.begin());
+    }
+    core::Force_alpha_opaque(destination_pixels);
+    return bitmap;
+}
+
+[[nodiscard]] std::optional<DynamicObfuscateLayer> Build_dynamic_obfuscate_layer(
+    std::span<const uint8_t> pixels, int width, int height, int row_bytes,
+    core::ObfuscateAnnotation const &annotation, core::RectPx target_bounds) {
+    core::RectPx const local_bounds =
+        Local_bounds_for_obfuscate(annotation, target_bounds);
+    std::optional<core::RectPx> const clipped_bounds =
+        core::RectPx::Clip(local_bounds, core::RectPx::From_ltrb(0, 0, width, height));
+    if (!clipped_bounds.has_value()) {
+        return std::nullopt;
+    }
+
+    std::optional<core::BgraBitmap> const source =
+        Extract_bitmap_from_pixels(pixels, width, height, row_bytes, *clipped_bounds);
+    if (!source.has_value() || !source->Is_valid()) {
+        return std::nullopt;
+    }
+
+    core::BgraBitmap const raster =
+        core::Rasterize_obfuscate(*source, annotation.block_size);
+    if (!raster.Is_valid()) {
+        return std::nullopt;
+    }
+
+    return DynamicObfuscateLayer{*clipped_bounds, raster};
 }
 
 [[nodiscard]] bool Read_capture_pixels(GdiCaptureResult const &capture,
@@ -164,6 +242,23 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
     D2D1_MATRIX_3X2_F const identity_transform = D2D1::Matrix3x2F::Identity();
 
     for (core::Annotation const &annotation : annotations) {
+        if (core::ObfuscateAnnotation const *const obfuscate =
+                std::get_if<core::ObfuscateAnnotation>(&annotation.data);
+            obfuscate != nullptr && obfuscate->premultiplied_bgra.empty()) {
+            std::optional<DynamicObfuscateLayer> const layer =
+                Build_dynamic_obfuscate_layer(pixels, capture.width, capture.height,
+                                              row_bytes, *obfuscate, target_bounds);
+            if (!layer.has_value()) {
+                continue;
+            }
+
+            core::Blend_premultiplied_bitmap_onto_opaque_pixels(
+                pixels, capture.width, capture.height, row_bytes,
+                layer->bitmap.premultiplied_bgra, layer->bitmap.width_px,
+                layer->bitmap.height_px, layer->bitmap.row_bytes, layer->bounds);
+            continue;
+        }
+
         scratch_rt->BeginDraw();
         scratch_rt->SetTransform(identity_transform);
         scratch_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));

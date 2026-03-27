@@ -185,6 +185,39 @@ void Draw_text(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext contex
                               D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
 }
 
+void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
+                    uint64_t annotation_id,
+                    core::ObfuscateAnnotation const &annotation) {
+    if (render_target == nullptr || context.obfuscate_bitmaps == nullptr ||
+        !Bitmap_data_is_valid(annotation)) {
+        return;
+    }
+
+    core::RectPx const bounds = annotation.bounds.Normalized();
+    D2D1_BITMAP_PROPERTIES props{};
+    props.pixelFormat =
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+    props.dpiX = kDefaultDpi;
+    props.dpiY = kDefaultDpi;
+
+    // Obfuscate rasters can change every preview frame while keeping the same
+    // annotation id, so the bitmap must be refreshed instead of reusing a stale cache
+    // entry keyed only by id.
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+    HRESULT const hr = render_target->CreateBitmap(
+        D2D1::SizeU(static_cast<UINT32>(annotation.bitmap_width_px),
+                    static_cast<UINT32>(annotation.bitmap_height_px)),
+        annotation.premultiplied_bgra.data(),
+        static_cast<UINT32>(annotation.bitmap_row_bytes), props, bitmap.GetAddressOf());
+    if (FAILED(hr) || !bitmap) {
+        return;
+    }
+
+    (*context.obfuscate_bitmaps)[annotation_id] = bitmap;
+    render_target->DrawBitmap(bitmap.Get(), Rect(bounds), 1.f,
+                              D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+}
+
 void Draw_bubble(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
                  uint64_t annotation_id, core::BubbleAnnotation const &annotation) {
     if (render_target == nullptr || context.bubble_bitmaps == nullptr ||
@@ -278,12 +311,14 @@ D2DAnnotationRenderResources::Build_context(ID2D1Factory *factory) noexcept {
         .solid_brush = solid_brush.Get(),
         .round_cap_style = round_cap_style.Get(),
         .flat_cap_style = flat_cap_style.Get(),
+        .obfuscate_bitmaps = &obfuscate_bitmaps,
         .text_bitmaps = &text_bitmaps,
         .bubble_bitmaps = &bubble_bitmaps,
     };
 }
 
 void D2DAnnotationRenderResources::Clear_cached_bitmaps() noexcept {
+    obfuscate_bitmaps.clear();
     text_bitmaps.clear();
     bubble_bitmaps.clear();
 }
@@ -402,6 +437,9 @@ void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                    },
                    [&](core::EllipseAnnotation const &ellipse) {
                        Draw_ellipse(render_target, context, ellipse);
+                   },
+                   [&](core::ObfuscateAnnotation const &obfuscate) {
+                       Draw_obfuscate(render_target, context, annotation.id, obfuscate);
                    },
                    [&](core::TextAnnotation const &text) {
                        Draw_text(render_target, context, annotation.id, text);

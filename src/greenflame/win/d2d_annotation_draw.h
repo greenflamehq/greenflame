@@ -12,6 +12,7 @@ struct D2DAnnotationDrawContext final {
     ID2D1SolidColorBrush *solid_brush = nullptr;
     ID2D1StrokeStyle *round_cap_style = nullptr;
     ID2D1StrokeStyle *flat_cap_style = nullptr;
+    D2DAnnotationBitmapMap *obfuscate_bitmaps = nullptr;
     D2DAnnotationBitmapMap *text_bitmaps = nullptr;
     D2DAnnotationBitmapMap *bubble_bitmaps = nullptr;
 };
@@ -20,6 +21,7 @@ struct D2DAnnotationRenderResources final {
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solid_brush;
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> round_cap_style;
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> flat_cap_style;
+    D2DAnnotationBitmapMap obfuscate_bitmaps = {};
     D2DAnnotationBitmapMap text_bitmaps = {};
     D2DAnnotationBitmapMap bubble_bitmaps = {};
 

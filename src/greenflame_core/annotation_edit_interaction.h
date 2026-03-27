@@ -51,6 +51,14 @@ struct AnnotationEditCommandData final {
     std::string_view description = {};
 };
 
+struct AnnotationEditPreview final {
+    size_t index = 0;
+    Annotation annotation_before = {};
+    Annotation annotation_after = {};
+
+    constexpr bool operator==(AnnotationEditPreview const &) const noexcept = default;
+};
+
 class IAnnotationEditInteractionHost {
   public:
     IAnnotationEditInteractionHost() = default;
@@ -86,6 +94,10 @@ class IAnnotationEditInteraction {
     [[nodiscard]] virtual bool Is_move_drag() const noexcept { return false; }
     [[nodiscard]] virtual std::optional<AnnotationEditHandleKind>
     Active_handle() const noexcept {
+        return std::nullopt;
+    }
+    [[nodiscard]] virtual std::optional<AnnotationEditPreview>
+    Preview() const noexcept {
         return std::nullopt;
     }
 };

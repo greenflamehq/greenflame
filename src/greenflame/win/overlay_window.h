@@ -59,6 +59,7 @@ class OverlayWindow final {
     };
 
     struct OverlayResources;
+    struct ObfuscateSourceProvider;
 
     struct ToolbarButtonModel final {
         ToolbarButtonAction action = ToolbarButtonAction::SelectAnnotationTool;
@@ -125,6 +126,7 @@ class OverlayWindow final {
     [[nodiscard]] bool Update_toolbar_hover_states(core::PointPx cursor);
     [[nodiscard]] bool Should_show_brush_cursor_preview() const;
     [[nodiscard]] bool Should_show_square_cursor_preview() const;
+    [[nodiscard]] bool Should_force_obfuscate_repaint() const;
     [[nodiscard]] bool Is_selection_stable_for_help() const;
     void Show_help_overlay_at_cursor();
     void Hide_help_overlay(bool suppress_next_lbutton_up);
@@ -170,6 +172,7 @@ class OverlayWindow final {
     HINSTANCE hinstance_ = nullptr;
     core::OverlayController controller_;
     std::unique_ptr<OverlayResources> resources_;
+    std::unique_ptr<ObfuscateSourceProvider> obfuscate_source_provider_;
     std::unique_ptr<D2DOverlayResources> d2d_resources_;
     std::unique_ptr<D2DTextLayoutEngine> text_layout_engine_;
     std::optional<core::SelectionHandle> last_hover_handle_;

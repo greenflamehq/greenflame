@@ -70,6 +70,28 @@ Annotation Make_text(uint64_t id, PointPx origin, RectPx visual_bounds,
     return annotation;
 }
 
+Annotation Make_obfuscate(uint64_t id, RectPx bounds, int32_t block_size,
+                          std::vector<uint8_t> premultiplied_bgra = {}) {
+    Annotation annotation{};
+    annotation.id = id;
+    RectPx const normalized = bounds.Normalized();
+    int32_t const row_bytes = normalized.Width() * 4;
+    if (premultiplied_bgra.empty()) {
+        premultiplied_bgra.assign(static_cast<size_t>(row_bytes) *
+                                      static_cast<size_t>(normalized.Height()),
+                                  0xFF);
+    }
+    annotation.data = ObfuscateAnnotation{
+        .bounds = normalized,
+        .block_size = block_size,
+        .bitmap_width_px = normalized.Width(),
+        .bitmap_height_px = normalized.Height(),
+        .bitmap_row_bytes = row_bytes,
+        .premultiplied_bgra = std::move(premultiplied_bgra),
+    };
+    return annotation;
+}
+
 } // namespace
 
 TEST(annotation_hit_test, AnnotationHitsPoint_SquareFreehandUsesSquareTipCoverage) {
@@ -265,6 +287,25 @@ TEST(annotation_hit_test, TranslateAnnotation_TextMovesOriginAndBounds) {
     EXPECT_EQ(moved_text.visual_bounds, (RectPx::From_ltrb(45, 47, 47, 49)));
 }
 
+TEST(annotation_hit_test, AnnotationHitsPoint_ObfuscateUsesNormalizedBounds) {
+    Annotation const obfuscate =
+        Make_obfuscate(5, RectPx::From_ltrb(30, 40, 51, 61), 4);
+
+    EXPECT_TRUE(Annotation_hits_point(obfuscate, {30, 40}));
+    EXPECT_TRUE(Annotation_hits_point(obfuscate, {50, 60}));
+    EXPECT_FALSE(Annotation_hits_point(obfuscate, {51, 60}));
+}
+
+TEST(annotation_hit_test, TranslateAnnotation_ObfuscateMovesBounds) {
+    Annotation const obfuscate =
+        Make_obfuscate(6, RectPx::From_ltrb(10, 10, 21, 21), 4);
+
+    Annotation const moved = Translate_annotation(obfuscate, {5, -3});
+
+    EXPECT_EQ(std::get<ObfuscateAnnotation>(moved.data).bounds,
+              (RectPx::From_ltrb(15, 7, 26, 18)));
+}
+
 TEST(annotation_hit_test, AnnotationShowsCornerBrackets_FreehandReturnsTrue) {
     EXPECT_TRUE(Annotation_shows_corner_brackets(AnnotationKind::Freehand));
 }
@@ -279,6 +320,10 @@ TEST(annotation_hit_test, AnnotationShowsCornerBrackets_RectangleReturnsFalse) {
 
 TEST(annotation_hit_test, AnnotationShowsCornerBrackets_EllipseReturnsFalse) {
     EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Ellipse));
+}
+
+TEST(annotation_hit_test, AnnotationShowsCornerBrackets_ObfuscateReturnsFalse) {
+    EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Obfuscate));
 }
 
 TEST(annotation_hit_test, AnnotationVisualBounds_FreehandMatchesHitTestBounds) {
@@ -302,6 +347,13 @@ TEST(annotation_hit_test, AnnotationVisualBounds_EllipseMatchesHitTestBounds) {
     Annotation const ellipse = Make_ellipse(1, RectPx::From_ltrb(10, 20, 50, 60), 4);
 
     EXPECT_EQ(Annotation_visual_bounds(ellipse), Annotation_bounds(ellipse));
+}
+
+TEST(annotation_hit_test, AnnotationVisualBounds_ObfuscateMatchesHitTestBounds) {
+    Annotation const obfuscate =
+        Make_obfuscate(7, RectPx::From_ltrb(10, 20, 50, 60), 4);
+
+    EXPECT_EQ(Annotation_visual_bounds(obfuscate), Annotation_bounds(obfuscate));
 }
 
 TEST(annotation_hit_test, AnnotationVisualBounds_HorizontalLineExcludesCapAndPadding) {

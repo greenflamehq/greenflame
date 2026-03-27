@@ -218,6 +218,19 @@
         "color": { "$ref": "#/$defs/color" }
       }
     },
+    "obfuscate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "left", "top", "width", "height"],
+      "properties": {
+        "type": { "const": "obfuscate" },
+        "left": { "type": "integer" },
+        "top": { "type": "integer" },
+        "width": { "type": "integer", "exclusiveMinimum": 0 },
+        "height": { "type": "integer", "exclusiveMinimum": 0 },
+        "size": { "$ref": "#/$defs/size" }
+      }
+    },
     "text_plain": {
       "type": "object",
       "additionalProperties": false,
@@ -278,6 +291,7 @@
         { "$ref": "#/$defs/filled_rectangle" },
         { "$ref": "#/$defs/ellipse" },
         { "$ref": "#/$defs/filled_ellipse" },
+        { "$ref": "#/$defs/obfuscate" },
         {
           "oneOf": [
             { "$ref": "#/$defs/text_plain" },

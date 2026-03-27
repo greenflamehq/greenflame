@@ -15,6 +15,7 @@ enum class AnnotationToolId : uint8_t {
     FilledRectangle,
     Ellipse,
     FilledEllipse,
+    Obfuscate,
     Text,
     Bubble,
 };
@@ -29,6 +30,7 @@ enum class AnnotationToolbarGlyph : uint8_t {
     FilledRectangle,
     Ellipse,
     FilledEllipse,
+    Obfuscate,
     Text,
     Bubble,
 };
@@ -63,8 +65,11 @@ class IAnnotationToolHost {
     [[nodiscard]] virtual uint64_t Next_annotation_id() const noexcept = 0;
     [[nodiscard]] virtual std::vector<PointPx>
     Smooth_points(std::span<const PointPx> points) const = 0;
+    [[nodiscard]] virtual int32_t Current_obfuscate_block_size() const noexcept = 0;
     [[nodiscard]] virtual std::optional<Annotation>
     Build_bubble_annotation(PointPx cursor) const = 0;
+    [[nodiscard]] virtual std::optional<Annotation>
+    Build_obfuscate_annotation(RectPx bounds) const = 0;
     virtual void Commit_new_annotation(UndoStack &undo_stack,
                                        Annotation annotation) = 0;
 };

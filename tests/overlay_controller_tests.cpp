@@ -1061,6 +1061,19 @@ TEST(overlay_controller, AnnotationToolHotkey_TogglesText) {
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
+TEST(overlay_controller, AnnotationToolHotkey_TogglesObfuscate) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'O'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Obfuscate});
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'O'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
+}
+
 TEST(overlay_controller, CancelWithActiveTextDraft_CancelsDraftButKeepsToolArmed) {
     auto c = Make_controller();
     FakeTextLayoutEngine engine;
@@ -1404,6 +1417,17 @@ TEST(overlay_controller, ToolSizeAdjust_AppliesToBubbleTool) {
     EXPECT_EQ(c.Tool_physical_size(AnnotationToolId::Bubble), 30);
     EXPECT_EQ(c.Adjust_tool_size(2), std::optional<int32_t>{32});
     EXPECT_EQ(c.Adjust_tool_size(-3), std::optional<int32_t>{29});
+}
+
+TEST(overlay_controller, ToolSizeAdjust_AppliesToObfuscateTool) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'O'), OverlayAction::Repaint);
+
+    EXPECT_EQ(c.Tool_physical_size(AnnotationToolId::Obfuscate), 10);
+    EXPECT_EQ(c.Adjust_tool_size(2), std::optional<int32_t>{12});
+    EXPECT_EQ(c.Adjust_tool_size(-20), std::optional<int32_t>{1});
 }
 
 TEST(overlay_controller,

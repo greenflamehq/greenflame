@@ -7,6 +7,7 @@
 #include "greenflame_core/app_config.h"
 #include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
+#include "greenflame_core/pixel_ops.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/save_image_policy.h"
 #include "greenflame_core/selection_handles.h"
@@ -35,9 +36,10 @@ constexpr int kRectangleToolGlyphResourceId = 107;
 constexpr int kFilledRectangleToolGlyphResourceId = 108;
 constexpr int kEllipseToolGlyphResourceId = 109;
 constexpr int kFilledEllipseToolGlyphResourceId = 110;
-constexpr int kHelpToolGlyphResourceId = 111;
-constexpr int kTextToolGlyphResourceId = 112;
-constexpr int kBubbleToolGlyphResourceId = 113;
+constexpr int kObfuscateToolGlyphResourceId = 111;
+constexpr int kHelpToolGlyphResourceId = 112;
+constexpr int kTextToolGlyphResourceId = 113;
+constexpr int kBubbleToolGlyphResourceId = 114;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 constexpr UINT_PTR kCaretBlinkTimerId = 2;
 constexpr UINT_PTR kHighlighterStraightenTimerId = 3;
@@ -63,7 +65,7 @@ struct ToolbarGlyphResourceSpec final {
     int resource_id = 0;
 };
 
-constexpr std::array<ToolbarGlyphResourceSpec, 11> kToolbarGlyphResourceSpecs = {{
+constexpr std::array<ToolbarGlyphResourceSpec, 12> kToolbarGlyphResourceSpecs = {{
     {greenflame::OverlayToolbarGlyphId::Brush, kBrushToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Highlighter, kHighlighterToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Line, kLineToolGlyphResourceId},
@@ -74,6 +76,7 @@ constexpr std::array<ToolbarGlyphResourceSpec, 11> kToolbarGlyphResourceSpecs = 
     {greenflame::OverlayToolbarGlyphId::Ellipse, kEllipseToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::FilledEllipse,
      kFilledEllipseToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Obfuscate, kObfuscateToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Text, kTextToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Bubble, kBubbleToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Help, kHelpToolGlyphResourceId},
@@ -500,6 +503,64 @@ Load_png_resource_alpha_mask(HINSTANCE hinstance, int resource_id) {
     return glyph;
 }
 
+[[nodiscard]] bool Read_capture_pixels(greenflame::GdiCaptureResult const &capture,
+                                       std::span<uint8_t> pixels) {
+    if (!capture.Is_valid()) {
+        return false;
+    }
+
+    HDC const dc = GetDC(nullptr);
+    if (dc == nullptr) {
+        return false;
+    }
+
+    BITMAPINFOHEADER bmi{};
+    greenflame::Fill_bmi32_top_down(bmi, capture.width, capture.height);
+    int const result =
+        GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
+                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
+    ReleaseDC(nullptr, dc);
+    return result != 0;
+}
+
+[[nodiscard]] std::optional<greenflame::core::Annotation>
+Build_preview_obfuscate_annotation(
+    greenflame::core::Annotation annotation,
+    std::span<const greenflame::core::Annotation> lower_annotations,
+    greenflame::core::IObfuscateSourceProvider &source_provider) {
+    greenflame::core::ObfuscateAnnotation *const obfuscate =
+        std::get_if<greenflame::core::ObfuscateAnnotation>(&annotation.data);
+    if (obfuscate == nullptr) {
+        return std::nullopt;
+    }
+
+    greenflame::core::RectPx const normalized_bounds = obfuscate->bounds.Normalized();
+    if (normalized_bounds.Is_empty()) {
+        return std::nullopt;
+    }
+
+    std::optional<greenflame::core::BgraBitmap> const source =
+        source_provider.Build_composited_source(normalized_bounds, lower_annotations);
+    if (!source.has_value() || !source->Is_valid()) {
+        return std::nullopt;
+    }
+
+    greenflame::core::BgraBitmap const raster =
+        greenflame::core::Rasterize_obfuscate(*source, obfuscate->block_size);
+    if (!raster.Is_valid()) {
+        return std::nullopt;
+    }
+
+    obfuscate->bounds = normalized_bounds;
+    obfuscate->block_size =
+        greenflame::core::Clamp_obfuscate_block_size(obfuscate->block_size);
+    obfuscate->bitmap_width_px = raster.width_px;
+    obfuscate->bitmap_height_px = raster.height_px;
+    obfuscate->bitmap_row_bytes = raster.row_bytes;
+    obfuscate->premultiplied_bgra = raster.premultiplied_bgra;
+    return annotation;
+}
+
 } // namespace
 
 namespace greenflame {
@@ -547,10 +608,65 @@ struct OverlayWindow::OverlayResources {
     }
 };
 
+struct OverlayWindow::ObfuscateSourceProvider final
+    : public core::IObfuscateSourceProvider {
+    explicit ObfuscateSourceProvider(OverlayWindow *owner) noexcept : owner_(owner) {}
+
+    [[nodiscard]] std::optional<core::BgraBitmap> Build_composited_source(
+        core::RectPx bounds,
+        std::span<const core::Annotation> lower_annotations) override {
+        if (owner_ == nullptr || owner_->resources_ == nullptr ||
+            !owner_->resources_->capture.Is_valid()) {
+            return std::nullopt;
+        }
+
+        core::RectPx const normalized_bounds = bounds.Normalized();
+        if (normalized_bounds.Is_empty()) {
+            return std::nullopt;
+        }
+
+        GdiCaptureResult cropped{};
+        if (!Crop_capture(owner_->resources_->capture, normalized_bounds.left,
+                          normalized_bounds.top, normalized_bounds.Width(),
+                          normalized_bounds.Height(), cropped)) {
+            return std::nullopt;
+        }
+
+        if (!lower_annotations.empty() &&
+            !Render_annotations_into_capture(cropped, lower_annotations,
+                                             normalized_bounds)) {
+            cropped.Free();
+            return std::nullopt;
+        }
+
+        int const row_bytes = Row_bytes32(cropped.width);
+        size_t const buffer_size =
+            static_cast<size_t>(row_bytes) * static_cast<size_t>(cropped.height);
+        core::BgraBitmap bitmap{
+            .width_px = cropped.width,
+            .height_px = cropped.height,
+            .row_bytes = row_bytes,
+            .premultiplied_bgra = std::vector<uint8_t>(buffer_size),
+        };
+        bool const read_ok = Read_capture_pixels(cropped, bitmap.premultiplied_bgra);
+        cropped.Free();
+        if (!read_ok) {
+            return std::nullopt;
+        }
+
+        core::Force_alpha_opaque(bitmap.premultiplied_bgra);
+        return bitmap;
+    }
+
+  private:
+    OverlayWindow *owner_ = nullptr;
+};
+
 OverlayWindow::OverlayWindow(IOverlayEvents *events, core::AppConfig *config,
                              IWindowQuery *window_query)
     : events_(events), config_(config), window_query_(window_query),
-      resources_(std::make_unique<OverlayResources>()) {}
+      resources_(std::make_unique<OverlayResources>()),
+      obfuscate_source_provider_(std::make_unique<ObfuscateSourceProvider>(this)) {}
 
 OverlayWindow::~OverlayWindow() { Destroy(); }
 
@@ -669,6 +785,8 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
             return OverlayToolbarGlyphId::Ellipse;
         case core::AnnotationToolbarGlyph::FilledEllipse:
             return OverlayToolbarGlyphId::FilledEllipse;
+        case core::AnnotationToolbarGlyph::Obfuscate:
+            return OverlayToolbarGlyphId::Obfuscate;
         case core::AnnotationToolbarGlyph::Text:
             return OverlayToolbarGlyphId::Text;
         case core::AnnotationToolbarGlyph::Bubble:
@@ -804,6 +922,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
 
     controller_.Reset_for_session(Get_monitors_with_bounds());
     controller_.Set_text_layout_engine(text_layout_engine_.get());
+    controller_.Set_obfuscate_source_provider(obfuscate_source_provider_.get());
     controller_.Refresh_snap_edges(Collect_visible_snap_edges(), bounds.left,
                                    bounds.top);
     auto const tool_step = [&](core::AnnotationToolId tool, int32_t step) {
@@ -817,6 +936,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         tool_step(core::AnnotationToolId::Ellipse, config_->ellipse_size);
         tool_step(core::AnnotationToolId::Highlighter, config_->highlighter_size);
         tool_step(core::AnnotationToolId::Bubble, config_->bubble_size);
+        tool_step(core::AnnotationToolId::Obfuscate, config_->obfuscate_block_size);
         tool_step(core::AnnotationToolId::Text, config_->text_size);
     } else {
         tool_step(core::AnnotationToolId::Freehand, core::AppConfig::kDefaultBrushSize);
@@ -828,6 +948,8 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         tool_step(core::AnnotationToolId::Highlighter,
                   core::AppConfig::kDefaultHighlighterSize);
         tool_step(core::AnnotationToolId::Bubble, core::AppConfig::kDefaultBubbleSize);
+        tool_step(core::AnnotationToolId::Obfuscate,
+                  core::AppConfig::kDefaultObfuscateBlockSize);
         tool_step(core::AnnotationToolId::Text, core::AppConfig::kDefaultTextSize);
     }
     controller_.Set_brush_annotation_color(
@@ -921,6 +1043,9 @@ bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
             break;
         case core::AnnotationToolId::Bubble:
             config_->bubble_size = new_step;
+            break;
+        case core::AnnotationToolId::Obfuscate:
+            config_->obfuscate_block_size = new_step;
             break;
         case core::AnnotationToolId::Text:
             config_->text_size = new_step;
@@ -1067,7 +1192,10 @@ void OverlayWindow::Reset_caret_blink() {
 
 bool OverlayWindow::Can_show_color_wheel() const noexcept {
     auto const &s = controller_.State();
-    return controller_.Active_annotation_tool().has_value() &&
+    std::optional<core::AnnotationToolId> const active_tool =
+        controller_.Active_annotation_tool();
+    return active_tool.has_value() &&
+           *active_tool != core::AnnotationToolId::Obfuscate &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview &&
            !controller_.Has_active_annotation_gesture() &&
@@ -1300,10 +1428,18 @@ bool OverlayWindow::Should_show_square_cursor_preview() const {
             *active_tool == core::AnnotationToolId::Line ||
             *active_tool == core::AnnotationToolId::Arrow ||
             *active_tool == core::AnnotationToolId::Rectangle ||
-            *active_tool == core::AnnotationToolId::Ellipse) &&
+            *active_tool == core::AnnotationToolId::Ellipse ||
+            *active_tool == core::AnnotationToolId::Obfuscate) &&
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview && !last_hover_handle_.has_value() &&
            !controller_.Has_active_annotation_gesture();
+}
+
+bool OverlayWindow::Should_force_obfuscate_repaint() const {
+    core::Annotation const *const draft = controller_.Draft_annotation();
+    return (draft != nullptr &&
+            std::holds_alternative<core::ObfuscateAnnotation>(draft->data)) ||
+           !controller_.Active_obfuscate_preview_indices().empty();
 }
 
 bool OverlayWindow::Is_selection_stable_for_help() const {
@@ -1861,6 +1997,13 @@ LRESULT OverlayWindow::On_l_button_down() {
     if (hover_changed) {
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
+    if (Should_force_obfuscate_repaint() ||
+        (controller_.Selected_annotation() != nullptr &&
+         std::holds_alternative<core::ObfuscateAnnotation>(
+             controller_.Selected_annotation()->data))) {
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+    }
     core::RectPx const after_selection = controller_.State().final_selection;
     auto const &after_state = controller_.State();
     if (before_selection != after_selection && before_selection.Is_empty() &&
@@ -1959,9 +2102,10 @@ LRESULT OverlayWindow::On_mouse_move() {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
-    if (!controller_.Has_active_annotation_gesture() &&
-        (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
-         controller_.Active_annotation_tool() == core::AnnotationToolId::Text)) {
+    if (Should_force_obfuscate_repaint() ||
+        (!controller_.Has_active_annotation_gesture() &&
+         (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
+          controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
         RedrawWindow(hwnd_, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
@@ -2086,6 +2230,11 @@ LRESULT OverlayWindow::On_l_button_up() {
                     InvalidateRect(hwnd_, nullptr, TRUE);
                 },
                 selection_before, after));
+    }
+
+    if (Should_force_obfuscate_repaint()) {
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
 
     return 0;
@@ -2565,9 +2714,67 @@ LRESULT OverlayWindow::On_paint() {
 
         D2DPaintInput input{};
         std::optional<core::TextDraftView> draft_text_view = std::nullopt;
+        std::optional<core::Annotation> draft_obfuscate_preview = std::nullopt;
+        std::vector<AnnotationPreviewPatch> patches;
+        core::Annotation const *paint_draft_annotation = controller_.Draft_annotation();
+        bool has_live_obfuscate_preview = false;
         if (core::TextEditController *const text_edit = controller_.Active_text_edit();
             text_edit != nullptr) {
             draft_text_view = text_edit->Build_view();
+        }
+        if (obfuscate_source_provider_ != nullptr) {
+            std::vector<size_t> const preview_indices =
+                controller_.Active_obfuscate_preview_indices();
+            if (!preview_indices.empty()) {
+                patches.reserve(preview_indices.size());
+                for (size_t index : preview_indices) {
+                    if (index >= controller_.Annotations().size()) continue;
+
+                    // Build lower-annotations span with already-computed patches
+                    // applied for correct stacking when multiple obfuscates overlap.
+                    std::span<const core::Annotation> lower_span =
+                        controller_.Annotations().first(index);
+                    std::vector<core::Annotation> lower_scratch;
+                    for (auto const &patch : patches) {
+                        if (patch.index < index) {
+                            if (lower_scratch.empty()) {
+                                lower_scratch.assign(lower_span.begin(),
+                                                     lower_span.end());
+                            }
+                            lower_scratch[patch.index] = patch.annotation;
+                        }
+                    }
+                    if (!lower_scratch.empty()) {
+                        lower_span = lower_scratch;
+                    }
+
+                    std::optional<core::Annotation> rebuilt =
+                        Build_preview_obfuscate_annotation(
+                            controller_.Annotations()[index], lower_span,
+                            *obfuscate_source_provider_);
+                    if (rebuilt.has_value()) {
+                        patches.push_back({index, std::move(*rebuilt)});
+                        has_live_obfuscate_preview = true;
+                    }
+                }
+            }
+
+            if (paint_draft_annotation != nullptr &&
+                std::holds_alternative<core::ObfuscateAnnotation>(
+                    paint_draft_annotation->data)) {
+                draft_obfuscate_preview = Build_preview_obfuscate_annotation(
+                    *paint_draft_annotation, controller_.Annotations(),
+                    *obfuscate_source_provider_);
+                if (draft_obfuscate_preview.has_value()) {
+                    paint_draft_annotation = &*draft_obfuscate_preview;
+                    has_live_obfuscate_preview = true;
+                }
+            }
+        }
+        if (has_live_obfuscate_preview && d2d_resources_ != nullptr) {
+            // Obfuscate preview frames reuse real annotation IDs, so the normal
+            // per-ID bitmap cache would otherwise keep drawing stale content.
+            d2d_resources_->obfuscate_bitmaps.clear();
         }
         input.dragging = s.dragging;
         input.handle_dragging = s.handle_dragging;
@@ -2586,6 +2793,7 @@ LRESULT OverlayWindow::On_paint() {
             std::span<const core::RectPx>(monitor_client_rects);
         input.cursor_client_px = cursor;
         input.annotations = controller_.Annotations();
+        input.annotation_patches = patches;
         input.draft_freehand_points = controller_.Draft_freehand_points();
         input.draft_freehand_style = controller_.Draft_freehand_style();
         input.draft_freehand_tip_shape =
@@ -2612,7 +2820,7 @@ LRESULT OverlayWindow::On_paint() {
             input.draft_text_blink_visible = caret_blink_visible_;
         } else if (!input.draft_freehand_style.has_value() ||
                    input.draft_freehand_points.size() == 1) {
-            input.draft_annotation = controller_.Draft_annotation();
+            input.draft_annotation = paint_draft_annotation;
         }
         if (controller_.Should_show_selected_annotation_handles()) {
             input.selected_annotation = controller_.Selected_annotation();
@@ -2750,6 +2958,7 @@ LRESULT OverlayWindow::On_destroy() {
     color_wheel_ = {};
     toolbar_buttons_.clear();
     controller_.Set_text_layout_engine(nullptr);
+    controller_.Set_obfuscate_source_provider(nullptr);
     text_layout_engine_.reset();
     if (d2d_resources_) {
         d2d_resources_->Release_all();
@@ -2856,7 +3065,8 @@ void OverlayWindow::Refresh_cursor() {
             *active_tool == core::AnnotationToolId::Rectangle ||
             *active_tool == core::AnnotationToolId::FilledRectangle ||
             *active_tool == core::AnnotationToolId::Ellipse ||
-            *active_tool == core::AnnotationToolId::FilledEllipse) {
+            *active_tool == core::AnnotationToolId::FilledEllipse ||
+            *active_tool == core::AnnotationToolId::Obfuscate) {
             SetCursor(Load_annotation_tool_cursor(hinstance_));
         } else if (*active_tool == core::AnnotationToolId::Text) {
             SetCursor(LoadCursorW(nullptr, IDC_IBEAM));

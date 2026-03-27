@@ -71,6 +71,7 @@ Build_annotation_draw_context(D2DOverlayResources &res) noexcept {
         .solid_brush = res.solid_brush.Get(),
         .round_cap_style = res.round_cap_style.Get(),
         .flat_cap_style = res.flat_cap_style.Get(),
+        .obfuscate_bitmaps = &res.obfuscate_bitmaps,
         .text_bitmaps = &res.text_bitmaps,
         .bubble_bitmaps = &res.bubble_bitmaps,
     };
@@ -918,6 +919,18 @@ void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     rt, res,
                     core::Rectangle_resize_handle_center(
                         ellipse->outer_bounds, static_cast<core::SelectionHandle>(i)));
+            }
+        }
+    } else if (core::ObfuscateAnnotation const *const obfuscate =
+                   std::get_if<core::ObfuscateAnnotation>(&ann->data)) {
+        std::array<bool, 8> const visible =
+            core::Visible_rectangle_resize_handles(obfuscate->bounds);
+        for (size_t i = 0; i < visible.size(); ++i) {
+            if (visible[i]) {
+                Draw_endpoint_handle(
+                    rt, res,
+                    core::Rectangle_resize_handle_center(
+                        obfuscate->bounds, static_cast<core::SelectionHandle>(i)));
             }
         }
     }
@@ -1932,17 +1945,30 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 // Temporarily EndDraw/BeginDraw's rt around each highlighter so draft_stroke_rt
 // can be used as a scratch surface.
 void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                            std::span<const core::Annotation> annotations) {
+                            std::span<const core::Annotation> annotations,
+                            std::span<const AnnotationPreviewPatch> patches) {
     auto const is_highlighter = [](core::Annotation const &ann) -> bool {
         auto const *fh = std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
         return fh && fh->freehand_tip_shape == core::FreehandTipShape::Square;
     };
 
+    // Invariant: patches never replace a non-highlighter with a highlighter, so the
+    // can_multiply check over the base span is correct for the obfuscate preview
+    // scenario.
     bool const can_multiply =
         res.screenshot && res.multiply_effect && res.draft_stroke_rt &&
         std::any_of(annotations.begin(), annotations.end(), is_highlighter);
 
-    for (auto const &ann : annotations) {
+    auto const find_patch = [&](size_t i) -> core::Annotation const * {
+        for (auto const &p : patches) {
+            if (p.index == i) return &p.annotation;
+        }
+        return nullptr;
+    };
+
+    for (size_t i = 0; i < annotations.size(); ++i) {
+        auto const *const patch = find_patch(i);
+        core::Annotation const &ann = patch != nullptr ? *patch : annotations[i];
         if (can_multiply && is_highlighter(ann)) {
             auto const &fh = *std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
 
@@ -2006,14 +2032,15 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 // ---------------------------------------------------------------------------
 
 void Rebuild_annotations_bitmap(D2DOverlayResources &res,
-                                std::span<const core::Annotation> annotations) {
+                                std::span<const core::Annotation> annotations,
+                                std::span<const AnnotationPreviewPatch> patches) {
     if (!res.annotations_rt) {
         return;
     }
 
     res.annotations_rt->BeginDraw();
     res.annotations_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
-    Draw_annotations_to_rt(res.annotations_rt.Get(), res, annotations);
+    Draw_annotations_to_rt(res.annotations_rt.Get(), res, annotations, patches);
 
     HRESULT const hr = res.annotations_rt->EndDraw();
     if (SUCCEEDED(hr)) {
@@ -2035,18 +2062,23 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
     res.frozen_rt->BeginDraw();
     res.frozen_rt->DrawBitmap(res.screenshot.Get());
 
-    // Dim the entire capture.
+    // Composite committed annotations before dimming so the dim sits on top of them.
+    res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
+
+    // Dim the entire capture (on top of screenshot and all annotations).
     res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
     res.frozen_rt->FillRectangle(full, res.solid_brush.Get());
 
-    // Restore selection area to undimmed screenshot.
+    // Restore the selection area undimmed: screenshot then annotations, both
+    // clipped so nothing outside the selection punches through the dim.
     if (!selection.Is_empty()) {
         Draw_clipped_screenshot_rect(res.frozen_rt.Get(), res.screenshot.Get(),
                                      selection, vd_width, vd_height);
+        res.frozen_rt->PushAxisAlignedClip(Rect(selection),
+                                           D2D1_ANTIALIAS_MODE_ALIASED);
+        res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
+        res.frozen_rt->PopAxisAlignedClip();
     }
-
-    // Composite committed annotations.
-    res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
 
     HRESULT const hr = res.frozen_rt->EndDraw();
     if (SUCCEEDED(hr)) {
@@ -2070,12 +2102,16 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     // hwnd_rt->BeginDraw(), so the normal blit path gets the correct multiply-blend
     // rendering for highlighters without any mid-frame EndDraw on hwnd_rt.
     if (input.annotation_editing) {
-        Rebuild_annotations_bitmap(res, input.annotations);
+        Rebuild_annotations_bitmap(res, input.annotations, input.annotation_patches);
     }
 
+    // A draft annotation must be drawn before the dim in the dynamic path so the
+    // dim sits on top outside the selection. Force the dynamic path whenever one
+    // is present.
     bool const is_steady_state = res.frozen_valid && !input.dragging &&
                                  !input.handle_dragging && !input.move_dragging &&
-                                 !input.annotation_editing && !input.modifier_preview;
+                                 !input.annotation_editing && !input.modifier_preview &&
+                                 input.draft_annotation == nullptr;
 
     res.hwnd_rt->BeginDraw();
 
@@ -2085,31 +2121,56 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
             res.hwnd_rt->DrawBitmap(res.frozen_bitmap.Get());
         }
     } else {
-        // Dynamic path: rebuild per frame from screenshot + dim + selection +
-        // annotations.
+        // Dynamic path: rebuild per frame from screenshot + annotations + dim +
+        // selection restore.
         D2D1_RECT_F const full = D2D1::RectF(0.f, 0.f, static_cast<float>(vd_width),
                                              static_cast<float>(vd_height));
         if (res.screenshot) {
             res.hwnd_rt->DrawBitmap(res.screenshot.Get());
         }
+
+        // Composite annotations before dimming so the dim sits on top of them.
+        if (res.annotations_bitmap) {
+            res.hwnd_rt->DrawBitmap(res.annotations_bitmap.Get());
+        }
+
+        // Draft annotation also drawn before the dim for the same reason.
+        if (input.draft_annotation != nullptr) {
+            Draw_annotation(res.hwnd_rt.Get(), res, *input.draft_annotation);
+        }
+
+        // Dim the entire canvas (on top of screenshot and all annotations).
         res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
         res.hwnd_rt->FillRectangle(full, res.solid_brush.Get());
 
-        // Restore selection area: live_rect while dragging selection,
-        // final_selection while editing an annotation (live_rect is empty then).
+        // Restore selection area undimmed: screenshot, annotations, and draft
+        // annotation — all clipped to the selection rect.
+        // Use live_rect while dragging the selection; fall back to final_selection
+        // when an annotation tool gesture is active (live_rect is empty then).
         core::RectPx const restore_rect =
-            input.annotation_editing ? input.final_selection : input.live_rect;
+            !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
         if (!restore_rect.Is_empty() && res.screenshot) {
             Draw_clipped_screenshot_rect(res.hwnd_rt.Get(), res.screenshot.Get(),
                                          restore_rect, vd_width, vd_height);
         }
-
-        if (res.annotations_bitmap) {
-            res.hwnd_rt->DrawBitmap(res.annotations_bitmap.Get());
+        if (!restore_rect.Is_empty()) {
+            res.hwnd_rt->PushAxisAlignedClip(Rect(restore_rect),
+                                             D2D1_ANTIALIAS_MODE_ALIASED);
+            if (res.annotations_bitmap) {
+                res.hwnd_rt->DrawBitmap(res.annotations_bitmap.Get());
+            }
+            if (input.draft_annotation != nullptr) {
+                Draw_annotation(res.hwnd_rt.Get(), res, *input.draft_annotation);
+            }
+            res.hwnd_rt->PopAxisAlignedClip();
         }
     }
 
-    Draw_live_layer(res.hwnd_rt.Get(), res, input, vd_width, vd_height);
+    // The draft annotation was already composited in the dynamic path above;
+    // pass nullptr so Draw_live_layer does not draw it again on top of the dim.
+    D2DPaintInput live_input = input;
+    live_input.draft_annotation = nullptr;
+    Draw_live_layer(res.hwnd_rt.Get(), res, live_input, vd_width, vd_height);
 
     if (help_overlay) {
         (void)help_overlay->Paint_d2d(res.hwnd_rt.Get(), res.dwrite_factory.Get(),

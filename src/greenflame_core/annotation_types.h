@@ -1,6 +1,7 @@
 #pragma once
 
 #include "greenflame_core/bubble_annotation_types.h"
+#include "greenflame_core/obfuscate_annotation_types.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/selection_handles.h"
 #include "greenflame_core/text_annotation_types.h"
@@ -12,6 +13,7 @@ enum class AnnotationKind : uint8_t {
     Line,
     Rectangle,
     Ellipse,
+    Obfuscate,
     Text,
     Bubble,
 };
@@ -74,7 +76,8 @@ struct EllipseAnnotation final {
 
 using AnnotationData =
     std::variant<FreehandStrokeAnnotation, LineAnnotation, RectangleAnnotation,
-                 EllipseAnnotation, TextAnnotation, BubbleAnnotation>;
+                 EllipseAnnotation, ObfuscateAnnotation, TextAnnotation,
+                 BubbleAnnotation>;
 
 template <class... Ts> struct Overloaded : Ts... {
     using Ts::operator()...;

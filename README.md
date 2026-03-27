@@ -41,7 +41,7 @@ With **no annotation tool selected** (the default mode):
 - **Click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
 - **Click and drag an annotation** to **select** and **move** it.
 - A **selected line or arrow annotation** shows draggable endpoint handles you can drag to reshape it.
-- A **selected rectangle annotation** shows draggable resize handles on the corners and sides.
+- **Selected rectangle, ellipse, and obfuscate annotations** show draggable resize handles on the corners and sides.
 
 ---
 
@@ -59,6 +59,7 @@ Press a hotkey or use the toolbar to toggle a tool on or off.
 | **Shift+R** | Filled Rectangle |
 | **E** | Ellipse |
 | **Shift+E** | Filled Ellipse |
+| **O** | Obfuscate |
 | **T** | Text |
 | **N** | Bubble |
 
@@ -66,16 +67,18 @@ Press a hotkey or use the toolbar to toggle a tool on or off.
 
 **Highlighter:** While drawing, holding the mouse still for 800 ms snaps the stroke to a straight bar from the start point to the cursor. After snapping, the end of the bar tracks the mouse live until release — the snap is one-way and cannot be reverted to freehand. The wait time is configurable via `tools.highlighter.pause_straighten_ms` (see [Configuration](#configuration)); setting it to `0` makes every stroke start as a straight bar immediately.
 
+**Obfuscate:** Drag out a rectangle to blur or pixelate the content underneath it. `tools.obfuscate.block_size = 1` uses blur mode; `2..50` uses block pixelation. Obfuscates can be moved and resized later, and they recompute when lower overlapping annotations change.
+
 ### Tool options
 
-**Color:** With an annotation tool active, **right-click** anywhere to open that tool's **color wheel** at the cursor. Left-click a segment to select a color, or press **Escape** to dismiss. For Text and Bubble, the wheel has a central hub that switches between 8 color slots and 4 font choices.
+**Color:** With an annotation tool other than **Obfuscate** active, **right-click** anywhere to open that tool's **color wheel** at the cursor. Left-click a segment to select a color, or press **Escape** to dismiss. For Text and Bubble, the wheel has a central hub that switches between 8 color slots and 4 font choices.
 
-**Size:** With any stroke tool active (**Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Ellipse**, **Bubble**, or **Text**), use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent size step, persisted separately.
+**Size:** With **Brush**, **Highlighter**, **Line**, **Arrow**, **Rectangle**, **Ellipse**, **Bubble**, **Obfuscate**, or **Text** active, use **mouse-wheel up/down** or **Ctrl+= / Ctrl+-** to change that tool's size step (1–50). Each tool has its own independent persisted setting. For Obfuscate, the setting is `block_size`: `1` means blur and `2..50` means block pixelation.
 
 **Cursor previews:**
 
 - **Brush** and **Bubble** — anti-aliased circular preview around the cursor hotspot.
-- **Highlighter**, **Line**, **Rectangle**, and **Ellipse** — anti-aliased axis-aligned square preview around the cursor hotspot.
+- **Highlighter**, **Line**, **Rectangle**, **Ellipse**, and **Obfuscate** — anti-aliased axis-aligned square preview around the cursor hotspot.
 - **Arrow** — anti-aliased square preview aligned to the current arrow direction.
 - **Text** — the letter "A" in the current font and size, shown beside the cursor hotspot.
 - **Filled Rectangle** and **Filled Ellipse** — no cursor preview.
@@ -313,6 +316,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `tools.text.current_font` | `sans` | Active font slot for the Text tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
 | `tools.bubble.size` | `10` | Bubble size step (1–50). |
 | `tools.bubble.current_font` | `sans` | Active font slot for the Bubble tool. Accepted values: `sans`, `serif`, `mono`, `art`. |
+| `tools.obfuscate.block_size` | `10` | Obfuscate tool block size (1–50). `1` uses blur mode; `2..50` uses block pixelation. |
 
 ### Save settings (`save.*`)
 
@@ -352,6 +356,9 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
       "opacity_percent": 50,
       "pause_straighten_ms": 800,
       "pause_straighten_deadzone_px": 0
+    },
+    "obfuscate": {
+      "block_size": 10
     },
     "text": {
       "size": 14,

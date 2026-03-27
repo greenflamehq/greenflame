@@ -58,6 +58,26 @@ constexpr uint8_t Colorref_blue(COLORREF color) noexcept {
     return pixels.size() >= dest_required && layer_pixels.size() >= layer_required;
 }
 
+[[nodiscard]] bool Bitmap_inputs_are_valid(std::span<uint8_t> pixels, int width,
+                                           int height, int row_bytes,
+                                           std::span<const uint8_t> layer_pixels,
+                                           int layer_width, int layer_height,
+                                           int layer_row_bytes) noexcept {
+    if (width <= 0 || height <= 0 || row_bytes <= 0 || layer_width <= 0 ||
+        layer_height <= 0 || layer_row_bytes <= 0) {
+        return false;
+    }
+    if (row_bytes < width * 4 || layer_row_bytes < layer_width * 4) {
+        return false;
+    }
+
+    size_t const dest_required =
+        static_cast<size_t>(row_bytes) * static_cast<size_t>(height);
+    size_t const layer_required =
+        static_cast<size_t>(layer_row_bytes) * static_cast<size_t>(layer_height);
+    return pixels.size() >= dest_required && layer_pixels.size() >= layer_required;
+}
+
 template <typename BlendPixelFn>
 void Composite_premultiplied_layer(std::span<uint8_t> pixels, int width, int height,
                                    int row_bytes, std::span<const uint8_t> layer_pixels,
@@ -97,7 +117,67 @@ void Composite_premultiplied_layer(std::span<uint8_t> pixels, int width, int hei
         }
     }
 }
+
+template <typename BlendPixelFn>
+void Composite_premultiplied_bitmap(std::span<uint8_t> pixels, int width, int height,
+                                    int row_bytes,
+                                    std::span<const uint8_t> layer_pixels,
+                                    int layer_width, int layer_height,
+                                    int layer_row_bytes, RectPx layer_bounds,
+                                    BlendPixelFn blend_pixel) noexcept {
+    if (!Bitmap_inputs_are_valid(pixels, width, height, row_bytes, layer_pixels,
+                                 layer_width, layer_height, layer_row_bytes)) {
+        return;
+    }
+
+    RectPx const normalized_bounds = layer_bounds.Normalized();
+    std::optional<RectPx> const clipped =
+        RectPx::Intersect(normalized_bounds, RectPx::From_ltrb(0, 0, width, height));
+    if (!clipped.has_value()) {
+        return;
+    }
+
+    for (int y = clipped->top; y < clipped->bottom; ++y) {
+        int const layer_y = y - normalized_bounds.top;
+        if (layer_y < 0 || layer_y >= layer_height) {
+            continue;
+        }
+
+        size_t const dest_row_offset =
+            static_cast<size_t>(y) * static_cast<size_t>(row_bytes);
+        size_t const layer_row_offset =
+            static_cast<size_t>(layer_y) * static_cast<size_t>(layer_row_bytes);
+        for (int x = clipped->left; x < clipped->right; ++x) {
+            int const layer_x = x - normalized_bounds.left;
+            if (layer_x < 0 || layer_x >= layer_width) {
+                continue;
+            }
+
+            size_t const dest_offset = dest_row_offset + static_cast<size_t>(x) * 4u;
+            size_t const layer_offset =
+                layer_row_offset + static_cast<size_t>(layer_x) * 4u;
+            uint8_t const alpha = layer_pixels[layer_offset + 3u];
+            if (alpha == 0) {
+                continue;
+            }
+
+            pixels[dest_offset] =
+                blend_pixel(pixels[dest_offset], layer_pixels[layer_offset], alpha);
+            pixels[dest_offset + 1u] = blend_pixel(
+                pixels[dest_offset + 1u], layer_pixels[layer_offset + 1u], alpha);
+            pixels[dest_offset + 2u] = blend_pixel(
+                pixels[dest_offset + 2u], layer_pixels[layer_offset + 2u], alpha);
+            pixels[dest_offset + 3u] = 255u;
+        }
+    }
+}
 } // namespace
+
+void Force_alpha_opaque(std::span<uint8_t> bgra_pixels) noexcept {
+    for (size_t index = 3; index < bgra_pixels.size(); index += 4u) {
+        bgra_pixels[index] = 255u;
+    }
+}
 
 void Dim_pixels_outside_rect(std::span<uint8_t> pixels, int width, int height,
                              int row_bytes, RectPx selection) noexcept {
@@ -164,6 +244,18 @@ void Blend_premultiplied_layer_onto_opaque_pixels(std::span<uint8_t> pixels, int
                                                   RectPx layer_bounds) noexcept {
     Composite_premultiplied_layer(
         pixels, width, height, row_bytes, layer_pixels, layer_row_bytes, layer_bounds,
+        [](uint8_t dst, uint8_t src, uint8_t alpha) noexcept {
+            return Blend_premultiplied_channel(dst, src, alpha);
+        });
+}
+
+void Blend_premultiplied_bitmap_onto_opaque_pixels(
+    std::span<uint8_t> pixels, int width, int height, int row_bytes,
+    std::span<const uint8_t> layer_pixels, int layer_width, int layer_height,
+    int layer_row_bytes, RectPx layer_bounds) noexcept {
+    Composite_premultiplied_bitmap(
+        pixels, width, height, row_bytes, layer_pixels, layer_width, layer_height,
+        layer_row_bytes, layer_bounds,
         [](uint8_t dst, uint8_t src, uint8_t alpha) noexcept {
             return Blend_premultiplied_channel(dst, src, alpha);
         });

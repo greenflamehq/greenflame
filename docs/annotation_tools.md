@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-09
+last_updated: 2026-03-26
 tags:
   - overlay
   - annotations
@@ -61,6 +61,9 @@ The annotation system applies only to the interactive overlay flow.
   - `Filled rectangle tool` hotkey `Shift+R`
   - `Ellipse tool` hotkey `E`
   - `Filled ellipse tool` hotkey `Shift+E`
+  - `Obfuscate tool` hotkey `O`
+  - `Text tool` hotkey `T`
+  - `Bubble tool` hotkey `N`
 - The toolbar is anchored to the current selection border.
 - Toolbar buttons display a tool glyph when one is available.
 - Hovering a toolbar button shows an opaque tooltip with the tool or help name and
@@ -83,42 +86,57 @@ The annotation system applies only to the interactive overlay flow.
   off.
 - Pressing `Shift+E` or clicking the `Filled ellipse tool` toolbar button toggles that
   tool on or off.
-- While an annotation tool is active, right-click opens that tool's color wheel
-  centered on the cursor.
+- Pressing `O` or clicking the `Obfuscate tool` toolbar button toggles that tool on
+  or off.
+- Pressing `T` or clicking the `Text tool` toolbar button toggles that tool on or
+  off.
+- Pressing `N` or clicking the `Bubble tool` toolbar button toggles that tool on or
+  off.
+- While an annotation tool other than Obfuscate is active, right-click opens that
+  tool's color wheel centered on the cursor.
 - While the color wheel is visible:
   - moving the mouse highlights the hovered color slot
   - left-clicking a slot selects that color for future annotations and closes the
     wheel
   - `Esc` closes the wheel without changing color
-- The Brush, Line, Arrow, Rectangle, Filled rectangle, Ellipse, and Filled ellipse tools use the
-  configurable 8-slot annotation palette.
+- The Brush, Line, Arrow, Rectangle, Filled rectangle, Ellipse, and Filled ellipse
+  tools use the configurable 8-slot annotation palette.
 - The Highlighter tool uses its own configurable 6-slot palette.
-- While the Brush, Highlighter, Line, Arrow, Rectangle, or Ellipse tool is active,
-  mouse-wheel up/down or `Ctrl+=` / `Ctrl+-` increases or decreases stroke width
-  within the `1..50` range.
+- The Text and Bubble tools use the configurable 8-slot annotation palette plus the
+  shared 4-slot font chooser.
+- The Obfuscate tool has no color-wheel UI.
+- While the Brush, Highlighter, Line, Arrow, Rectangle, Ellipse, Bubble,
+  Obfuscate, or Text tool is active, mouse-wheel up/down or `Ctrl+=` / `Ctrl+-`
+  increases or decreases that tool's size setting within the `1..50` range.
+- For Obfuscate, `block_size == 1` is blur mode and `2..50` is block-pixelation.
 - While the Brush tool is active, the overlay draws an anti-aliased circular size
   preview around the cursor hotspot.
 - While the Highlighter tool is active, the overlay draws an anti-aliased
   axis-aligned square size preview around the cursor hotspot.
 - While the Line or Arrow tool is active, the overlay draws an anti-aliased square
   size preview around the cursor hotspot aligned to the current line direction.
-- While the Rectangle or Ellipse tool is active, the overlay draws an axis-aligned
-  square size preview around the cursor hotspot.
+- While the Rectangle, Ellipse, or Obfuscate tool is active, the overlay draws an
+  axis-aligned square size preview around the cursor hotspot.
+- While the Bubble tool is active, the overlay draws an anti-aliased circular size
+  preview around the cursor hotspot.
+- While the Text tool is active, the overlay draws a text cursor preview using the
+  current font and point-size mapping.
 - The Filled rectangle and Filled ellipse tools do not draw a cursor size preview
   overlay.
-- Stroke-width changes show a temporary centered size overlay inside the current
+- Tool-size changes show a temporary centered size overlay inside the current
   selection using the same visual treatment as the center selection-size label.
-- Stroke width persists in the INI file at `[tools] brush_width`.
-- The color wheel palette persists in `[tools] color_0` through `[tools] color_7`
-  using `#rrggbb`.
-- The currently selected palette slot persists in `[tools] current_color`.
-- The Highlighter palette persists in `[tools] highlighter_color_0` through
-  `[tools] highlighter_color_5` using `#rrggbb`.
+- Per-tool size settings persist in JSON at `tools.<tool>.size`, except Obfuscate,
+  which persists at `tools.obfuscate.block_size`.
+- The annotation color-wheel palette persists in `tools.colors` using slot-index
+  keys and `#rrggbb` values.
+- The currently selected annotation palette slot persists in `tools.current_color`.
+- The Highlighter palette persists in `tools.highlighter.colors`.
 - The currently selected Highlighter slot persists in
-  `[tools] highlighter_current_color`.
-- Highlighter opacity persists in `[tools] highlighter_opacity_percent`.
-- The size-overlay duration persists in the INI file at
-  `[ui] tool_size_overlay_duration_ms`.
+  `tools.highlighter.current_color`.
+- Highlighter opacity persists in `tools.highlighter.opacity_percent`.
+- Text and Bubble font selections persist in `tools.text.current_font` and
+  `tools.bubble.current_font`, while font family names persist in `tools.font.*`.
+- The size-overlay duration persists in `ui.tool_size_overlay_duration_ms`.
 - Completing an annotation does not change the active tool.
 - Starting a selection move clears the selected annotation.
 
@@ -137,6 +155,8 @@ The annotation system applies only to the interactive overlay flow.
   are too small to show all handles without overlap.
 - Selected ellipse annotations are shown by drawing eight resize handles using the
   same bounding-rect handle layout as rectangles.
+- Selected obfuscate annotations are shown by drawing eight resize handles using
+  the same bounding-rect handle layout as rectangles.
 - `Delete` removes the selected annotation.
 - Deletion is undoable and redoable.
 
@@ -188,6 +208,9 @@ The registry lives in core.
     - `RectangleAnnotationTool` configured for filled rectangles
     - `EllipseAnnotationTool` configured for outlined ellipses
     - `EllipseAnnotationTool` configured for filled ellipses
+    - `ObfuscateAnnotationTool`
+    - `TextAnnotationTool`
+    - `BubbleAnnotationTool`
 
 Tools are objects so behavior remains encapsulated and future tools can be added
 without pushing per-tool logic into the Win32 layer.
@@ -202,9 +225,9 @@ without pushing per-tool logic into the Win32 layer.
 - `Annotation`
   - holds an `id` and an `AnnotationData` payload
   - `AnnotationData` is `std::variant<FreehandStrokeAnnotation, LineAnnotation,
-    RectangleAnnotation, EllipseAnnotation>`; all dispatch is done with
-    `std::visit(Overloaded{...},
-    annotation.data)`
+    RectangleAnnotation, EllipseAnnotation, ObfuscateAnnotation,
+    TextAnnotation, BubbleAnnotation>`; all dispatch is done with
+    `std::visit(Overloaded{...}, annotation.data)`
   - `AnnotationKind` enum exists separately and is used only by
     `Annotation_shows_corner_brackets`; `Annotation::kind()` derives it from the
     active variant alternative
@@ -246,6 +269,22 @@ without pushing per-tool logic into the Win32 layer.
   - cached raster coverage
   - committed on mouse-up, then becomes undoable
 
+- `ObfuscateAnnotation`
+  - outer bounds in physical pixels using an exclusive right/bottom rect
+  - persisted `block_size` where `1` means blur and `2..50` means pixelation
+  - committed BGRA bitmap stamp sampled from the composited image under those
+    bounds
+  - committed on mouse-up and recomputed on later lower-layer edits that intersect
+    it
+
+- `TextAnnotation`
+  - anchor point, text layout, style, and committed BGRA bitmap
+  - committed when the draft editor is confirmed, then becomes undoable
+
+- `BubbleAnnotation`
+  - center point, counter value, text style, and committed BGRA bitmap
+  - committed on mouse-up, then becomes undoable
+
 ## Rasterization, preview, and hit-testing
 
 Pixel accuracy for committed annotations is achieved by using one shared core raster
@@ -253,6 +292,10 @@ path for selection, output compositing, and committed annotation paint.
 
 - `Rasterize_freehand_stroke(...)`
   - converts a stroke polyline into a local coverage mask and bounds
+
+- `Rasterize_obfuscate(...)`
+  - converts a composited BGRA source bitmap into either a blur stamp
+    (`block_size == 1`) or a block-pixelated stamp (`2..50`)
 
 - `Annotation_hits_point(...)`
   - answers whether a given overlay pixel belongs to the annotation
@@ -307,6 +350,21 @@ The Ellipse and Filled ellipse tools also reuse the committed core raster path:
 - the overlay composites that draft raster above committed annotations
 - hit-testing and save/copy still ignore the draft until mouse-up commits it
 
+### Draft obfuscate preview
+
+The Obfuscate tool also reuses the committed core rasterizer, but its source is the
+composited image underneath the obfuscate bounds rather than a geometric shape:
+
+- on commit, core asks the host for a composited BGRA source image covering the
+  obfuscate bounds, then calls `Rasterize_obfuscate(...)`
+- the committed BGRA stamp is cached on the annotation and reused for steady-state
+  overlay paint, save output, and clipboard output
+- during live preview, the Win32 paint path rebuilds the draft obfuscate stamp from
+  the current composited source
+- while moving or resizing an obfuscate, or while editing a lower annotation beneath
+  existing obfuscates, the preview path rebuilds the affected higher obfuscates in
+  ascending z-order so stacked previews stay visually correct
+
 ## Freehand smoothing
 
 Smoothing is intentionally abstracted.
@@ -332,8 +390,12 @@ Current command types:
 - annotation add via `AddAnnotationCommand`
 - annotation delete via `DeleteAnnotationCommand`
 - annotation move / edit via `UpdateAnnotationCommand`
+- grouped annotation mutations via `CompoundCommand`
 
 Tool switching is **not** currently part of undo history.
+
+Reactive obfuscate recomputes are folded into the same undo record as the
+underlying add, delete, move, or resize that caused them.
 
 ## Rendering and output
 
@@ -350,12 +412,15 @@ The overlay paint path draws in this order:
    - rectangle and filled-rectangle previews are composited from the draft core
      raster
    - ellipse and filled-ellipse previews are composited from the draft core raster
+   - obfuscate previews are rebuilt from the current composited source using the
+     same core rasterizer as the committed path
 5. selection labels / crosshair / region handles
 6. selected-annotation markers
    - freehand uses bounding-box corners
    - line and arrow use endpoint handles
    - rectangle uses corner/side resize handles
    - ellipse uses corner/side resize handles on its bounding rect
+   - obfuscate uses corner/side resize handles on its bounding rect
 7. toolbar buttons and tooltip
 8. color wheel, when visible
 

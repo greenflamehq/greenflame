@@ -14,6 +14,13 @@ struct D2DOverlayResources;
 class IOverlayButton;
 class OverlayHelpOverlay;
 
+// Per-index override used by the obfuscate preview path to avoid a full annotation
+// deep-copy — only the changed indices are patched at render time.
+struct AnnotationPreviewPatch {
+    size_t index;
+    core::Annotation annotation;
+};
+
 // Per-frame paint input for the Direct2D overlay renderer.
 struct D2DPaintInput {
     core::RectPx live_rect = {};
@@ -21,6 +28,7 @@ struct D2DPaintInput {
     core::PointPx cursor_client_px = {};
     std::span<const core::RectPx> monitor_rects_client = {};
     std::span<const core::Annotation> annotations = {};
+    std::span<const AnnotationPreviewPatch> annotation_patches = {};
     core::Annotation const *draft_annotation = nullptr;
     core::TextAnnotation const *draft_text_annotation = nullptr;
     std::vector<core::RectPx> draft_text_selection_rects = {};
@@ -67,8 +75,10 @@ struct D2DPaintInput {
 
 // Rebuild the annotations off-screen bitmap from committed annotations.
 // Sets res.annotations_valid = true on success.
+// patches: optional per-index overrides for the obfuscate preview path.
 void Rebuild_annotations_bitmap(D2DOverlayResources &res,
-                                std::span<const core::Annotation> annotations);
+                                std::span<const core::Annotation> annotations,
+                                std::span<const AnnotationPreviewPatch> patches = {});
 
 // Rebuild the frozen off-screen bitmap: screenshot + dim + selection restore +
 // annotations. Sets res.frozen_valid = true on success.

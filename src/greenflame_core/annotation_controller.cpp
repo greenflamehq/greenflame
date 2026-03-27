@@ -40,6 +40,15 @@ constexpr int32_t kBubbleDiameterStepOffsetPx = 20;
     return false;
 }
 
+[[nodiscard]] bool Bounds_intersect(std::optional<RectPx> a,
+                                    std::optional<RectPx> b) noexcept {
+    return a.has_value() && b.has_value() && RectPx::Intersect(*a, *b).has_value();
+}
+
+[[nodiscard]] bool Is_obfuscate_annotation(Annotation const &annotation) noexcept {
+    return std::holds_alternative<ObfuscateAnnotation>(annotation.data);
+}
+
 } // namespace
 
 std::vector<PointPx>
@@ -61,8 +70,10 @@ void AnnotationController::Reset_for_session() {
     highlighter_style_ = Default_highlighter_style();
     bubble_size_step_ = 10;
     text_size_step_ = 10;
+    obfuscate_block_size_ = kObfuscateDefaultBlockSize;
     active_edit_interaction_.reset();
     text_layout_engine_ = nullptr;
+    obfuscate_source_provider_ = nullptr;
     text_edit_ctrl_.reset();
     text_current_font_ = TextFontChoice::Sans;
     bubble_counter_ = 1;
@@ -121,6 +132,8 @@ int32_t AnnotationController::Tool_size_step(AnnotationToolId tool) const noexce
         return highlighter_style_.width_px - kHighlighterStrokeWidthStepOffsetPx;
     case AnnotationToolId::Bubble:
         return bubble_size_step_;
+    case AnnotationToolId::Obfuscate:
+        return obfuscate_block_size_;
     case AnnotationToolId::Text:
         return text_size_step_;
     case AnnotationToolId::FilledRectangle:
@@ -146,6 +159,8 @@ int32_t AnnotationController::Tool_physical_size(AnnotationToolId tool) const no
         return highlighter_style_.width_px;
     case AnnotationToolId::Bubble:
         return bubble_size_step_ + kBubbleDiameterStepOffsetPx;
+    case AnnotationToolId::Obfuscate:
+        return obfuscate_block_size_;
     case AnnotationToolId::Text:
         return kTextSizePtTable[static_cast<size_t>(text_size_step_ - 1)];
     case AnnotationToolId::FilledRectangle:
@@ -202,6 +217,12 @@ bool AnnotationController::Set_tool_size_step(AnnotationToolId tool,
             return false;
         }
         bubble_size_step_ = clamped;
+        break;
+    case AnnotationToolId::Obfuscate:
+        if (obfuscate_block_size_ == clamped) {
+            return false;
+        }
+        obfuscate_block_size_ = clamped;
         break;
     case AnnotationToolId::Text:
         if (text_size_step_ == clamped) {
@@ -318,6 +339,40 @@ AnnotationController::Active_annotation_edit_handle() const noexcept {
     return active_edit_interaction_->Active_handle();
 }
 
+std::optional<AnnotationEditPreview>
+AnnotationController::Active_annotation_edit_preview() const noexcept {
+    if (active_edit_interaction_ == nullptr) {
+        return std::nullopt;
+    }
+    return active_edit_interaction_->Preview();
+}
+
+std::vector<size_t> AnnotationController::Active_obfuscate_preview_indices() const {
+    std::vector<size_t> indices = {};
+    std::optional<AnnotationEditPreview> const preview =
+        Active_annotation_edit_preview();
+    if (!preview.has_value() || preview->index >= document_.annotations.size()) {
+        return indices;
+    }
+
+    std::optional<RectPx> const old_bounds =
+        Annotation_bounds(preview->annotation_before);
+    std::optional<RectPx> const new_bounds =
+        Annotation_bounds(preview->annotation_after);
+    for (size_t index = preview->index; index < document_.annotations.size(); ++index) {
+        Annotation const &annotation = document_.annotations[index];
+        if (!Is_obfuscate_annotation(annotation)) {
+            continue;
+        }
+        if (index == preview->index ||
+            Bounds_intersect(Annotation_bounds(annotation), old_bounds) ||
+            Bounds_intersect(Annotation_bounds(annotation), new_bounds)) {
+            indices.push_back(index);
+        }
+    }
+    return indices;
+}
+
 bool AnnotationController::Has_active_gesture() const noexcept {
     return Has_active_tool_gesture() || Has_active_edit_interaction() ||
            Has_active_text_edit();
@@ -325,6 +380,11 @@ bool AnnotationController::Has_active_gesture() const noexcept {
 
 void AnnotationController::Set_text_layout_engine(ITextLayoutEngine *engine) noexcept {
     text_layout_engine_ = engine;
+}
+
+void AnnotationController::Set_obfuscate_source_provider(
+    IObfuscateSourceProvider *provider) noexcept {
+    obfuscate_source_provider_ = provider;
 }
 
 bool AnnotationController::Has_active_text_edit() const noexcept {
@@ -463,10 +523,32 @@ bool AnnotationController::On_primary_release(UndoStack &undo_stack) {
             return false;
         }
 
+        std::vector<Annotation> const annotations_before = document_.annotations;
+        Annotation primary_after = command->annotation_after;
+        if (std::holds_alternative<ObfuscateAnnotation>(primary_after.data)) {
+            std::optional<Annotation> const rebuilt = Rebuild_obfuscate_annotation(
+                annotations_before, command->index, primary_after);
+            if (!rebuilt.has_value()) {
+                return false;
+            }
+            primary_after = *rebuilt;
+            if (command->index < document_.annotations.size()) {
+                document_.annotations[command->index] = primary_after;
+            }
+        }
+
         std::optional<uint64_t> const selection = document_.selected_annotation_id;
-        undo_stack.Push(std::make_unique<UpdateAnnotationCommand>(
-            this, command->index, command->annotation_before, command->annotation_after,
-            selection, selection, command->description));
+        std::vector<std::unique_ptr<ICommand>> reactive_commands =
+            Build_reactive_obfuscate_update_commands(
+                annotations_before, document_.annotations, command->index,
+                Annotation_bounds(command->annotation_before),
+                Annotation_bounds(primary_after), selection, selection);
+        Push_annotation_command(undo_stack,
+                                std::make_unique<UpdateAnnotationCommand>(
+                                    this, command->index, command->annotation_before,
+                                    primary_after, selection, selection,
+                                    command->description),
+                                std::move(reactive_commands));
         return true;
     }
 
@@ -508,9 +590,22 @@ bool AnnotationController::Delete_selected_annotation(UndoStack &undo_stack) {
         return true;
     }
 
-    undo_stack.Push(std::make_unique<DeleteAnnotationCommand>(
-        this, *index, document_.annotations[*index], document_.selected_annotation_id,
-        std::nullopt));
+    Annotation const deleted_annotation = document_.annotations[*index];
+    std::vector<Annotation> const annotations_before = document_.annotations;
+    std::vector<Annotation> annotations_after = document_.annotations;
+    annotations_after.erase(annotations_after.begin() +
+                            static_cast<std::ptrdiff_t>(*index));
+    std::vector<std::unique_ptr<ICommand>> reactive_commands =
+        Build_reactive_obfuscate_update_commands(
+            annotations_before, annotations_after, *index,
+            Annotation_bounds(deleted_annotation), std::nullopt,
+            document_.selected_annotation_id, std::nullopt);
+
+    Push_annotation_command(undo_stack,
+                            std::make_unique<DeleteAnnotationCommand>(
+                                this, *index, deleted_annotation,
+                                document_.selected_annotation_id, std::nullopt),
+                            std::move(reactive_commands));
     return true;
 }
 
@@ -576,6 +671,7 @@ StrokeStyle AnnotationController::Current_stroke_style() const noexcept {
     case AnnotationToolId::FilledEllipse:
         return ellipse_style_;
     case AnnotationToolId::Freehand:
+    case AnnotationToolId::Obfuscate:
     case AnnotationToolId::Bubble:
     case AnnotationToolId::Text:
         return freehand_style_;
@@ -590,6 +686,10 @@ uint64_t AnnotationController::Next_annotation_id() const noexcept {
 std::vector<PointPx>
 AnnotationController::Smooth_points(std::span<const PointPx> points) const {
     return smoother_.Smooth(points);
+}
+
+int32_t AnnotationController::Current_obfuscate_block_size() const noexcept {
+    return obfuscate_block_size_;
 }
 
 std::optional<Annotation>
@@ -612,17 +712,35 @@ AnnotationController::Build_bubble_annotation(PointPx cursor) const {
     return annotation;
 }
 
+std::optional<Annotation>
+AnnotationController::Build_obfuscate_annotation(RectPx bounds) const {
+    Annotation annotation{};
+    annotation.id = Next_annotation_id();
+    annotation.data = ObfuscateAnnotation{
+        .bounds = bounds.Normalized(),
+        .block_size = Current_obfuscate_block_size(),
+    };
+    return Rebuild_obfuscate_annotation(
+        document_.annotations, document_.annotations.size(), std::move(annotation));
+}
+
 void AnnotationController::Commit_new_annotation(UndoStack &undo_stack,
                                                  Annotation annotation) {
     size_t const insert_index = document_.annotations.size();
     std::optional<uint64_t> const selection = document_.selected_annotation_id;
     if (annotation.Kind() == AnnotationKind::Bubble) {
-        undo_stack.Push(std::make_unique<AddBubbleAnnotationCommand>(
-            this, insert_index, std::move(annotation), selection, selection));
+        Push_annotation_command(
+            undo_stack,
+            std::make_unique<AddBubbleAnnotationCommand>(
+                this, insert_index, std::move(annotation), selection, selection),
+            {});
         return;
     }
-    undo_stack.Push(std::make_unique<AddAnnotationCommand>(
-        this, insert_index, std::move(annotation), selection, selection));
+    Push_annotation_command(
+        undo_stack,
+        std::make_unique<AddAnnotationCommand>(
+            this, insert_index, std::move(annotation), selection, selection),
+        {});
 }
 
 bool AnnotationController::Begin_annotation_edit(AnnotationEditTarget target,
@@ -646,6 +764,118 @@ bool AnnotationController::Begin_annotation_edit(AnnotationEditTarget target,
     document_.selected_annotation_id = target.annotation_id;
     active_edit_interaction_ = std::move(interaction);
     return true;
+}
+
+std::optional<Annotation> AnnotationController::Rebuild_obfuscate_annotation(
+    std::span<const Annotation> annotations, size_t index,
+    Annotation annotation) const {
+    ObfuscateAnnotation *const obfuscate =
+        std::get_if<ObfuscateAnnotation>(&annotation.data);
+    if (obfuscate == nullptr || obfuscate_source_provider_ == nullptr) {
+        return std::nullopt;
+    }
+
+    RectPx const normalized_bounds = obfuscate->bounds.Normalized();
+    if (normalized_bounds.Is_empty()) {
+        return std::nullopt;
+    }
+
+    std::optional<BgraBitmap> const source =
+        obfuscate_source_provider_->Build_composited_source(normalized_bounds,
+                                                            annotations.first(index));
+    if (!source.has_value() || !source->Is_valid()) {
+        return std::nullopt;
+    }
+
+    BgraBitmap const raster = Rasterize_obfuscate(*source, obfuscate->block_size);
+    if (!raster.Is_valid()) {
+        return std::nullopt;
+    }
+
+    obfuscate->bounds = normalized_bounds;
+    obfuscate->block_size = Clamp_obfuscate_block_size(obfuscate->block_size);
+    obfuscate->bitmap_width_px = raster.width_px;
+    obfuscate->bitmap_height_px = raster.height_px;
+    obfuscate->bitmap_row_bytes = raster.row_bytes;
+    obfuscate->premultiplied_bgra = raster.premultiplied_bgra;
+    return annotation;
+}
+
+std::vector<std::unique_ptr<ICommand>>
+AnnotationController::Build_reactive_obfuscate_update_commands(
+    std::vector<Annotation> const &before_annotations,
+    std::vector<Annotation> after_annotations, size_t changed_index,
+    std::optional<RectPx> old_bounds, std::optional<RectPx> new_bounds,
+    std::optional<uint64_t> selection_before, std::optional<uint64_t> selection_after) {
+    std::vector<std::unique_ptr<ICommand>> commands = {};
+    size_t const start_index = std::min(changed_index, after_annotations.size());
+    auto const before_index_for_after = [&](size_t after_index) noexcept {
+        if (after_annotations.size() + 1u == before_annotations.size() &&
+            after_index >= changed_index) {
+            return after_index + 1u;
+        }
+        if (after_annotations.size() == before_annotations.size() + 1u &&
+            after_index > changed_index) {
+            return after_index - 1u;
+        }
+        return after_index;
+    };
+
+    for (size_t index = start_index; index < after_annotations.size(); ++index) {
+        if (!Is_obfuscate_annotation(after_annotations[index])) {
+            continue;
+        }
+
+        size_t const before_index = before_index_for_after(index);
+        if (before_index >= before_annotations.size()) {
+            continue;
+        }
+
+        std::optional<RectPx> const obfuscate_bounds =
+            Annotation_bounds(after_annotations[index]);
+        if (index != changed_index && !Bounds_intersect(obfuscate_bounds, old_bounds) &&
+            !Bounds_intersect(obfuscate_bounds, new_bounds)) {
+            continue;
+        }
+
+        std::optional<Annotation> const rebuilt = Rebuild_obfuscate_annotation(
+            after_annotations, index, after_annotations[index]);
+        if (!rebuilt.has_value()) {
+            continue;
+        }
+        if (before_annotations[before_index] == *rebuilt) {
+            after_annotations[index] = *rebuilt;
+            continue;
+        }
+
+        commands.push_back(std::make_unique<UpdateAnnotationCommand>(
+            this, index, before_annotations[before_index], *rebuilt, selection_before,
+            selection_after, "Recompute obfuscate annotation"));
+        after_annotations[index] = *rebuilt;
+    }
+
+    return commands;
+}
+
+void AnnotationController::Push_annotation_command(
+    UndoStack &undo_stack, std::unique_ptr<ICommand> primary_command,
+    std::vector<std::unique_ptr<ICommand>> reactive_commands) const {
+    if (primary_command == nullptr) {
+        return;
+    }
+
+    if (reactive_commands.empty()) {
+        undo_stack.Push(std::move(primary_command));
+        return;
+    }
+
+    std::vector<std::unique_ptr<ICommand>> commands = {};
+    commands.reserve(reactive_commands.size() + 1u);
+    commands.push_back(std::move(primary_command));
+    for (auto &command : reactive_commands) {
+        commands.push_back(std::move(command));
+    }
+    undo_stack.Push(std::make_unique<CompoundCommand>(std::move(commands)));
 }
 
 void AnnotationController::Update_annotation_at(

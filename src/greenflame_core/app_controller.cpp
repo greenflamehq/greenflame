@@ -446,13 +446,15 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
         {L"Shift+R", L"Toggle Filled rectangle tool"},
         {L"E", L"Toggle Ellipse tool"},
         {L"Shift+E", L"Toggle Filled ellipse tool"},
+        {L"O", L"Toggle Obfuscate tool"},
         {L"T", L"Toggle Text tool"},
         {L"N", L"Toggle Bubble tool"},
-        {L"Right Click", L"Open the active tool's color wheel at cursor"},
+        {L"Right Click",
+         L"Open the active tool's color wheel at cursor (except Obfuscate)"},
         {L"Wheel Up / Ctrl + =",
-         L"Increase Brush/Highlighter/Line/Arrow/Rectangle/Ellipse width"},
+         L"Increase Brush/Highlighter/Line/Arrow/Rectangle/Ellipse/Obfuscate size"},
         {L"Wheel Down / Ctrl + -",
-         L"Decrease Brush/Highlighter/Line/Arrow/Rectangle/Ellipse width"},
+         L"Decrease Brush/Highlighter/Line/Arrow/Rectangle/Ellipse/Obfuscate size"},
     };
     content.sections.push_back(std::move(tools));
 

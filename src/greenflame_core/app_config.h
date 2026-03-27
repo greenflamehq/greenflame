@@ -13,6 +13,7 @@ struct AppConfig final {
     static constexpr int32_t kDefaultEllipseSize = 2;
     static constexpr int32_t kDefaultHighlighterSize = 10;
     static constexpr int32_t kDefaultBubbleSize = 10;
+    static constexpr int32_t kDefaultObfuscateBlockSize = 10;
     static constexpr int32_t kDefaultTextSize = 10;
     static constexpr int32_t kDefaultToolSizeOverlayDurationMs = 800;
     static constexpr int32_t kDefaultHighlighterPauseStraightenMs = 800;
@@ -32,6 +33,7 @@ struct AppConfig final {
     int32_t ellipse_size = kDefaultEllipseSize;
     int32_t highlighter_size = kDefaultHighlighterSize;
     int32_t bubble_size = kDefaultBubbleSize;
+    int32_t obfuscate_block_size = kDefaultObfuscateBlockSize;
     int32_t text_size = kDefaultTextSize;
     AnnotationColorPalette annotation_colors = kDefaultAnnotationColorPalette;
     int32_t current_annotation_color_index = kDefaultAnnotationColorIndex;

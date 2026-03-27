@@ -33,9 +33,9 @@ constexpr std::array<std::string_view, 4> kRootKeys = {
 constexpr std::array<std::string_view, 4> kUiKeys = {
     {"show_balloons", "show_selection_size_side_labels",
      "show_selection_size_center_label", "tool_size_overlay_duration_ms"}};
-constexpr std::array<std::string_view, 11> kToolsKeys = {
+constexpr std::array<std::string_view, 12> kToolsKeys = {
     {"brush", "line", "arrow", "rect", "ellipse", "colors", "current_color", "font",
-     "highlighter", "text", "bubble"}};
+     "highlighter", "text", "bubble", "obfuscate"}};
 constexpr std::array<std::string_view, 4> kFontKeys = {
     {"sans", "serif", "mono", "art"}};
 constexpr std::array<std::string_view, 6> kHighlighterKeys = {
@@ -47,6 +47,7 @@ constexpr std::array<std::string_view, 8> kSaveKeys = {
      "filename_pattern_region", "filename_pattern_desktop", "filename_pattern_monitor",
      "filename_pattern_window"}};
 constexpr std::array<std::string_view, 1> kSizeOnlyKeys = {{"size"}};
+constexpr std::array<std::string_view, 1> kObfuscateKeys = {{"block_size"}};
 
 [[nodiscard]] bool Contains_key(std::span<const std::string_view> allowed_keys,
                                 std::string_view key) noexcept {
@@ -767,6 +768,19 @@ void Apply_size_only_object(Json const &object, std::wstring_view path, int32_t 
                            ctx);
 }
 
+void Apply_obfuscate_object(Json const &object, ParseContext &ctx) {
+    constexpr std::wstring_view k_path = L"tools.obfuscate";
+
+    if (object.JSON_type() != JsonClass::Object) {
+        ctx.Report_schema_error(k_path, L"Must be an object.");
+        return;
+    }
+
+    Report_unknown_keys(object, kObfuscateKeys, k_path, ctx);
+    Apply_integer_property(object, "block_size", k_path, kMinToolSize, kMaxToolSize,
+                           ctx.result.config.obfuscate_block_size, ctx);
+}
+
 void Apply_ui_object(Json const &object, ParseContext &ctx) {
     constexpr std::wstring_view k_path = L"ui";
 
@@ -901,6 +915,9 @@ void Apply_tools_object(Json const &object, ParseContext &ctx) {
         Apply_text_tool_object(object["bubble"], L"tools.bubble",
                                ctx.result.config.bubble_size,
                                ctx.result.config.bubble_current_font, ctx);
+    }
+    if (object.has_key("obfuscate")) {
+        Apply_obfuscate_object(object["obfuscate"], ctx);
     }
 }
 
@@ -1055,6 +1072,7 @@ std::string Serialize_app_config_json(AppConfig const &config) {
         config.ellipse_size != defaults.ellipse_size ||
         config.highlighter_size != defaults.highlighter_size ||
         config.bubble_size != defaults.bubble_size ||
+        config.obfuscate_block_size != defaults.obfuscate_block_size ||
         config.text_size != defaults.text_size ||
         config.current_annotation_color_index !=
             defaults.current_annotation_color_index ||
@@ -1182,6 +1200,9 @@ std::string Serialize_app_config_json(AppConfig const &config) {
                 root["tools"]["bubble"]["current_font"] =
                     std::string(Text_font_choice_token(config.bubble_current_font));
             }
+        }
+        if (config.obfuscate_block_size != defaults.obfuscate_block_size) {
+            root["tools"]["obfuscate"]["block_size"] = config.obfuscate_block_size;
         }
     }
 

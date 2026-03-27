@@ -1,0 +1,13 @@
+{
+  "coordinate_space": "local",
+  "annotations": [
+    {
+      "type": "obfuscate",
+      "left": 44,
+      "top": 28,
+      "width": 84,
+      "height": 52,
+      "size": 9
+    }
+  ]
+}

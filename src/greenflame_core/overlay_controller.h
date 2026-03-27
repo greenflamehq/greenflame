@@ -11,6 +11,8 @@
 
 namespace greenflame::core {
 
+class IObfuscateSourceProvider;
+
 struct OverlayModifierState {
     bool shift = false;
     bool ctrl = false;
@@ -142,6 +144,7 @@ class OverlayController final {
     [[nodiscard]] bool Has_active_annotation_edit() const noexcept;
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_annotation_edit_handle() const noexcept;
+    [[nodiscard]] std::vector<size_t> Active_obfuscate_preview_indices() const;
     [[nodiscard]] COLORREF Annotation_color() const noexcept;
     [[nodiscard]] COLORREF Brush_annotation_color() const noexcept;
     [[nodiscard]] COLORREF Highlighter_color() const noexcept;
@@ -161,6 +164,7 @@ class OverlayController final {
     [[nodiscard]] bool Straighten_highlighter_stroke() noexcept;
     [[nodiscard]] bool Is_annotation_dragging() const noexcept;
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;
+    void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
 
   private:
     void Rebuild_snap_edges(SnapEdges const &screen_edges, int32_t origin_x,

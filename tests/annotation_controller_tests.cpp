@@ -85,6 +85,123 @@ Annotation Make_text(uint64_t id, PointPx origin, RectPx visual_bounds,
     return annotation;
 }
 
+Annotation Make_obfuscate(uint64_t id, RectPx bounds, int32_t block_size,
+                          std::vector<uint8_t> premultiplied_bgra = {}) {
+    Annotation annotation{};
+    annotation.id = id;
+    RectPx const normalized = bounds.Normalized();
+    int32_t const row_bytes = normalized.Width() * 4;
+    if (premultiplied_bgra.empty()) {
+        premultiplied_bgra.assign(static_cast<size_t>(row_bytes) *
+                                      static_cast<size_t>(normalized.Height()),
+                                  0xFF);
+    }
+    annotation.data = ObfuscateAnnotation{
+        .bounds = normalized,
+        .block_size = block_size,
+        .bitmap_width_px = normalized.Width(),
+        .bitmap_height_px = normalized.Height(),
+        .bitmap_row_bytes = row_bytes,
+        .premultiplied_bgra = std::move(premultiplied_bgra),
+    };
+    return annotation;
+}
+
+struct RecordingObfuscateSourceProvider final : public IObfuscateSourceProvider {
+    struct Request final {
+        RectPx bounds = {};
+        size_t lower_annotation_count = 0;
+        uint32_t lower_annotations_hash = 0;
+    };
+
+    [[nodiscard]] std::optional<BgraBitmap>
+    Build_composited_source(RectPx bounds,
+                            std::span<const Annotation> lower_annotations) override {
+        RectPx const normalized_bounds = bounds.Normalized();
+        if (normalized_bounds.Is_empty()) {
+            return std::nullopt;
+        }
+
+        uint32_t hash = 0;
+        for (Annotation const &annotation : lower_annotations) {
+            hash += static_cast<uint32_t>(annotation.id);
+            if (std::optional<RectPx> const annotation_bounds =
+                    Annotation_bounds(annotation);
+                annotation_bounds.has_value()) {
+                hash += static_cast<uint32_t>(annotation_bounds->left);
+                hash += static_cast<uint32_t>(annotation_bounds->top);
+                hash += static_cast<uint32_t>(annotation_bounds->right);
+                hash += static_cast<uint32_t>(annotation_bounds->bottom);
+            }
+        }
+        requests.push_back(Request{
+            .bounds = normalized_bounds,
+            .lower_annotation_count = lower_annotations.size(),
+            .lower_annotations_hash = hash,
+        });
+
+        int32_t const width = normalized_bounds.Width();
+        int32_t const height = normalized_bounds.Height();
+        int32_t const row_bytes = width * 4;
+        BgraBitmap bitmap{
+            .width_px = width,
+            .height_px = height,
+            .row_bytes = row_bytes,
+            .premultiplied_bgra = std::vector<uint8_t>(
+                static_cast<size_t>(row_bytes) * static_cast<size_t>(height), 0),
+        };
+        uint8_t const blue = static_cast<uint8_t>(hash & 255u);
+        uint8_t const green = static_cast<uint8_t>((hash >> 8u) & 255u);
+        uint8_t const red = static_cast<uint8_t>(lower_annotations.size() * 37u);
+        for (size_t index = 0; index < bitmap.premultiplied_bgra.size(); index += 4u) {
+            bitmap.premultiplied_bgra[index] = blue;
+            bitmap.premultiplied_bgra[index + 1u] = green;
+            bitmap.premultiplied_bgra[index + 2u] = red;
+            bitmap.premultiplied_bgra[index + 3u] = 255u;
+        }
+        return bitmap;
+    }
+
+    std::vector<Request> requests = {};
+};
+
+[[nodiscard]] uint32_t Obfuscate_bitmap_signature(Annotation const &annotation) {
+    ObfuscateAnnotation const &obfuscate =
+        std::get<ObfuscateAnnotation>(annotation.data);
+    if (obfuscate.premultiplied_bgra.size() < 4u) {
+        return 0;
+    }
+    return static_cast<uint32_t>(obfuscate.premultiplied_bgra[0]) |
+           (static_cast<uint32_t>(obfuscate.premultiplied_bgra[1]) << 8u) |
+           (static_cast<uint32_t>(obfuscate.premultiplied_bgra[2]) << 16u) |
+           (static_cast<uint32_t>(obfuscate.premultiplied_bgra[3]) << 24u);
+}
+
+[[nodiscard]] Annotation
+Build_obfuscate_with_provider(RecordingObfuscateSourceProvider &source_provider,
+                              uint64_t id, RectPx bounds, int32_t block_size,
+                              std::span<const Annotation> lower_annotations) {
+    std::optional<BgraBitmap> const source =
+        source_provider.Build_composited_source(bounds, lower_annotations);
+    EXPECT_TRUE(source.has_value());
+    EXPECT_TRUE(source->Is_valid());
+
+    BgraBitmap const raster = Rasterize_obfuscate(*source, block_size);
+    EXPECT_TRUE(raster.Is_valid());
+
+    Annotation annotation{};
+    annotation.id = id;
+    annotation.data = ObfuscateAnnotation{
+        .bounds = bounds.Normalized(),
+        .block_size = block_size,
+        .bitmap_width_px = raster.width_px,
+        .bitmap_height_px = raster.height_px,
+        .bitmap_row_bytes = raster.row_bytes,
+        .premultiplied_bgra = raster.premultiplied_bgra,
+    };
+    return annotation;
+}
+
 } // namespace
 
 TEST(annotation_controller, InitialState_DefaultsToNoActiveTool) {
@@ -102,7 +219,7 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     std::vector<AnnotationToolbarButtonView> const views =
         controller.Build_toolbar_button_views();
 
-    ASSERT_EQ(views.size(), 10u);
+    ASSERT_EQ(views.size(), 11u);
     EXPECT_EQ(views[0].id, AnnotationToolId::Freehand);
     EXPECT_EQ(views[0].label, L"B");
     EXPECT_EQ(views[0].tooltip, L"Brush (B)");
@@ -143,16 +260,21 @@ TEST(annotation_controller, ToolbarViews_ExposeAnnotationTools) {
     EXPECT_EQ(views[7].tooltip, L"Filled ellipse (Shift+E)");
     EXPECT_EQ(views[7].glyph, AnnotationToolbarGlyph::FilledEllipse);
     EXPECT_FALSE(views[7].active);
-    EXPECT_EQ(views[8].id, AnnotationToolId::Text);
-    EXPECT_EQ(views[8].label, L"T");
-    EXPECT_EQ(views[8].tooltip, L"Text (T)");
-    EXPECT_EQ(views[8].glyph, AnnotationToolbarGlyph::Text);
+    EXPECT_EQ(views[8].id, AnnotationToolId::Obfuscate);
+    EXPECT_EQ(views[8].label, L"O");
+    EXPECT_EQ(views[8].tooltip, L"Obfuscate (O)");
+    EXPECT_EQ(views[8].glyph, AnnotationToolbarGlyph::Obfuscate);
     EXPECT_FALSE(views[8].active);
-    EXPECT_EQ(views[9].id, AnnotationToolId::Bubble);
-    EXPECT_EQ(views[9].label, L"N");
-    EXPECT_EQ(views[9].tooltip, L"Bubble (N)");
-    EXPECT_EQ(views[9].glyph, AnnotationToolbarGlyph::Bubble);
+    EXPECT_EQ(views[9].id, AnnotationToolId::Text);
+    EXPECT_EQ(views[9].label, L"T");
+    EXPECT_EQ(views[9].tooltip, L"Text (T)");
+    EXPECT_EQ(views[9].glyph, AnnotationToolbarGlyph::Text);
     EXPECT_FALSE(views[9].active);
+    EXPECT_EQ(views[10].id, AnnotationToolId::Bubble);
+    EXPECT_EQ(views[10].label, L"N");
+    EXPECT_EQ(views[10].tooltip, L"Bubble (N)");
+    EXPECT_EQ(views[10].glyph, AnnotationToolbarGlyph::Bubble);
+    EXPECT_FALSE(views[10].active);
 }
 
 TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesFreehand) {
@@ -250,6 +372,16 @@ TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesText) {
     EXPECT_EQ(controller.Active_tool(),
               std::optional<AnnotationToolId>{AnnotationToolId::Text});
     EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L't'));
+    EXPECT_EQ(controller.Active_tool(), std::nullopt);
+}
+
+TEST(annotation_controller, ToggleToolByHotkey_ActivatesAndDeactivatesObfuscate) {
+    AnnotationController controller;
+
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'O'));
+    EXPECT_EQ(controller.Active_tool(),
+              std::optional<AnnotationToolId>{AnnotationToolId::Obfuscate});
+    EXPECT_TRUE(controller.Toggle_tool_by_hotkey(L'o'));
     EXPECT_EQ(controller.Active_tool(), std::nullopt);
 }
 
@@ -816,6 +948,12 @@ TEST(annotation_controller, ToolSize_ClampsToSupportedRange) {
     EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Bubble), 21);
     EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Bubble, 500));
     EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Bubble), 70);
+
+    // Obfuscate: step = physical block size
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Obfuscate, 0));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Obfuscate), 1);
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Obfuscate, 500));
+    EXPECT_EQ(controller.Tool_physical_size(AnnotationToolId::Obfuscate), 50);
 }
 
 TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedFreehandStyle) {
@@ -948,6 +1086,131 @@ TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedEllipseStyle) {
     EXPECT_EQ(
         std::get<EllipseAnnotation>(controller.Annotations()[0].data).style.width_px,
         12);
+}
+
+TEST(annotation_controller, ObfuscateTool_BuildsCommittedBitmapFromSourceProvider) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+
+    controller.Set_obfuscate_source_provider(&source_provider);
+    EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Obfuscate, 6));
+    EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Obfuscate));
+    EXPECT_TRUE(controller.On_primary_press({10, 20}));
+    EXPECT_TRUE(controller.On_pointer_move({30, 50}));
+    ASSERT_NE(controller.Draft_annotation(), nullptr);
+    EXPECT_EQ(controller.Draft_annotation()->Kind(), AnnotationKind::Obfuscate);
+    EXPECT_EQ(
+        std::get<ObfuscateAnnotation>(controller.Draft_annotation()->data).block_size,
+        6);
+
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    ASSERT_EQ(source_provider.requests.size(), 1u);
+    EXPECT_EQ(source_provider.requests[0].bounds, (RectPx::From_ltrb(10, 20, 31, 51)));
+    EXPECT_EQ(source_provider.requests[0].lower_annotation_count, 0u);
+
+    ObfuscateAnnotation const &obfuscate =
+        std::get<ObfuscateAnnotation>(controller.Annotations()[0].data);
+    EXPECT_EQ(obfuscate.bounds, (RectPx::From_ltrb(10, 20, 31, 51)));
+    EXPECT_EQ(obfuscate.block_size, 6);
+    EXPECT_EQ(obfuscate.bitmap_width_px, 21);
+    EXPECT_EQ(obfuscate.bitmap_height_px, 31);
+    EXPECT_FALSE(obfuscate.premultiplied_bgra.empty());
+}
+
+TEST(annotation_controller,
+     ActiveObfuscatePreviewIndices_TracksIntersectingHigherObfuscates) {
+    AnnotationController controller;
+
+    controller.Insert_annotation_at(
+        0, Make_rectangle(1, RectPx::From_ltrb(10, 10, 31, 31), 2), std::nullopt);
+    controller.Insert_annotation_at(
+        1, Make_obfuscate(2, RectPx::From_ltrb(0, 0, 40, 40), 4), std::nullopt);
+    controller.Insert_annotation_at(
+        2, Make_obfuscate(3, RectPx::From_ltrb(20, 20, 60, 60), 4), std::nullopt);
+
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::Body}, {15, 15}));
+    EXPECT_TRUE(controller.On_pointer_move({30, 30}));
+
+    EXPECT_EQ(controller.Active_obfuscate_preview_indices(),
+              (std::vector<size_t>{1u, 2u}));
+    EXPECT_TRUE(controller.On_cancel());
+}
+
+TEST(annotation_controller,
+     ReactiveObfuscateRecompute_UpdatesAfterLowerMoveAndUndoRestores) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+
+    controller.Set_obfuscate_source_provider(&source_provider);
+    controller.Insert_annotation_at(
+        0, Make_rectangle(1, RectPx::From_ltrb(10, 10, 31, 31), 2), std::nullopt);
+    controller.Insert_annotation_at(
+        1,
+        Build_obfuscate_with_provider(source_provider, 2,
+                                      RectPx::From_ltrb(5, 5, 40, 40), 4,
+                                      controller.Annotations().first(1)),
+        std::nullopt);
+    uint32_t const before_signature =
+        Obfuscate_bitmap_signature(controller.Annotations()[1]);
+
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::Body}, {20, 20}));
+    EXPECT_TRUE(controller.On_pointer_move({30, 35}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 2u);
+    uint32_t const after_signature =
+        Obfuscate_bitmap_signature(controller.Annotations()[1]);
+    EXPECT_NE(after_signature, before_signature);
+
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 2u);
+    EXPECT_EQ(Obfuscate_bitmap_signature(controller.Annotations()[1]),
+              before_signature);
+
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 2u);
+    EXPECT_EQ(Obfuscate_bitmap_signature(controller.Annotations()[1]), after_signature);
+}
+
+TEST(annotation_controller,
+     ReactiveObfuscateRecompute_UpdatesAfterLowerDeleteAndUndoRestores) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+
+    controller.Set_obfuscate_source_provider(&source_provider);
+    controller.Insert_annotation_at(
+        0, Make_rectangle(1, RectPx::From_ltrb(10, 10, 31, 31), 2), std::nullopt);
+    controller.Insert_annotation_at(
+        1,
+        Build_obfuscate_with_provider(source_provider, 2,
+                                      RectPx::From_ltrb(5, 5, 40, 40), 4,
+                                      controller.Annotations().first(1)),
+        std::nullopt);
+    uint32_t const before_signature =
+        Obfuscate_bitmap_signature(controller.Annotations()[1]);
+
+    ASSERT_TRUE(controller.Set_selected_annotation(1));
+    EXPECT_TRUE(controller.Delete_selected_annotation(undo_stack));
+
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    uint32_t const after_signature =
+        Obfuscate_bitmap_signature(controller.Annotations()[0]);
+    EXPECT_NE(after_signature, before_signature);
+
+    undo_stack.Undo();
+    ASSERT_EQ(controller.Annotations().size(), 2u);
+    EXPECT_EQ(Obfuscate_bitmap_signature(controller.Annotations()[1]),
+              before_signature);
+
+    undo_stack.Redo();
+    ASSERT_EQ(controller.Annotations().size(), 1u);
+    EXPECT_EQ(Obfuscate_bitmap_signature(controller.Annotations()[0]), after_signature);
 }
 
 TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedStrokeStyle) {

@@ -174,6 +174,41 @@ TEST(pixel_ops, BlendPremultipliedLayerOntoOpaquePixels_UsesSourceOver) {
     EXPECT_EQ(pixels[3], kOpaque);
 }
 
+TEST(pixel_ops, BlendPremultipliedBitmapOntoOpaquePixels_PositionsLocalBitmap) {
+    int const width = 4;
+    int const height = 3;
+    int const row_bytes = width * kBytesPerPixel;
+    std::vector<uint8_t> pixels(static_cast<size_t>(row_bytes) * height, 20);
+    for (size_t index = 3; index < pixels.size(); index += kBytesPerPixel) {
+        pixels[index] = kOpaque;
+    }
+
+    int const layer_width = 2;
+    int const layer_height = 1;
+    int const layer_row_bytes = layer_width * kBytesPerPixel;
+    std::vector<uint8_t> layer_pixels(
+        static_cast<size_t>(layer_row_bytes) * layer_height, 0);
+    Set_bgra_pixel(layer_pixels, layer_row_bytes, 0, 0, 5, 6, 7, kOpaque);
+    Set_bgra_pixel(layer_pixels, layer_row_bytes, 1, 0, 8, 9, 10, kOpaque);
+
+    Blend_premultiplied_bitmap_onto_opaque_pixels(
+        pixels, width, height, row_bytes, layer_pixels, layer_width, layer_height,
+        layer_row_bytes, RectPx::From_ltrb(1, 1, 3, 2));
+
+    EXPECT_EQ(pixels[Pixel_offset(0, 1, row_bytes)], 20);
+    EXPECT_EQ(pixels[Pixel_offset(0, 1, row_bytes) + 1u], 20);
+    EXPECT_EQ(pixels[Pixel_offset(0, 1, row_bytes) + 2u], 20);
+    EXPECT_EQ(pixels[Pixel_offset(1, 1, row_bytes)], 5);
+    EXPECT_EQ(pixels[Pixel_offset(1, 1, row_bytes) + 1u], 6);
+    EXPECT_EQ(pixels[Pixel_offset(1, 1, row_bytes) + 2u], 7);
+    EXPECT_EQ(pixels[Pixel_offset(2, 1, row_bytes)], 8);
+    EXPECT_EQ(pixels[Pixel_offset(2, 1, row_bytes) + 1u], 9);
+    EXPECT_EQ(pixels[Pixel_offset(2, 1, row_bytes) + 2u], 10);
+    EXPECT_EQ(pixels[Pixel_offset(3, 1, row_bytes)], 20);
+    EXPECT_EQ(pixels[Pixel_offset(3, 1, row_bytes) + 1u], 20);
+    EXPECT_EQ(pixels[Pixel_offset(3, 1, row_bytes) + 2u], 20);
+}
+
 TEST(pixel_ops, MultiplyPremultipliedLayerOntoOpaquePixels_UsesMultiplyBlend) {
     int const width = 1;
     int const height = 1;

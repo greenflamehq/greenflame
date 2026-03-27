@@ -30,6 +30,8 @@ constexpr std::array<std::string_view, 6> kEllipseKeys = {
     {"type", "center", "width", "height", "size", "color"}};
 constexpr std::array<std::string_view, 5> kFilledEllipseKeys = {
     {"type", "center", "width", "height", "color"}};
+constexpr std::array<std::string_view, 6> kObfuscateKeys = {
+    {"type", "left", "top", "width", "height", "size"}};
 constexpr std::array<std::string_view, 7> kTextKeys = {
     {"type", "origin", "text", "spans", "font", "size", "color"}};
 constexpr std::array<std::string_view, 5> kBubbleKeys = {
@@ -587,6 +589,9 @@ void Report_unknown_keys(Json const &object,
     }
     if (type == L"ellipse" || type == L"filled_ellipse") {
         return config.ellipse_size;
+    }
+    if (type == L"obfuscate") {
+        return config.obfuscate_block_size;
     }
     if (type == L"bubble") {
         return config.bubble_size;
@@ -1202,6 +1207,50 @@ void Apply_font_override(BubbleAnnotation &bubble,
     return true;
 }
 
+[[nodiscard]] bool Try_parse_obfuscate(Json const &object, std::wstring_view path,
+                                       ParseState &state, Annotation &out) {
+    std::optional<int32_t> size_step = std::nullopt;
+    int32_t left = 0;
+    int32_t top = 0;
+    int32_t width = 0;
+    int32_t height = 0;
+    if (!Try_parse_size_property(object, "size", path, size_step, state) ||
+        !Try_parse_required_int32(object, "left", path, left, state) ||
+        !Try_parse_required_int32(object, "top", path, top, state) ||
+        !Try_parse_required_int32(object, "width", path, width, state) ||
+        !Try_parse_required_int32(object, "height", path, height, state)) {
+        return false;
+    }
+
+    if (width <= 0 || height <= 0) {
+        state.Fail(path, L"requires positive width and height.");
+        return false;
+    }
+
+    PointPx screen_top_left{};
+    if (!Try_translate_point(PointPx{left, top}, state.coordinate_space, state,
+                             screen_top_left)) {
+        state.Fail(path, L"overflows screen-space coordinates.");
+        return false;
+    }
+
+    int32_t right = 0;
+    int32_t bottom = 0;
+    if (!Try_add_int32(screen_top_left.x, width, right) ||
+        !Try_add_int32(screen_top_left.y, height, bottom)) {
+        state.Fail(path, L"overflows rectangle bounds.");
+        return false;
+    }
+
+    ObfuscateAnnotation obfuscate{};
+    obfuscate.bounds =
+        RectPx::From_ltrb(screen_top_left.x, screen_top_left.y, right, bottom);
+    obfuscate.block_size =
+        size_step.value_or(Default_size_step_for_type(L"obfuscate", *state.config));
+    out.data = std::move(obfuscate);
+    return true;
+}
+
 [[nodiscard]] bool Try_parse_text(Json const &object, std::wstring_view path,
                                   ParseState &state, Annotation &out) {
     std::optional<COLORREF> annotation_color = std::nullopt;
@@ -1414,6 +1463,11 @@ void Apply_font_override(BubbleAnnotation &bubble,
         Report_unknown_keys(object, kFilledEllipseKeys, path, state);
         return state.result.error_message.empty() &&
                Try_parse_ellipse(object, path, L"filled_ellipse", true, state, out);
+    }
+    if (type == L"obfuscate") {
+        Report_unknown_keys(object, kObfuscateKeys, path, state);
+        return state.result.error_message.empty() &&
+               Try_parse_obfuscate(object, path, state, out);
     }
     if (type == L"text") {
         Report_unknown_keys(object, kTextKeys, path, state);

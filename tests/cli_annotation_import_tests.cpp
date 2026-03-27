@@ -99,6 +99,59 @@ TEST(cli_annotation_import, parse_assigns_bubble_numbers_only_to_bubbles) {
     EXPECT_EQ(std::get<BubbleAnnotation>(result.annotations[2].data).counter_value, 2);
 }
 
+TEST(cli_annotation_import, parse_translates_local_obfuscate_into_capture_space) {
+    AppConfig const config = Make_config();
+    CliAnnotationParseResult const result = Parse_cli_annotations_json(
+        R"({"annotations":[{"type":"obfuscate","left":5,"top":7,"width":30,"height":20,"size":6}]})",
+        Make_context(config));
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(result.annotations.size(), 1u);
+    ASSERT_TRUE(
+        std::holds_alternative<ObfuscateAnnotation>(result.annotations[0].data));
+
+    ObfuscateAnnotation const &obfuscate =
+        std::get<ObfuscateAnnotation>(result.annotations[0].data);
+    EXPECT_EQ(obfuscate.bounds, (RectPx::From_ltrb(105, 207, 135, 227)));
+    EXPECT_EQ(obfuscate.block_size, 6);
+    EXPECT_TRUE(obfuscate.premultiplied_bgra.empty());
+}
+
+TEST(cli_annotation_import,
+     parse_preserves_alternating_annotations_and_obfuscates_in_paint_order) {
+    AppConfig const config = Make_config();
+    CliAnnotationParseResult const result = Parse_cli_annotations_json(
+        R"({"annotations":[{"type":"brush","size":5,"points":[{"x":12,"y":18},{"x":24,"y":26},{"x":36,"y":22}]},{"type":"obfuscate","left":10,"top":12,"width":32,"height":18,"size":8},{"type":"line","start":{"x":40,"y":44},"end":{"x":78,"y":60},"size":3},{"type":"obfuscate","left":34,"top":40,"width":28,"height":24,"size":1}]})",
+        Make_context(config));
+    ASSERT_TRUE(result.ok);
+    ASSERT_EQ(result.annotations.size(), 4u);
+    EXPECT_TRUE(
+        std::holds_alternative<FreehandStrokeAnnotation>(result.annotations[0].data));
+    EXPECT_TRUE(
+        std::holds_alternative<ObfuscateAnnotation>(result.annotations[1].data));
+    EXPECT_TRUE(std::holds_alternative<LineAnnotation>(result.annotations[2].data));
+    EXPECT_TRUE(
+        std::holds_alternative<ObfuscateAnnotation>(result.annotations[3].data));
+
+    FreehandStrokeAnnotation const &brush =
+        std::get<FreehandStrokeAnnotation>(result.annotations[0].data);
+    EXPECT_EQ(brush.points.front(), (PointPx{112, 218}));
+    EXPECT_EQ(brush.points.back(), (PointPx{136, 222}));
+
+    ObfuscateAnnotation const &first_obfuscate =
+        std::get<ObfuscateAnnotation>(result.annotations[1].data);
+    EXPECT_EQ(first_obfuscate.bounds, (RectPx::From_ltrb(110, 212, 142, 230)));
+    EXPECT_EQ(first_obfuscate.block_size, 8);
+
+    LineAnnotation const &line = std::get<LineAnnotation>(result.annotations[2].data);
+    EXPECT_EQ(line.start, (PointPx{140, 244}));
+    EXPECT_EQ(line.end, (PointPx{178, 260}));
+
+    ObfuscateAnnotation const &second_obfuscate =
+        std::get<ObfuscateAnnotation>(result.annotations[3].data);
+    EXPECT_EQ(second_obfuscate.bounds, (RectPx::From_ltrb(134, 240, 162, 264)));
+    EXPECT_EQ(second_obfuscate.block_size, 1);
+}
+
 TEST(cli_annotation_import, parse_applies_document_text_defaults_and_merges_spans) {
     AppConfig const config = Make_config();
     CliAnnotationParseResult const result = Parse_cli_annotations_json(

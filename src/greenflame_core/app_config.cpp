@@ -72,6 +72,7 @@ void AppConfig::Normalize() {
     ellipse_size = std::clamp(ellipse_size, kMinToolSize, kMaxToolSize);
     highlighter_size = std::clamp(highlighter_size, kMinToolSize, kMaxToolSize);
     bubble_size = std::clamp(bubble_size, kMinToolSize, kMaxToolSize);
+    obfuscate_block_size = std::clamp(obfuscate_block_size, kMinToolSize, kMaxToolSize);
     text_size = std::clamp(text_size, kMinToolSize, kMaxToolSize);
     current_annotation_color_index =
         Clamp_annotation_color_index(current_annotation_color_index);

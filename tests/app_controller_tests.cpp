@@ -1423,6 +1423,92 @@ TEST(app_controller, cli_annotate_parse_failure_does_not_resolve_output_path) {
     EXPECT_THAT(result.stderr_message, HasSubstr(L"--annotate:"));
 }
 
+TEST(app_controller,
+     cli_annotate_inline_obfuscates_pass_through_prepare_and_save_in_order) {
+    ControllerFixture fixture;
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop-obfuscate-stack.png";
+    options.overwrite_output = true;
+    options.annotate_value =
+        L"{\"annotations\":[{\"type\":\"brush\",\"size\":5,\"points\":[{\"x\":12,"
+        L"\"y\":18},{\"x\":24,\"y\":26},{\"x\":36,\"y\":22}]},{\"type\":"
+        L"\"obfuscate\",\"left\":10,\"top\":12,\"width\":32,\"height\":18,"
+        L"\"size\":8},{\"type\":\"line\",\"start\":{\"x\":40,\"y\":44},\"end\":"
+        L"{\"x\":78,\"y\":60},\"size\":3},{\"type\":\"obfuscate\",\"left\":34,"
+        L"\"top\":40,\"width\":28,\"height\":24,\"size\":1}]}";
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+
+    {
+        ::testing::InSequence sequence;
+        EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+            .Times(2)
+            .WillRepeatedly(Return(desktop));
+        EXPECT_CALL(fixture.annotation_preparation, Prepare_annotations(_))
+            .WillOnce([](core::AnnotationPreparationRequest const &request) {
+                EXPECT_EQ(request.annotations.size(), 4u);
+                if (request.annotations.size() != 4u) {
+                    core::AnnotationPreparationResult result{};
+                    result.status = core::AnnotationPreparationStatus::InputInvalid;
+                    result.error_message = L"unexpected annotation count";
+                    return result;
+                }
+                EXPECT_TRUE(std::holds_alternative<core::FreehandStrokeAnnotation>(
+                    request.annotations[0].data));
+                EXPECT_TRUE(std::holds_alternative<core::ObfuscateAnnotation>(
+                    request.annotations[1].data));
+                EXPECT_TRUE(std::holds_alternative<core::LineAnnotation>(
+                    request.annotations[2].data));
+                EXPECT_TRUE(std::holds_alternative<core::ObfuscateAnnotation>(
+                    request.annotations[3].data));
+
+                core::ObfuscateAnnotation const &first_obfuscate =
+                    std::get<core::ObfuscateAnnotation>(request.annotations[1].data);
+                EXPECT_EQ(first_obfuscate.bounds, (RectPx::From_ltrb(10, 12, 42, 30)));
+                EXPECT_EQ(first_obfuscate.block_size, 8);
+
+                core::ObfuscateAnnotation const &second_obfuscate =
+                    std::get<core::ObfuscateAnnotation>(request.annotations[3].data);
+                EXPECT_EQ(second_obfuscate.bounds, (RectPx::From_ltrb(34, 40, 62, 64)));
+                EXPECT_EQ(second_obfuscate.block_size, 1);
+
+                return Make_annotation_prepare_success(request.annotations);
+            });
+        EXPECT_CALL(fixture.file_system,
+                    Resolve_absolute_path(Eq(
+                        std::wstring_view{L"C:\\shots\\desktop-obfuscate-stack.png"})))
+            .WillOnce(Return(L"C:\\shots\\desktop-obfuscate-stack.png"));
+        EXPECT_CALL(
+            fixture.capture,
+            Save_capture_to_file(
+                _, Eq(std::wstring_view{L"C:\\shots\\desktop-obfuscate-stack.png"}),
+                ImageSaveFormat::Png))
+            .WillOnce([](core::CaptureSaveRequest const &request, std::wstring_view,
+                         ImageSaveFormat) {
+                EXPECT_EQ(request.source_rect_screen,
+                          (RectPx::From_ltrb(0, 0, 1920, 1080)));
+                EXPECT_EQ(request.annotations.size(), 4u);
+                if (request.annotations.size() != 4u) {
+                    return core::CaptureSaveResult{core::CaptureSaveStatus::SaveFailed,
+                                                   L"unexpected annotation count"};
+                }
+                EXPECT_TRUE(std::holds_alternative<core::FreehandStrokeAnnotation>(
+                    request.annotations[0].data));
+                EXPECT_TRUE(std::holds_alternative<core::ObfuscateAnnotation>(
+                    request.annotations[1].data));
+                EXPECT_TRUE(std::holds_alternative<core::LineAnnotation>(
+                    request.annotations[2].data));
+                EXPECT_TRUE(std::holds_alternative<core::ObfuscateAnnotation>(
+                    request.annotations[3].data));
+                return Make_capture_save_success();
+            });
+    }
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
 TEST(app_controller, cli_annotate_file_read_success_parses_and_saves_annotations) {
     ControllerFixture fixture;
     CliOptions options{};

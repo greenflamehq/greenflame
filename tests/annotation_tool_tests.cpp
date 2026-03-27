@@ -2,6 +2,7 @@
 #include "greenflame_core/ellipse_annotation_tool.h"
 #include "greenflame_core/freehand_annotation_tool.h"
 #include "greenflame_core/line_annotation_tool.h"
+#include "greenflame_core/obfuscate_annotation_tool.h"
 #include "greenflame_core/rectangle_annotation_tool.h"
 #include "greenflame_core/text_annotation_tool.h"
 #include "greenflame_core/undo_stack.h"
@@ -91,6 +92,34 @@ class RecordingAnnotationToolHost final : public IAnnotationToolHost {
         return annotation;
     }
 
+    [[nodiscard]] int32_t Current_obfuscate_block_size() const noexcept override {
+        return obfuscate_block_size;
+    }
+
+    [[nodiscard]] std::optional<Annotation>
+    Build_obfuscate_annotation(RectPx bounds) const override {
+        if (!obfuscate_build_enabled) {
+            return std::nullopt;
+        }
+
+        RectPx const normalized = bounds.Normalized();
+        int32_t const row_bytes = normalized.Width() * 4;
+        Annotation annotation{};
+        annotation.id = next_annotation_id;
+        annotation.data = ObfuscateAnnotation{
+            .bounds = normalized,
+            .block_size = obfuscate_block_size,
+            .bitmap_width_px = normalized.Width(),
+            .bitmap_height_px = normalized.Height(),
+            .bitmap_row_bytes = row_bytes,
+            .premultiplied_bgra =
+                std::vector<uint8_t>(static_cast<size_t>(row_bytes) *
+                                         static_cast<size_t>(normalized.Height()),
+                                     0xFF),
+        };
+        return annotation;
+    }
+
     void Commit_new_annotation(UndoStack &undo_stack, Annotation annotation) override {
         (void)undo_stack;
         committed_annotations.push_back(std::move(annotation));
@@ -101,7 +130,9 @@ class RecordingAnnotationToolHost final : public IAnnotationToolHost {
     uint64_t next_annotation_id = 1;
     std::optional<std::vector<PointPx>> smoothed_points_override = std::nullopt;
     bool bubble_build_enabled = true;
+    bool obfuscate_build_enabled = true;
     int32_t bubble_counter_value = 1;
+    int32_t obfuscate_block_size = 10;
     TextFontChoice bubble_font_choice = TextFontChoice::Sans;
     std::vector<Annotation> committed_annotations = {};
 };
@@ -427,6 +458,54 @@ TEST(annotation_tool, FilledEllipseTool_UsesCurrentColorAndCommit) {
         EXPECT_TRUE(committed_ellipse.filled);
         EXPECT_EQ(committed_ellipse.style.color, host.stroke_style.color);
     }
+}
+
+TEST(annotation_tool, ObfuscateTool_UsesHostBlockSizeAndCommit) {
+    RecordingAnnotationToolHost host;
+    UndoStack undo_stack;
+    ObfuscateAnnotationTool tool;
+
+    host.next_annotation_id = 41;
+    host.obfuscate_block_size = 7;
+
+    EXPECT_TRUE(tool.On_primary_press(host, {25, 35}));
+    EXPECT_TRUE(tool.On_pointer_move(host, {60, 70}));
+    ASSERT_NE(tool.Draft_annotation(host), nullptr);
+    EXPECT_EQ(tool.Draft_annotation(host)->Kind(), AnnotationKind::Obfuscate);
+    EXPECT_EQ(tool.Draft_annotation(host)->id, 41u);
+    {
+        auto const &draft_obfuscate =
+            std::get<ObfuscateAnnotation>(tool.Draft_annotation(host)->data);
+        EXPECT_EQ(draft_obfuscate.bounds, (RectPx::From_ltrb(25, 35, 61, 71)));
+        EXPECT_EQ(draft_obfuscate.block_size, 7);
+        EXPECT_TRUE(draft_obfuscate.premultiplied_bgra.empty());
+    }
+
+    EXPECT_TRUE(tool.On_primary_release(host, undo_stack));
+    EXPECT_FALSE(tool.Has_active_gesture());
+    ASSERT_EQ(host.committed_annotations.size(), 1u);
+    EXPECT_EQ(host.committed_annotations[0].Kind(), AnnotationKind::Obfuscate);
+    EXPECT_EQ(host.committed_annotations[0].id, 41u);
+    {
+        auto const &committed_obfuscate =
+            std::get<ObfuscateAnnotation>(host.committed_annotations[0].data);
+        EXPECT_EQ(committed_obfuscate.bounds, (RectPx::From_ltrb(25, 35, 61, 71)));
+        EXPECT_EQ(committed_obfuscate.block_size, 7);
+        EXPECT_FALSE(committed_obfuscate.premultiplied_bgra.empty());
+    }
+}
+
+TEST(annotation_tool, ObfuscateTool_ClickWithoutDragDoesNotCommit) {
+    RecordingAnnotationToolHost host;
+    UndoStack undo_stack;
+    ObfuscateAnnotationTool tool;
+
+    EXPECT_TRUE(tool.On_primary_press(host, {15, 20}));
+    ASSERT_NE(tool.Draft_annotation(host), nullptr);
+    EXPECT_FALSE(tool.On_primary_release(host, undo_stack));
+    EXPECT_FALSE(tool.Has_active_gesture());
+    EXPECT_EQ(tool.Draft_annotation(host), nullptr);
+    EXPECT_TRUE(host.committed_annotations.empty());
 }
 
 TEST(annotation_tool, TextTool_DescriptorAndNoGestureBehavior) {

@@ -63,6 +63,16 @@ Annotation Make_ellipse(uint64_t id, RectPx outer_bounds, int32_t width_px,
     return annotation;
 }
 
+Annotation Make_obfuscate(uint64_t id, RectPx bounds, int32_t block_size) {
+    Annotation annotation{};
+    annotation.id = id;
+    annotation.data = ObfuscateAnnotation{
+        .bounds = bounds.Normalized(),
+        .block_size = block_size,
+    };
+    return annotation;
+}
+
 class RecordingEditInteractionHost final : public IAnnotationEditInteractionHost {
   public:
     [[nodiscard]] Annotation const *
@@ -269,6 +279,45 @@ TEST(annotation_edit_interaction,
     std::optional<AnnotationEditCommandData> const command = interaction->Commit();
     ASSERT_TRUE(command.has_value());
     EXPECT_EQ(command->description, "Resize ellipse annotation");
+}
+
+TEST(annotation_edit_interaction,
+     HitTest_PrefersSelectedObfuscateHandlesAndFallsBackToBody) {
+    Annotation const obfuscate =
+        Make_obfuscate(16, RectPx::From_ltrb(40, 40, 81, 81), 4);
+    std::vector<Annotation> const annotations = {obfuscate};
+
+    EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {40, 40}),
+              (std::optional<AnnotationEditTarget>{AnnotationEditTarget{
+                  16, AnnotationEditTargetKind::RectangleTopLeftHandle}}));
+    EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {60, 60}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{16, AnnotationEditTargetKind::Body}}));
+}
+
+TEST(annotation_edit_interaction,
+     ObfuscateResizeInteraction_CommitUsesObfuscateDescription) {
+    RecordingEditInteractionHost host;
+    Annotation const original =
+        Make_obfuscate(17, RectPx::From_ltrb(40, 40, 81, 81), 4);
+    host.annotations.push_back(original);
+
+    std::unique_ptr<IAnnotationEditInteraction> interaction =
+        Create_annotation_edit_interaction(
+            AnnotationEditTarget{17, AnnotationEditTargetKind::RectangleRightHandle}, 0,
+            original, {80, 60});
+    ASSERT_NE(interaction, nullptr);
+    EXPECT_EQ(interaction->Active_handle(),
+              std::optional<AnnotationEditHandleKind>{
+                  AnnotationEditHandleKind::RectangleRight});
+
+    EXPECT_TRUE(interaction->Update(host, {95, 60}));
+    EXPECT_EQ(std::get<ObfuscateAnnotation>(host.annotations[0].data).bounds,
+              (RectPx::From_ltrb(40, 40, 96, 81)));
+
+    std::optional<AnnotationEditCommandData> const command = interaction->Commit();
+    ASSERT_TRUE(command.has_value());
+    EXPECT_EQ(command->description, "Resize obfuscate annotation");
 }
 
 TEST(annotation_edit_interaction,
