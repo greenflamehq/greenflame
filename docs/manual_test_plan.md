@@ -333,7 +333,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - A help overlay opens near the cursor.
   - It shows the current shortcut reference.
-  - All listed shortcuts remain readable without clipping; when content would overflow vertically, the layout reflows cleanly into two columns.
+  - All listed shortcuts remain readable without clipping, and the `Annotation Tools` section stays in the second column.
+  - The final `Annotation Tools` rows, including the mouse-wheel size shortcuts, remain fully visible on a 1920x1080 display.
   - The toolbar `Help` button opens help on button release and does not toggle an
     annotation tool.
   - While visible, other overlay interactions are blocked.

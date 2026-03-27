@@ -21,11 +21,16 @@ constexpr float kHelpPanelSidePaddingPxF = 32.f;
 constexpr float kHelpTitleTopPaddingPxF = 20.f;
 constexpr float kHelpSeparatorOffsetPxF = 50.f;
 constexpr float kHelpKeyColumnGapPxF = 10.f;
-constexpr float kHelpRowHeightPxF = 34.f;
+constexpr float kHelpRowHeightPxF = 32.f;
+constexpr float kHelpSectionTitleBottomGapPxF = 2.f;
 constexpr float kHelpSectionGapPxF = 8.f;
 constexpr float kHelpTextMeasureExtentPxF = 8192.f;
 constexpr float kHelpPanelBorderInsetPxF = 0.5f;
 constexpr float kHelpTwoColGapPxF = 32.f;
+constexpr float kHelpPanelVerticalMarginPxF = 24.f;
+constexpr float kHelpPanelFixedChromeHeightPxF =
+    kHelpTitleTopPaddingPxF + kHelpSeparatorOffsetPxF +
+    static_cast<float>(kRowsTopPaddingPx) + static_cast<float>(kPanelBottomPaddingPx);
 constexpr float kBackdropAlphaF =
     static_cast<float>(kOverlayBackdropAlpha) / kColorChannelMaxF;
 constexpr float kPanelFillAlphaF =
@@ -51,6 +56,91 @@ constexpr D2D1_COLOR_F kHelpShortcutColor = {244.f / kColorChannelMaxF,
 constexpr D2D1_COLOR_F kHelpBodyColor = {240.f / kColorChannelMaxF,
                                          240.f / kColorChannelMaxF,
                                          240.f / kColorChannelMaxF, 1.f};
+
+[[nodiscard]] float Calculate_section_height(
+    greenflame::core::OverlayHelpSection const &section, bool include_gap_before) {
+    if (section.entries.empty()) {
+        return 0.f;
+    }
+
+    float section_height = 0.f;
+    if (include_gap_before && section.gap_before) {
+        section_height += kHelpRowHeightPxF;
+    }
+
+    section_height += kHelpRowHeightPxF + kHelpSectionTitleBottomGapPxF;
+    for (greenflame::core::OverlayHelpEntry const &entry : section.entries) {
+        if (!entry.shortcut.empty()) {
+            section_height += kHelpRowHeightPxF;
+        }
+    }
+    section_height += kHelpSectionGapPxF;
+    return section_height;
+}
+
+[[nodiscard]] float Calculate_single_column_content_height(
+    greenflame::core::OverlayHelpContent const &content) {
+    float total_height = 0.f;
+    for (greenflame::core::OverlayHelpSection const &section : content.sections) {
+        total_height += Calculate_section_height(section, true);
+    }
+    return total_height;
+}
+
+[[nodiscard]] float Calculate_two_column_content_height(
+    greenflame::core::OverlayHelpContent const &content) {
+    float first_column_height = 0.f;
+    float second_column_height = 0.f;
+    int column_index = 0;
+
+    for (greenflame::core::OverlayHelpSection const &section : content.sections) {
+        if (section.entries.empty()) {
+            continue;
+        }
+        if (section.new_column && column_index == 0) {
+            column_index = 1;
+        }
+
+        float const section_height =
+            Calculate_section_height(section, column_index == 0);
+        if (column_index == 0) {
+            first_column_height += section_height;
+        } else {
+            second_column_height += section_height;
+        }
+    }
+
+    return std::max(first_column_height, second_column_height);
+}
+
+[[nodiscard]] bool Has_explicit_second_column(
+    greenflame::core::OverlayHelpContent const &content) {
+    for (greenflame::core::OverlayHelpSection const &section : content.sections) {
+        if (section.new_column && !section.entries.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] float Calculate_target_panel_height(
+    greenflame::core::OverlayHelpContent const &content, float default_panel_height,
+    float overlay_height) {
+    float const max_panel_height =
+        std::max(1.f, overlay_height - (2.f * kHelpPanelVerticalMarginPxF));
+    bool const prefer_two_columns = Has_explicit_second_column(content);
+    float const single_column_panel_height =
+        kHelpPanelFixedChromeHeightPxF +
+        Calculate_single_column_content_height(content);
+    if (!prefer_two_columns && single_column_panel_height <= max_panel_height) {
+        return std::max(default_panel_height, single_column_panel_height);
+    }
+
+    float const two_column_panel_height =
+        kHelpPanelFixedChromeHeightPxF + Calculate_two_column_content_height(content);
+    return std::clamp(std::max(default_panel_height, two_column_panel_height), 1.f,
+                      max_panel_height);
+}
 
 } // namespace
 
@@ -203,15 +293,16 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
     float const ov_w = ov_r - ov_l;
     float const ov_h = ov_b - ov_t;
     float const panel_w = std::max(1.f, ov_w / 2.f);
-    float const panel_h = std::max(1.f, ov_h / 2.f);
+    float const panel_h =
+        Calculate_target_panel_height(*content_, std::max(1.f, ov_h / 2.f), ov_h);
     float const panel_l = ov_l + (ov_w - panel_w) / 2.f;
     float panel_t = ov_t + static_cast<float>(kPanelTopOffsetPx);
-    float const max_panel_t = ov_b - panel_h;
-    if (panel_t > max_panel_t) {
-        panel_t = max_panel_t;
-    }
-    if (panel_t < ov_t) {
-        panel_t = ov_t;
+    float const min_panel_t = ov_t + kHelpPanelVerticalMarginPxF;
+    float const max_panel_t = ov_b - panel_h - kHelpPanelVerticalMarginPxF;
+    if (max_panel_t >= min_panel_t) {
+        panel_t = std::clamp(panel_t, min_panel_t, max_panel_t);
+    } else {
+        panel_t = ov_t + std::max(0.f, (ov_h - panel_h) / 2.f);
     }
     float const panel_r = panel_l + panel_w;
     float const panel_b = panel_t + panel_h;
@@ -293,21 +384,8 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
     float const bottom_limit = panel_b - static_cast<float>(kPanelBottomPaddingPx);
     float const available_h = bottom_limit - row_y;
 
-    float total_h = 0.f;
-    for (core::OverlayHelpSection const &section : content_->sections) {
-        if (section.entries.empty()) {
-            continue;
-        }
-        total_h += kHelpRowHeightPxF + 2.f;
-        for (core::OverlayHelpEntry const &entry : section.entries) {
-            if (!entry.shortcut.empty()) {
-                total_h += kHelpRowHeightPxF;
-            }
-        }
-        total_h += kHelpSectionGapPxF;
-    }
-
-    bool const two_col = total_h > available_h;
+    float const total_h = Calculate_single_column_content_height(*content_);
+    bool const two_col = Has_explicit_second_column(*content_) || total_h > available_h;
 
     if (!two_col) {
         float const max_key_col_w = content_w / 2.f;
@@ -328,7 +406,7 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
             }
             draw_text(dwrite_section_.Get(), section.title, desc_l, row_y,
                       content_r - desc_l, kHelpRowHeightPxF, kBorderColor);
-            row_y += kHelpRowHeightPxF + 2.f;
+            row_y += kHelpRowHeightPxF + kHelpSectionTitleBottomGapPxF;
 
             for (core::OverlayHelpEntry const &entry : section.entries) {
                 if (row_y + kHelpRowHeightPxF > bottom_limit) {
@@ -382,7 +460,7 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
             }
             draw_text(dwrite_section_.Get(), section.title, col_desc_l, row_y,
                       col_r - col_desc_l, kHelpRowHeightPxF, kBorderColor);
-            row_y += kHelpRowHeightPxF + 2.f;
+            row_y += kHelpRowHeightPxF + kHelpSectionTitleBottomGapPxF;
 
             for (core::OverlayHelpEntry const &entry : section.entries) {
                 if (row_y + kHelpRowHeightPxF > bottom_limit) {
