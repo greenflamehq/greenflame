@@ -10,6 +10,8 @@ constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
 constexpr wchar_t kStartupToggleFailedMessage[] =
     L"Failed to update 'Start with Windows' setting.";
+constexpr wchar_t kIncludeCursorToggleFailedMessage[] =
+    L"Failed to update 'Include captured cursor' setting.";
 
 [[nodiscard]] HBITMAP Create_thumbnail_from_clipboard() {
     if (OpenClipboard(nullptr) == 0) {
@@ -282,6 +284,23 @@ void GreenflameApp::On_copy_last_window_to_clipboard_requested() {
     ClipboardCopyResult const result =
         app_controller_.On_copy_last_window_to_clipboard_requested();
     Show_clipboard_result(result, config_, tray_window_);
+}
+
+bool GreenflameApp::Is_include_cursor_enabled() const { return config_.include_cursor; }
+
+bool GreenflameApp::On_set_include_cursor_enabled(bool enabled) {
+    bool const previous_value = config_.include_cursor;
+    config_.include_cursor = enabled;
+    config_.Normalize();
+    if (Save_app_config(config_)) {
+        return true;
+    }
+
+    config_.include_cursor = previous_value;
+    config_.Normalize();
+    tray_window_.Show_balloon(TrayBalloonIcon::Warning,
+                              kIncludeCursorToggleFailedMessage);
+    return false;
 }
 
 bool GreenflameApp::On_set_start_with_windows_enabled(bool enabled) {

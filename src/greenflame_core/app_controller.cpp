@@ -55,6 +55,20 @@ Resolve_padding_color(greenflame::core::AppConfig const &config,
     return config.padding_color;
 }
 
+[[nodiscard]] bool
+Resolve_include_cursor(greenflame::core::AppConfig const &config,
+                       greenflame::core::CliOptions const &cli_options) noexcept {
+    switch (cli_options.cursor_override) {
+    case greenflame::core::CliCursorOverride::UseConfig:
+        return config.include_cursor;
+    case greenflame::core::CliCursorOverride::ForceInclude:
+        return true;
+    case greenflame::core::CliCursorOverride::ForceExclude:
+        return false;
+    }
+    return config.include_cursor;
+}
+
 void Update_default_save_dir_from_path(greenflame::core::AppConfig &config,
                                        std::wstring_view full_path) {
     size_t const slash = full_path.find_last_of(L"\\/");
@@ -340,7 +354,8 @@ AppController::On_copy_window_to_clipboard_requested(HWND target_window) {
         std::optional<core::RectPx> const target_rect =
             window_inspector_.Get_window_rect(target_window);
         if (target_rect.has_value() &&
-            capture_service_.Copy_rect_to_clipboard(*target_rect)) {
+            capture_service_.Copy_rect_to_clipboard(*target_rect,
+                                                    config_.include_cursor)) {
             Store_last_capture(*target_rect, target_window);
             return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
         }
@@ -349,7 +364,7 @@ AppController::On_copy_window_to_clipboard_requested(HWND target_window) {
     std::optional<core::RectPx> const foreground_rect =
         window_inspector_.Get_foreground_window_rect(target_window);
     if (foreground_rect.has_value() &&
-        capture_service_.Copy_rect_to_clipboard(*foreground_rect)) {
+        capture_service_.Copy_rect_to_clipboard(*foreground_rect, config_.include_cursor)) {
         Store_last_capture(*foreground_rect, std::nullopt);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
@@ -359,7 +374,7 @@ AppController::On_copy_window_to_clipboard_requested(HWND target_window) {
     std::optional<core::RectPx> const fallback_rect =
         window_inspector_.Get_window_rect_under_cursor(cursor_point, nullptr);
     if (fallback_rect.has_value() &&
-        capture_service_.Copy_rect_to_clipboard(*fallback_rect)) {
+        capture_service_.Copy_rect_to_clipboard(*fallback_rect, config_.include_cursor)) {
         Store_last_capture(*fallback_rect, std::nullopt);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
@@ -382,7 +397,7 @@ ClipboardCopyResult AppController::On_copy_monitor_to_clipboard_requested() {
     }
 
     core::RectPx const rect = monitors[*index].bounds;
-    if (capture_service_.Copy_rect_to_clipboard(rect)) {
+    if (capture_service_.Copy_rect_to_clipboard(rect, config_.include_cursor)) {
         Store_last_capture(rect, std::nullopt);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
@@ -391,7 +406,7 @@ ClipboardCopyResult AppController::On_copy_monitor_to_clipboard_requested() {
 
 ClipboardCopyResult AppController::On_copy_desktop_to_clipboard_requested() {
     core::RectPx const rect = display_queries_.Get_virtual_desktop_bounds_px();
-    if (capture_service_.Copy_rect_to_clipboard(rect)) {
+    if (capture_service_.Copy_rect_to_clipboard(rect, config_.include_cursor)) {
         Store_last_capture(rect, std::nullopt);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
@@ -402,7 +417,8 @@ ClipboardCopyResult AppController::On_copy_last_region_to_clipboard_requested() 
     if (!last_capture_screen_rect_.has_value()) {
         return ClipboardCopyResult{kNoLastRegionMessage, false};
     }
-    if (capture_service_.Copy_rect_to_clipboard(*last_capture_screen_rect_)) {
+    if (capture_service_.Copy_rect_to_clipboard(*last_capture_screen_rect_,
+                                                config_.include_cursor)) {
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
     return ClipboardCopyResult{kNoLastRegionMessage, false};
@@ -425,7 +441,7 @@ ClipboardCopyResult AppController::On_copy_last_window_to_clipboard_requested() 
         last_capture_window_ = std::nullopt;
         return ClipboardCopyResult{kLastWindowClosedMessage, false};
     }
-    if (capture_service_.Copy_rect_to_clipboard(*rect)) {
+    if (capture_service_.Copy_rect_to_clipboard(*rect, config_.include_cursor)) {
         Store_last_capture(*rect, hwnd);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
@@ -471,6 +487,7 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
         {L"Delete", L"Delete selected annotation"},
         {L"Ctrl + Z", L"Undo last region or annotation change"},
         {L"Ctrl + Shift + Z", L"Redo last undone change"},
+        {L"Ctrl + K", L"Show or hide the captured cursor in this screenshot"},
     };
     content.sections.push_back(std::move(edit));
 
@@ -516,6 +533,7 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
     bool const has_padding = cli_options.padding_px.has_value();
     core::InsetsPx const padding_px = cli_options.padding_px.value_or(core::InsetsPx{});
     COLORREF const padding_color = Resolve_padding_color(config_, cli_options);
+    bool const include_cursor = Resolve_include_cursor(config_, cli_options);
     core::WindowCaptureBackend const requested_window_capture_backend =
         cli_options.window_capture_backend;
 
@@ -858,6 +876,7 @@ CliResult AppController::Run_cli_capture_mode(core::CliOptions const &cli_option
         save_request.source_window = captured_window.value_or(nullptr);
         save_request.padding_px = padding_px;
         save_request.fill_color = padding_color;
+        save_request.include_cursor = include_cursor;
         save_request.preserve_source_extent = has_padding;
         save_request.annotations = prepared_annotations;
         return save_request;

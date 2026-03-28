@@ -25,10 +25,11 @@ enum CommandId : int {
     CopyDesktop = 4,
     CopyLastRegion = 5,
     CopyLastWindow = 6,
-    StartWithWindows = 7,
-    OpenConfig = 8,
-    About = 9,
-    Exit = 10,
+    IncludeCursor = 7,
+    StartWithWindows = 8,
+    OpenConfig = 9,
+    About = 10,
+    Exit = 11,
 };
 
 enum HotkeyId : int {
@@ -51,6 +52,7 @@ constexpr wchar_t kCaptureFullScreenMenuText[] =
 constexpr wchar_t kCaptureLastRegionMenuText[] = L"Capture last region\tAlt + Prt Scrn";
 constexpr wchar_t kCaptureLastWindowMenuText[] =
     L"Capture last window\tCtrl + Alt + Prt Scrn";
+constexpr wchar_t kIncludeCursorMenuText[] = L"Include captured cursor";
 constexpr wchar_t kStartWithWindowsMenuText[] = L"Start with Windows";
 constexpr wchar_t kOpenConfigMenuText[] = L"Open config file...";
 constexpr wchar_t kAboutMenuText[] = L"About Greenflame...";
@@ -1133,6 +1135,9 @@ LRESULT TrayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
         case CopyLastWindow:
             Notify_copy_last_window_to_clipboard();
             break;
+        case IncludeCursor:
+            Notify_toggle_include_cursor();
+            break;
         case StartWithWindows:
             Notify_toggle_start_with_windows();
             break;
@@ -1250,6 +1255,11 @@ void TrayWindow::Show_context_menu() {
     AppendMenuW(menu, MF_STRING, CopyLastRegion, kCaptureLastRegionMenuText);
     AppendMenuW(menu, MF_STRING, CopyLastWindow, kCaptureLastWindowMenuText);
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    UINT include_cursor_flags = MF_STRING;
+    if (events_ != nullptr && events_->Is_include_cursor_enabled()) {
+        include_cursor_flags |= MF_CHECKED;
+    }
+    AppendMenuW(menu, include_cursor_flags, IncludeCursor, kIncludeCursorMenuText);
     UINT start_with_windows_flags = MF_STRING;
     if (start_with_windows_enabled_) {
         start_with_windows_flags |= MF_CHECKED;
@@ -1324,6 +1334,14 @@ void TrayWindow::Notify_copy_last_window_to_clipboard() {
     if (events_) {
         events_->On_copy_last_window_to_clipboard_requested();
     }
+}
+
+void TrayWindow::Notify_toggle_include_cursor() {
+    if (!events_) {
+        return;
+    }
+    bool const desired_state = !events_->Is_include_cursor_enabled();
+    (void)events_->On_set_include_cursor_enabled(desired_state);
 }
 
 void TrayWindow::Notify_toggle_start_with_windows() {

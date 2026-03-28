@@ -98,7 +98,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Dismiss the menu without choosing an action.
 - Expected:
   - Left-click starts interactive capture.
-  - The right-click menu includes region, monitor, window, desktop, last-region, last-window, start-with-Windows, `Open config file...`, About, and Exit actions.
+  - The right-click menu includes region, monitor, window, desktop, last-region, last-window, `Include captured cursor`, start-with-Windows, `Open config file...`, About, and Exit actions.
   - Dismissing the menu does not trigger a capture.
 
 ### GF-MAN-TRAY-002 - Tray Current-Window Capture Does Not Capture Tray UI
@@ -199,6 +199,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - `Shift + Prt Scrn` copies the current monitor.
   - `Ctrl + Shift + Prt Scrn` copies the full virtual desktop.
   - Each action works without showing the interactive overlay.
+  - Each action honors the persisted `capture.include_cursor` setting.
 
 ### GF-MAN-HK-003 - Last Region Recapture
 
@@ -333,6 +334,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - A help overlay opens near the cursor.
   - It shows the current shortcut reference.
+  - The shortcut list includes `Ctrl + K` for the captured-cursor toggle.
   - All listed shortcuts remain readable without clipping, and the `Annotation Tools` section stays in the second column.
   - The final `Annotation Tools` rows, including the mouse-wheel size shortcuts, remain fully visible on a 1920x1080 display.
   - The toolbar `Help` button opens help on button release and does not toggle an
@@ -352,11 +354,13 @@ unless a real end-to-end bug escapes into the Win32 shell:
   3. Toggle a few tools on and off.
 - Expected:
   - The toolbar stays attached to the selection and remains visible on-screen.
-  - The `Help` button stays last on the right and is visually separated from the
-    annotation tools by one reserved button slot of space.
+  - The toolbar layout is `[annotation tools][spacer][cursor][spacer][help]`.
+  - The `Help` button stays last on the right.
   - Hovering shows an opaque tooltip for each button.
   - Tool button tooltips include the tool name followed by its hotkey in
     parentheses, such as `Brush (B)`.
+  - The captured-cursor button uses a stable cursor glyph in both states, with
+    tooltip text that reflects the action (`Show...` or `Hide...`).
   - The help button tooltip includes the help hotkey in parentheses.
   - Hovering any visible toolbar button shows the standard pointer cursor.
   - Button state tracks the active tool correctly.
@@ -383,6 +387,76 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The hotkey path opens the same warning dialog.
   - Accepting the warning keeps Obfuscate armed.
   - After acceptance is persisted, later Obfuscate activations do not show the warning again.
+
+## Captured Cursor
+
+### GF-MAN-CURSOR-001 - Overlay Toggle, Output Layering, And Persistence
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Set `capture.include_cursor=false` in the config and relaunch Greenflame.
+  2. Place the live pointer somewhere obvious inside a new interactive selection.
+  3. Press `Ctrl + K`, then press it again.
+  4. Use the toolbar cursor button to turn the captured cursor on.
+  5. Draw one annotation over the captured cursor and save or copy the result.
+  6. Start a new interactive capture.
+  7. Exit and relaunch Greenflame, then start another interactive capture.
+- Expected:
+  - `Ctrl + K` and the toolbar button toggle the captured cursor for the current screenshot.
+  - If the capture started with the cursor hidden, toggling it on during the same capture still reveals the cursor sampled at capture time.
+  - When shown, the captured cursor appears inside the frozen screenshot, not as a live overlay primitive.
+  - Saved and copied output shows the captured cursor below annotations.
+  - The captured cursor cannot be selected, moved, resized, or hit-tested as an annotation.
+  - The toggled state persists into the next capture and after app restart.
+
+### GF-MAN-CURSOR-002 - Direct Clipboard Captures Honor Persisted Cursor Setting
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Set `capture.include_cursor=true` in the config and relaunch Greenflame.
+  2. Trigger `Ctrl + Prt Scrn`, `Shift + Prt Scrn`, and `Ctrl + Shift + Prt Scrn`, pasting each result into Paint.
+  3. Set `capture.include_cursor=false` in the config and relaunch Greenflame.
+  4. Repeat the same three hotkeys and paste each result again.
+- Expected:
+  - With `capture.include_cursor=true`, each direct clipboard capture includes the captured cursor when it falls inside the captured area.
+  - With `capture.include_cursor=false`, the same capture paths omit the captured cursor.
+  - None of these paths opens the overlay.
+
+### GF-MAN-CURSOR-002A - Tray Menu Cursor Toggle Persists Config Default
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Set `capture.include_cursor=false` in the config and relaunch Greenflame.
+  2. Right-click the tray icon and confirm `Include captured cursor` is unchecked.
+  3. Click `Include captured cursor`.
+  4. Reopen the tray menu and confirm the item is now checked.
+  5. Trigger a direct clipboard capture such as `Ctrl + Prt Scrn` and verify the cursor behavior.
+  6. Exit and relaunch Greenflame, reopen the tray menu, and verify the item remains checked.
+  7. Toggle the item off again and repeat the same verification.
+- Expected:
+  - The tray item checkmark matches the current persisted `capture.include_cursor` value.
+  - Toggling the tray item updates the config-backed default without manually editing the config file.
+  - Direct clipboard captures honor the new persisted value immediately.
+  - The value remains stable across app restart.
+
+### GF-MAN-CURSOR-003 - Cursor Placement Across Types And Edges
+
+- Priority: `P2`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Capture a screenshot while showing the normal arrow cursor near each edge of the selection so the cursor is fully inside, partially intersecting, and fully outside the selected output.
+  2. Repeat with an I-beam cursor over editable text.
+  3. Repeat with resize, crosshair, busy/wait, and one custom application cursor if available.
+  4. On `ENV-B`, repeat at least one case across a mixed-DPI monitor boundary and once with negative virtual-desktop coordinates involved.
+- Expected:
+  - Fully visible cursors are placed at the correct hotspot-aligned location.
+  - Partially intersecting cursors are clipped normally instead of jumping or disappearing.
+  - Fully out-of-bounds cursors are omitted from the output.
+  - Placement stays stable across cursor types, including I-beam.
+  - Record any hotspot offset regression immediately, especially for I-beam placement.
 
 ## Annotations
 
@@ -1038,6 +1112,23 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Each file is created at the requested path.
   - The output images visually match the requested region, monitor, or full virtual desktop.
 
+### GF-MAN-CLI-002A - CLI Captured Cursor Config And Overrides
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Set `capture.include_cursor=false` in the config.
+  2. Run `greenflame.exe --desktop --output <file> --overwrite`.
+  3. Run `greenflame.exe --desktop --cursor --output <file> --overwrite`.
+  4. Set `capture.include_cursor=true` in the config.
+  5. Run `greenflame.exe --desktop --output <file> --overwrite`.
+  6. Run `greenflame.exe --desktop --no-cursor --output <file> --overwrite`.
+- Expected:
+  - Live CLI captures use the persisted config value by default.
+  - `--cursor` forces inclusion for that invocation only.
+  - `--no-cursor` forces exclusion for that invocation only.
+  - Neither CLI override changes the saved config file.
+
 ### GF-MAN-CLI-003 - Window Capture Success And Common Errors
 
 - Priority: `P1`
@@ -1214,12 +1305,15 @@ unless a real end-to-end bug escapes into the Win32 shell:
   1. Run `greenflame.exe --input "%TEMP%\greenflame-source.png"`.
   2. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --annotate "{\"annotations\":[]}"`.
   3. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --annotate "{\"coordinate_space\":\"global\",\"annotations\":[]}" --overwrite`.
-  4. After each command, inspect the tray area.
+  4. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --annotate "{\"annotations\":[]}" --overwrite --cursor`.
+  5. Run `greenflame.exe --input "%TEMP%\greenflame-source.png" --annotate "{\"annotations\":[]}" --overwrite --no-cursor`.
+  6. After each command, inspect the tray area.
 - Expected:
   - Step 1 fails validation because `--annotate` is required.
   - Step 2 fails validation because either `--output` or `--overwrite` is required.
   - Step 3 fails with exit code `14` because `global` coordinates are not supported with `--input`.
-  - None of the three commands starts or leaves behind a tray instance.
+  - Steps 4 and 5 fail validation because `--input` is incompatible with `--cursor` and `--no-cursor`.
+  - None of the five commands starts or leaves behind a tray instance.
 
 ### GF-MAN-CLI-013 - `--input` In-Place Overwrite And Explicit Output
 

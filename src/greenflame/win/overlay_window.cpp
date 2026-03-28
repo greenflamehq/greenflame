@@ -40,6 +40,7 @@ constexpr int kObfuscateToolGlyphResourceId = 111;
 constexpr int kHelpToolGlyphResourceId = 112;
 constexpr int kTextToolGlyphResourceId = 113;
 constexpr int kBubbleToolGlyphResourceId = 114;
+constexpr int kCursorToolGlyphResourceId = 115;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 constexpr UINT_PTR kCaretBlinkTimerId = 2;
 constexpr UINT_PTR kHighlighterStraightenTimerId = 3;
@@ -65,7 +66,7 @@ struct ToolbarGlyphResourceSpec final {
     int resource_id = 0;
 };
 
-constexpr std::array<ToolbarGlyphResourceSpec, 12> kToolbarGlyphResourceSpecs = {{
+constexpr std::array<ToolbarGlyphResourceSpec, 13> kToolbarGlyphResourceSpecs = {{
     {greenflame::OverlayToolbarGlyphId::Brush, kBrushToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Highlighter, kHighlighterToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Line, kLineToolGlyphResourceId},
@@ -79,6 +80,7 @@ constexpr std::array<ToolbarGlyphResourceSpec, 12> kToolbarGlyphResourceSpecs = 
     {greenflame::OverlayToolbarGlyphId::Obfuscate, kObfuscateToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Text, kTextToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Bubble, kBubbleToolGlyphResourceId},
+    {greenflame::OverlayToolbarGlyphId::Cursor, kCursorToolGlyphResourceId},
     {greenflame::OverlayToolbarGlyphId::Help, kHelpToolGlyphResourceId},
 }};
 
@@ -566,7 +568,10 @@ Build_preview_obfuscate_annotation(
 namespace greenflame {
 
 struct OverlayWindow::OverlayResources {
-    GdiCaptureResult capture = {};
+    GdiCaptureResult base_capture = {};
+    GdiCaptureResult display_capture = {};
+    std::optional<CapturedCursorSnapshot> captured_cursor = std::nullopt;
+    core::PointPx capture_origin_px = {};
     std::array<std::shared_ptr<OverlayButtonGlyph const>,
                static_cast<size_t>(OverlayToolbarGlyphId::Count)>
         toolbar_glyphs = {};
@@ -578,7 +583,7 @@ struct OverlayWindow::OverlayResources {
     OverlayResources &operator=(OverlayResources const &) = delete;
 
     [[nodiscard]] bool Initialize_for_capture(HINSTANCE hinstance) {
-        if (!capture.Is_valid()) {
+        if (!base_capture.Is_valid() || !display_capture.Is_valid()) {
             return false;
         }
         for (ToolbarGlyphResourceSpec const &spec : kToolbarGlyphResourceSpecs) {
@@ -601,7 +606,10 @@ struct OverlayWindow::OverlayResources {
     }
 
     void Reset() noexcept {
-        capture.Free();
+        base_capture.Free();
+        display_capture.Free();
+        captured_cursor.reset();
+        capture_origin_px = {};
         for (auto &glyph : toolbar_glyphs) {
             glyph.reset();
         }
@@ -616,7 +624,7 @@ struct OverlayWindow::ObfuscateSourceProvider final
         core::RectPx bounds,
         std::span<const core::Annotation> lower_annotations) override {
         if (owner_ == nullptr || owner_->resources_ == nullptr ||
-            !owner_->resources_->capture.Is_valid()) {
+            !owner_->resources_->display_capture.Is_valid()) {
             return std::nullopt;
         }
 
@@ -626,7 +634,7 @@ struct OverlayWindow::ObfuscateSourceProvider final
         }
 
         GdiCaptureResult cropped{};
-        if (!Crop_capture(owner_->resources_->capture, normalized_bounds.left,
+        if (!Crop_capture(owner_->resources_->display_capture, normalized_bounds.left,
                           normalized_bounds.top, normalized_bounds.Width(),
                           normalized_bounds.Height(), cropped)) {
             return std::nullopt;
@@ -677,6 +685,91 @@ void OverlayWindow::Set_hotkey_help_content(
 
 void OverlayWindow::Set_testing_toolbar(bool enable) noexcept {
     testing_toolbar_ = enable;
+}
+
+bool OverlayWindow::Is_captured_cursor_visible() const noexcept {
+    return config_ != nullptr && config_->include_cursor;
+}
+
+bool OverlayWindow::Current_capture_has_captured_cursor() const noexcept {
+    return resources_ != nullptr && resources_->captured_cursor.has_value() &&
+           resources_->captured_cursor->Is_valid();
+}
+
+std::wstring OverlayWindow::Build_captured_cursor_tooltip() const {
+    std::wstring tooltip = Is_captured_cursor_visible()
+                               ? L"Hide captured cursor (Ctrl+K)"
+                               : L"Show captured cursor (Ctrl+K)";
+    if (!Current_capture_has_captured_cursor()) {
+        tooltip += L" - no captured cursor in this image";
+    }
+    return tooltip;
+}
+
+bool OverlayWindow::Rebuild_display_capture() {
+    if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
+        return false;
+    }
+
+    int const w = resources_->base_capture.width;
+    int const h = resources_->base_capture.height;
+
+    // Reuse the existing allocation when dimensions match to avoid a large DIB
+    // alloc/free cycle on every cursor toggle.
+    if (resources_->display_capture.Is_valid() &&
+        resources_->display_capture.width == w &&
+        resources_->display_capture.height == h) {
+        if (!Blit_capture(resources_->base_capture, 0, 0, w, h,
+                          resources_->display_capture, 0, 0)) {
+            resources_->display_capture.Free();
+            return false;
+        }
+    } else {
+        resources_->display_capture.Free();
+        if (!Crop_capture(resources_->base_capture, 0, 0, w, h,
+                          resources_->display_capture)) {
+            return false;
+        }
+    }
+
+    if (Is_captured_cursor_visible() && Current_capture_has_captured_cursor() &&
+        !Composite_cursor_snapshot(*resources_->captured_cursor,
+                                   resources_->capture_origin_px,
+                                   resources_->display_capture)) {
+        resources_->display_capture.Free();
+        return false;
+    }
+
+    return true;
+}
+
+void OverlayWindow::Toggle_captured_cursor_visibility() {
+    if (config_ == nullptr) {
+        return;
+    }
+
+    bool const previous_value = config_->include_cursor;
+    config_->include_cursor = !previous_value;
+    config_->Normalize();
+    if (!Rebuild_display_capture()) {
+        config_->include_cursor = previous_value;
+        config_->Normalize();
+        return;
+    }
+
+    (void)Save_app_config(*config_);
+    Rebuild_toolbar_buttons();
+    if (d2d_resources_ != nullptr) {
+        if (!d2d_resources_->Upload_screenshot(resources_->display_capture)) {
+            Handle_device_loss();
+            return;
+        }
+        d2d_resources_->Invalidate_annotations();
+    }
+    (void)Refresh_hover_handle();
+    (void)Update_toolbar_hover_states(Get_client_cursor_pos_px(hwnd_));
+    Refresh_cursor();
+    InvalidateRect(hwnd_, nullptr, FALSE);
 }
 
 void OverlayWindow::Show_help_overlay_at_cursor() {
@@ -876,8 +969,8 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
         return OverlayToolbarGlyphId::None;
     };
 
-    size_t const spacer_count = views.empty() ? 0u : 1u;
-    size_t const trailing_button_count = 1u; // Help button.
+    size_t const spacer_count = views.empty() ? 1u : 2u;
+    size_t const trailing_button_count = 2u;
     std::vector<ToolbarLayoutItem> layout_items;
     layout_items.reserve(views.size() + spacer_count + trailing_button_count);
     for (auto const &view : views) {
@@ -894,6 +987,17 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
     if (!views.empty()) {
         layout_items.push_back(ToolbarLayoutItem{ToolbarLayoutItemKind::Spacer});
     }
+    {
+        ToolbarButtonModel cursor_model{};
+        cursor_model.action = ToolbarButtonAction::ToggleCapturedCursor;
+        cursor_model.glyph = OverlayToolbarGlyphId::Cursor;
+        cursor_model.tooltip = Build_captured_cursor_tooltip();
+        cursor_model.label = L"K";
+        cursor_model.active = Is_captured_cursor_visible();
+        layout_items.push_back(
+            ToolbarLayoutItem{ToolbarLayoutItemKind::Button, std::move(cursor_model)});
+    }
+    layout_items.push_back(ToolbarLayoutItem{ToolbarLayoutItemKind::Spacer});
     {
         ToolbarButtonModel help_model{};
         help_model.action = ToolbarButtonAction::ShowHelp;
@@ -964,16 +1068,26 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     text_layout_engine_.reset();
 
     core::RectPx const bounds = Get_virtual_desktop_bounds_px();
+    if (!Capture_virtual_desktop(resources_->base_capture)) {
+        return false;
+    }
+    resources_->capture_origin_px = {bounds.left, bounds.top};
+    CapturedCursorSnapshot captured_cursor = {};
+    if (Capture_cursor_snapshot(captured_cursor)) {
+        resources_->captured_cursor = std::move(captured_cursor);
+    } else {
+        resources_->captured_cursor.reset();
+    }
+
     HWND const hwnd = CreateWindowExW(
         WS_EX_TOPMOST, kOverlayWindowClass, L"", WS_POPUP, bounds.left, bounds.top,
         bounds.Width(), bounds.Height(), nullptr, nullptr, hinstance_, this);
     if (!hwnd) {
+        resources_->Reset();
         hinstance_ = nullptr;
         return false;
     }
-
-    if (!Capture_virtual_desktop(resources_->capture) ||
-        !resources_->Initialize_for_capture(hinstance_)) {
+    if (!Rebuild_display_capture() || !resources_->Initialize_for_capture(hinstance_)) {
         DestroyWindow(hwnd);
         return false;
     }
@@ -981,12 +1095,12 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     // Initialize D2D render pipeline.
     d2d_resources_ = std::make_unique<D2DOverlayResources>();
     if (!d2d_resources_->Initialize_factory() ||
-        !d2d_resources_->Create_hwnd_rt(hwnd, resources_->capture.width,
-                                        resources_->capture.height) ||
-        !d2d_resources_->Upload_screenshot(resources_->capture) ||
+        !d2d_resources_->Create_hwnd_rt(hwnd, resources_->display_capture.width,
+                                        resources_->display_capture.height) ||
+        !d2d_resources_->Upload_screenshot(resources_->display_capture) ||
         !d2d_resources_->Create_shared_resources() ||
-        !d2d_resources_->Create_cache_targets(resources_->capture.width,
-                                              resources_->capture.height)) {
+        !d2d_resources_->Create_cache_targets(resources_->display_capture.width,
+                                              resources_->display_capture.height)) {
         d2d_resources_.reset();
     } else {
         auto const glyphs = resources_->Glyph_pointers();
@@ -1802,6 +1916,12 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
     if (hotkey_help_overlay_.Is_visible()) {
         return 0;
     }
+    if (eff_ctrl && wparam == L'K') {
+        if (!is_repeat) {
+            Toggle_captured_cursor_visibility();
+        }
+        return 0;
+    }
     if (eff_ctrl && wparam == L'Z') {
         if (eff_shift) {
             controller_.Redo();
@@ -1944,7 +2064,7 @@ LRESULT OverlayWindow::On_char(WPARAM wparam) {
 }
 
 LRESULT OverlayWindow::On_l_button_down() {
-    if (!resources_->capture.Is_valid()) {
+    if (resources_ == nullptr || !resources_->display_capture.Is_valid()) {
         return 0;
     }
     bool const had_text_edit = controller_.Has_active_text_edit();
@@ -2301,6 +2421,9 @@ LRESULT OverlayWindow::On_l_button_up() {
                     Clear_transient_center_label(false);
                     Apply_action(action);
                     (void)Maybe_show_obfuscate_warning();
+                } else if (btn.action == ToolbarButtonAction::ToggleCapturedCursor) {
+                    Toggle_captured_cursor_visibility();
+                    return 0;
                 } else if (btn.action == ToolbarButtonAction::ShowHelp) {
                     Show_help_overlay_at_cursor();
                 }
@@ -2376,7 +2499,7 @@ LRESULT OverlayWindow::On_l_button_up() {
 }
 
 LRESULT OverlayWindow::On_r_button_down() {
-    if (!resources_->capture.Is_valid()) {
+    if (resources_ == nullptr || !resources_->display_capture.Is_valid()) {
         return 0;
     }
     if (obfuscate_warning_dialog_.Is_visible()) {
@@ -2573,7 +2696,7 @@ core::RectPx OverlayWindow::Selection_screen_rect() const {
 }
 
 void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
-    if (!resources_->capture.Is_valid()) {
+    if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
         return;
     }
     core::RectPx const &selection = controller_.State().final_selection;
@@ -2581,9 +2704,8 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
         return;
     }
 
-    GdiCaptureResult cropped;
-    if (!Crop_capture(resources_->capture, selection.left, selection.top,
-                      selection.Width(), selection.Height(), cropped)) {
+    GdiCaptureResult cropped{};
+    if (!Build_selection_capture(cropped)) {
         Destroy();
         return;
     }
@@ -2641,7 +2763,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
 }
 
 void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
-    if (!resources_->capture.Is_valid()) {
+    if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
         return;
     }
     core::RectPx const &selection = controller_.State().final_selection;
@@ -2649,9 +2771,8 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         return;
     }
 
-    GdiCaptureResult cropped;
-    if (!Crop_capture(resources_->capture, selection.left, selection.top,
-                      selection.Width(), selection.Height(), cropped)) {
+    GdiCaptureResult cropped{};
+    if (!Build_selection_capture(cropped)) {
         Destroy();
         return;
     }
@@ -2740,8 +2861,37 @@ void OverlayWindow::Notify_save_and_close(GdiCaptureResult &cropped,
     Destroy();
 }
 
+bool OverlayWindow::Build_selection_capture(GdiCaptureResult &out) const {
+    out.Free();
+    if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
+        return false;
+    }
+
+    core::RectPx const &selection = controller_.State().final_selection;
+    if (selection.Is_empty()) {
+        return false;
+    }
+
+    if (!Crop_capture(resources_->base_capture, selection.left, selection.top,
+                      selection.Width(), selection.Height(), out)) {
+        return false;
+    }
+
+    core::RectPx const selection_screen_rect = Selection_screen_rect();
+    if (Is_captured_cursor_visible() && Current_capture_has_captured_cursor() &&
+        !Composite_cursor_snapshot(*resources_->captured_cursor,
+                                   {selection_screen_rect.left,
+                                    selection_screen_rect.top},
+                                   out)) {
+        out.Free();
+        return false;
+    }
+
+    return true;
+}
+
 void OverlayWindow::Copy_to_clipboard_and_close() {
-    if (!resources_->capture.Is_valid()) {
+    if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
         return;
     }
     core::RectPx const &selection = controller_.State().final_selection;
@@ -2749,9 +2899,8 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
         return;
     }
 
-    GdiCaptureResult cropped;
-    if (!Crop_capture(resources_->capture, selection.left, selection.top,
-                      selection.Width(), selection.Height(), cropped)) {
+    GdiCaptureResult cropped{};
+    if (!Build_selection_capture(cropped)) {
         Destroy();
         return;
     }
@@ -2846,8 +2995,8 @@ LRESULT OverlayWindow::On_paint() {
         }
         if (!d2d_resources_->frozen_valid) {
             Rebuild_frozen_bitmap(*d2d_resources_, s.final_selection,
-                                  resources_->capture.width,
-                                  resources_->capture.height);
+                                  resources_->display_capture.width,
+                                  resources_->display_capture.height);
         }
 
         D2DPaintInput input{};
@@ -3037,8 +3186,8 @@ LRESULT OverlayWindow::On_paint() {
         input.toolbar_button_glyphs = std::span<ID2D1Bitmap *const>(btn_glyphs);
 
         bool const ok = Paint_d2d_frame(*d2d_resources_, input,
-                                        resources_->capture.width,
-                                        resources_->capture.height,
+                                        resources_->display_capture.width,
+                                        resources_->display_capture.height,
                                         Active_top_layer());
         if (!ok) {
             Handle_device_loss();
@@ -3054,15 +3203,15 @@ LRESULT OverlayWindow::On_paint() {
 }
 
 void OverlayWindow::Handle_device_loss() {
-    if (!d2d_resources_ || !resources_->capture.Is_valid()) {
+    if (!d2d_resources_ || resources_ == nullptr || !resources_->display_capture.Is_valid()) {
         return;
     }
-    int const w = resources_->capture.width;
-    int const h = resources_->capture.height;
+    int const w = resources_->display_capture.width;
+    int const h = resources_->display_capture.height;
 
     d2d_resources_->Release_device_resources();
     if (!d2d_resources_->Create_hwnd_rt(hwnd_, w, h) ||
-        !d2d_resources_->Upload_screenshot(resources_->capture) ||
+        !d2d_resources_->Upload_screenshot(resources_->display_capture) ||
         !d2d_resources_->Create_shared_resources() ||
         !d2d_resources_->Create_cache_targets(w, h)) {
         controller_.Set_text_layout_engine(nullptr);

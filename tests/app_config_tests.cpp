@@ -104,6 +104,12 @@ TEST(app_config, Defaults_DoNotAcknowledgeObfuscateRisk) {
     EXPECT_FALSE(config.obfuscate_risk_acknowledged);
 }
 
+TEST(app_config, Defaults_DoNotIncludeCapturedCursor) {
+    AppConfig const config{};
+
+    EXPECT_FALSE(config.include_cursor);
+}
+
 TEST(app_config, Normalize_ResetsInvalidCurrentTextFontChoice) {
     AppConfig config{};
     config.text_current_font = static_cast<TextFontChoice>(99);
@@ -188,6 +194,7 @@ TEST(app_config_json, Parse_AcceptsSchemaPropertyAndValidValues) {
     std::optional<AppConfig> const config = Parse_app_config_json(R"json(
 {
   "$schema": "https://example.com/greenflame.config.schema.json",
+  "capture": { "include_cursor": true },
   "tools": {
     "brush": { "size": 5 },
     "colors": { "4": "#ff00ff" },
@@ -207,6 +214,7 @@ TEST(app_config_json, Parse_AcceptsSchemaPropertyAndValidValues) {
 )json");
 
     ASSERT_TRUE(config.has_value());
+    EXPECT_TRUE(config->include_cursor);
     EXPECT_EQ(config->brush_size, 5);
     EXPECT_EQ(config->annotation_colors[4], Make_colorref(0xFF, 0x00, 0xFF));
     EXPECT_EQ(config->text_font_sans, L"Arial");
@@ -311,6 +319,27 @@ TEST(app_config_json, Serialize_WritesObfuscateRiskAcknowledgedWhenTrue) {
     EXPECT_TRUE(round_tripped->obfuscate_risk_acknowledged);
 }
 
+TEST(app_config_json, Serialize_WritesIncludeCursorWhenTrue) {
+    AppConfig config{};
+    config.include_cursor = true;
+
+    std::string const serialized = Serialize_app_config_json(config);
+    std::optional<AppConfig> const round_tripped = Parse_app_config_json(serialized);
+
+    EXPECT_NE(serialized.find(R"json("capture")json"), std::string::npos);
+    EXPECT_NE(serialized.find(R"json("include_cursor")json"), std::string::npos);
+    ASSERT_TRUE(round_tripped.has_value());
+    EXPECT_TRUE(round_tripped->include_cursor);
+}
+
+TEST(app_config_json, Serialize_OmitsIncludeCursorWhenFalse) {
+    AppConfig config{};
+
+    std::string const serialized = Serialize_app_config_json(config);
+
+    EXPECT_EQ(serialized.find(R"json("include_cursor")json"), std::string::npos);
+}
+
 TEST(app_config_json, Parse_RejectsUnknownTopLevelKey) {
     EXPECT_FALSE(Parse_app_config_json(R"json({"extra":true})json").has_value());
 }
@@ -334,6 +363,12 @@ TEST(app_config_json, Parse_RejectsNonBooleanObfuscateRiskAcknowledged) {
     EXPECT_FALSE(Parse_app_config_json(
                      R"json({"tools":{"obfuscate":{"risk_acknowledged":"yes"}}})json")
                      .has_value());
+}
+
+TEST(app_config_json, Parse_RejectsNonBooleanCaptureIncludeCursor) {
+    EXPECT_FALSE(
+        Parse_app_config_json(R"json({"capture":{"include_cursor":"yes"}})json")
+            .has_value());
 }
 
 TEST(app_config_json, Parse_RejectsColorArrays) {

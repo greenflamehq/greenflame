@@ -42,6 +42,7 @@ enum class OverlayToolbarGlyphId : uint8_t {
     Obfuscate,
     Text,
     Bubble,
+    Cursor,
     Help,
     Count,
 };

@@ -51,6 +51,7 @@ class OverlayWindow final {
   private:
     enum class ToolbarButtonAction : uint8_t {
         SelectAnnotationTool,
+        ToggleCapturedCursor,
         ShowHelp,
     };
 
@@ -98,6 +99,7 @@ class OverlayWindow final {
     void Save_directly_and_close(bool copy_saved_file_to_clipboard);
     void Save_as_and_close(bool copy_saved_file_to_clipboard);
     void Copy_to_clipboard_and_close();
+    [[nodiscard]] bool Build_selection_capture(GdiCaptureResult &out) const;
     void Notify_save_and_close(GdiCaptureResult &cropped, std::wstring_view saved_path,
                                bool file_copied_to_clipboard);
 
@@ -135,6 +137,11 @@ class OverlayWindow final {
     void Hide_obfuscate_warning();
     void Accept_obfuscate_warning();
     void Reject_obfuscate_warning();
+    void Toggle_captured_cursor_visibility();
+    [[nodiscard]] bool Is_captured_cursor_visible() const noexcept;
+    [[nodiscard]] bool Current_capture_has_captured_cursor() const noexcept;
+    [[nodiscard]] std::wstring Build_captured_cursor_tooltip() const;
+    [[nodiscard]] bool Rebuild_display_capture();
     [[nodiscard]] bool Maybe_show_obfuscate_warning();
     [[nodiscard]] IOverlayTopLayer *Active_top_layer() noexcept;
     [[nodiscard]] std::wstring_view Hovered_toolbar_tooltip_text() const noexcept;

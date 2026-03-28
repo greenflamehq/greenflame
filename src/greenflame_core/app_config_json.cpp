@@ -28,8 +28,9 @@ constexpr int32_t kMaxAnnotationColorIndex =
 constexpr int32_t kMaxHighlighterColorIndex =
     static_cast<int32_t>(kHighlighterColorSlotCount) - 1;
 
-constexpr std::array<std::string_view, 4> kRootKeys = {
-    {"$schema", "ui", "tools", "save"}};
+constexpr std::array<std::string_view, 5> kRootKeys = {
+    {"$schema", "capture", "ui", "tools", "save"}};
+constexpr std::array<std::string_view, 1> kCaptureKeys = {{"include_cursor"}};
 constexpr std::array<std::string_view, 4> kUiKeys = {
     {"show_balloons", "show_selection_size_side_labels",
      "show_selection_size_center_label", "tool_size_overlay_duration_ms"}};
@@ -784,6 +785,19 @@ void Apply_obfuscate_object(Json const &object, ParseContext &ctx) {
                         ctx.result.config.obfuscate_risk_acknowledged, ctx);
 }
 
+void Apply_capture_object(Json const &object, ParseContext &ctx) {
+    constexpr std::wstring_view k_path = L"capture";
+
+    if (object.JSON_type() != JsonClass::Object) {
+        ctx.Report_schema_error(k_path, L"Must be an object.");
+        return;
+    }
+
+    Report_unknown_keys(object, kCaptureKeys, k_path, ctx);
+    Apply_bool_property(object, "include_cursor", k_path,
+                        ctx.result.config.include_cursor, ctx);
+}
+
 void Apply_ui_object(Json const &object, ParseContext &ctx) {
     constexpr std::wstring_view k_path = L"ui";
 
@@ -1020,6 +1034,9 @@ Parse_app_config_json_with_diagnostics(std::string_view json_text) noexcept {
     if (root.has_key("$schema") && root["$schema"].JSON_type() != JsonClass::String) {
         ctx.Report_schema_error(L"$schema", L"Must be a string.");
     }
+    if (root.has_key("capture")) {
+        Apply_capture_object(root["capture"], ctx);
+    }
     if (root.has_key("ui")) {
         Apply_ui_object(root["ui"], ctx);
     }
@@ -1045,6 +1062,11 @@ std::optional<AppConfig> Parse_app_config_json(std::string_view json_text) noexc
 std::string Serialize_app_config_json(AppConfig const &config) {
     AppConfig const defaults{};
     easyjson::JSON root = easyjson::object();
+
+    if (config.include_cursor != defaults.include_cursor) {
+        root["capture"] = easyjson::object();
+        root["capture"]["include_cursor"] = config.include_cursor;
+    }
 
     if (!config.show_balloons || !config.show_selection_size_side_labels ||
         !config.show_selection_size_center_label ||

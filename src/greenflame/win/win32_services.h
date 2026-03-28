@@ -36,7 +36,8 @@ class Win32WindowInspector final : public IWindowInspector {
 
 class Win32CaptureService final : public ICaptureService {
   public:
-    [[nodiscard]] bool Copy_rect_to_clipboard(core::RectPx screen_rect) override;
+    [[nodiscard]] bool Copy_rect_to_clipboard(core::RectPx screen_rect,
+                                              bool include_cursor) override;
     [[nodiscard]] core::CaptureSaveResult
     Save_capture_to_file(core::CaptureSaveRequest const &request,
                          std::wstring_view path, core::ImageSaveFormat format) override;

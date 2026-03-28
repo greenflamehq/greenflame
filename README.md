@@ -21,6 +21,9 @@ A selection scheme inspired by [Greenshot](https://greenshot.org/)
 
 Press the **Print Screen** key, or **left-click** the tray icon to start an interactive capture. Alternatively, **right-click** the tray icon and choose a capture mode from the context menu.
 
+The tray menu also includes a persisted `Include captured cursor` toggle for the
+default live-capture behavior, next to the other app-level settings.
+
 ---
 
 ### Selecting a region
@@ -35,6 +38,9 @@ In interactive mode, the screen is captured and a region is selected:
 Once a region is selected:
 
 - **Drag the handles** on the selection to resize (hold **Alt** to disable snapping).
+- Use the **captured cursor** button on the toolbar, or press **Ctrl+K**, to show or
+  hide the cursor that was sampled from the captured screen image. This affects the
+  frozen screenshot only, not the live editing pointer.
 
 With **no annotation tool selected** (the default mode):
 
@@ -120,10 +126,14 @@ Committed text annotations can be selected, moved, and deleted, but are not re-e
 
 **Save As** supports **PNG**, **JPEG**, and **BMP**.
 
+When the captured cursor is shown, it is composited into the screenshot below all
+annotations. It is never selectable or movable.
+
 ### Other shortcuts
 
 | Shortcut | Action |
 |----------|--------|
+| **Ctrl-K** | Show or hide the captured cursor in this screenshot |
 | **Delete** | Remove the selected annotation |
 | **Ctrl-Z** | Undo the last region or annotation change |
 | **Ctrl-Shift-Z** | Redo the last undone region or annotation change |
@@ -145,6 +155,9 @@ All hotkeys use the **Print Screen** key with modifier combinations. They are al
 | **Ctrl + Alt + Prt Scrn** | Recapture the last captured window (wherever it is now) |
 
 The last two hotkeys require a previous capture in the current session. If no previous capture exists, or if the previously captured window has been closed or minimized, a warning toast is shown.
+
+These direct clipboard captures honor the persisted `capture.include_cursor` setting.
+They do not open the overlay, so there is no post-capture cursor toggle in those flows.
 
 ---
 
@@ -175,6 +188,8 @@ Optional:
 | `--padding-color <#rrggbb>` | Override the padding color for this invocation only (valid only with `--padding`) |
 | `--annotate <json\|path>` | Apply JSON-defined annotations to the saved CLI render result |
 | `--window-capture <auto\|gdi\|wgc>` | CLI-only window-capture backend for `--window` / `--window-hwnd`; defaults to `auto` |
+| `--cursor` | Include the captured cursor for this live-capture invocation only |
+| `--no-cursor` | Exclude the captured cursor for this live-capture invocation only |
 | `-f, --overwrite` | Allow replacing an existing explicit `--output` file |
 
 Both `--option=value` and `--option value` forms are supported.
@@ -189,6 +204,7 @@ greenflame.exe --monitor 2 --output "D:\shots\monitor2.png"
 greenflame.exe --monitor 2 --padding 24,12 --padding-color "#ffffff"
 greenflame.exe --window "Notepad" --output "D:\shots\note" --format jpg
 greenflame.exe --window "Notepad" --window-capture wgc --output "D:\shots\note-wgc.png"
+greenflame.exe --window "Notepad" --window-capture wgc --cursor --output "D:\shots\note-wgc-cursor.png"
 greenflame.exe --window-hwnd 0x0000000000123456 --output "D:\shots\exact-window.png"
 greenflame.exe --window "Notepad" --output "D:\shots\note.jpg" --overwrite
 greenflame.exe --window="Notepad" --output "D:\shots\note"
@@ -220,9 +236,16 @@ greenflame.exe --input "D:\shots\issue.jpg" --output "D:\shots\issue-annotated" 
 - `--input` requires either `--output` or `--overwrite`.
 - `--input --overwrite` without `--output` writes back to the input path.
 - `--input` is incompatible with live capture modes and with `--window-capture`.
+- `--input` is also incompatible with `--cursor` and `--no-cursor`.
 - Imported images support only local coordinates. `coordinate_space: "global"` fails with exit code `14`.
 - Imported images must decode fully opaque in V1. Any non-opaque alpha fails with exit code `16`.
 - See [docs/cli_annotations.md](docs/cli_annotations.md) for the full format, schema/examples, coordinate rules, and validation behavior.
+
+**Captured cursor**
+
+- Live CLI captures use `capture.include_cursor` from config by default.
+- `--cursor` and `--no-cursor` override that setting for one invocation only.
+- These overrides do not modify the saved config file.
 
 **CLI window capture backends**
 
@@ -283,6 +306,12 @@ codes are unique and not reused.
 
 Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.config\greenflame\greenflame.json`).
 
+### Capture settings (`capture.*`)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `capture.include_cursor` | `false` | Include the captured cursor by default for live captures. Interactive overlay captures can still toggle it per capture with **Ctrl+K** or the toolbar button. |
+
 ### UI settings (`ui.*`)
 
 | Key | Default | Meaning |
@@ -337,6 +366,9 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 
 ```json
 {
+  "capture": {
+    "include_cursor": true
+  },
   "ui": {
     "show_balloons": true,
     "show_selection_size_side_labels": true,

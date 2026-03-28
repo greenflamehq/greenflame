@@ -22,6 +22,8 @@ class ITrayEvents {
     virtual void On_copy_desktop_to_clipboard_requested() = 0;
     virtual void On_copy_last_region_to_clipboard_requested() = 0;
     virtual void On_copy_last_window_to_clipboard_requested() = 0;
+    [[nodiscard]] virtual bool Is_include_cursor_enabled() const = 0;
+    [[nodiscard]] virtual bool On_set_include_cursor_enabled(bool enabled) = 0;
     [[nodiscard]] virtual bool On_set_start_with_windows_enabled(bool enabled) = 0;
     virtual void On_exit_requested() = 0;
 };
@@ -61,6 +63,7 @@ class TrayWindow final {
     void Notify_copy_desktop_to_clipboard();
     void Notify_copy_last_region_to_clipboard();
     void Notify_copy_last_window_to_clipboard();
+    void Notify_toggle_include_cursor();
     void Notify_toggle_start_with_windows();
 
     ITrayEvents *events_ = nullptr;

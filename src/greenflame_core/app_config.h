@@ -26,6 +26,7 @@ struct AppConfig final {
     std::wstring filename_pattern_window = {};
     std::wstring default_save_format = {}; // "png" (default), "jpg"/"jpeg", or "bmp".
     COLORREF padding_color = Make_colorref(0x00, 0x00, 0x00);
+    bool include_cursor = false;
     int32_t brush_size = kDefaultBrushSize;
     int32_t line_size = kDefaultLineSize;
     int32_t arrow_size = kDefaultArrowSize;

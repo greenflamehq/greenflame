@@ -22,6 +22,7 @@ struct CaptureSaveRequest final {
     HWND source_window = nullptr;
     InsetsPx padding_px = {};
     COLORREF fill_color = static_cast<COLORREF>(0);
+    bool include_cursor = false;
     bool preserve_source_extent = false;
     std::vector<Annotation> annotations = {};
 
@@ -139,7 +140,8 @@ class IWindowInspector {
 class ICaptureService {
   public:
     virtual ~ICaptureService() = default;
-    [[nodiscard]] virtual bool Copy_rect_to_clipboard(core::RectPx screen_rect) = 0;
+    [[nodiscard]] virtual bool Copy_rect_to_clipboard(core::RectPx screen_rect,
+                                                      bool include_cursor) = 0;
     [[nodiscard]] virtual core::CaptureSaveResult
     Save_capture_to_file(core::CaptureSaveRequest const &request,
                          std::wstring_view path, core::ImageSaveFormat format) = 0;

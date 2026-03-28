@@ -371,6 +371,18 @@ Save_bitmap_to_file(greenflame::GdiCaptureResult const &capture, std::wstring_vi
     return Make_capture_save_result(greenflame::core::CaptureSaveStatus::Success);
 }
 
+[[nodiscard]] bool Maybe_composite_captured_cursor(
+    greenflame::core::CaptureSaveRequest const &request,
+    greenflame::CapturedCursorSnapshot const *cursor_snapshot,
+    greenflame::core::PointPx target_origin_px, greenflame::GdiCaptureResult &target) {
+    if (!request.include_cursor || cursor_snapshot == nullptr ||
+        !cursor_snapshot->Is_valid()) {
+        return true;
+    }
+    return greenflame::Composite_cursor_snapshot(*cursor_snapshot, target_origin_px,
+                                                 target);
+}
+
 [[nodiscard]] bool Has_installed_font_family(IDWriteFontCollection *font_collection,
                                              std::wstring_view family) {
     if (font_collection == nullptr || family.empty()) {
@@ -398,6 +410,7 @@ template <typename T>
 [[nodiscard]] greenflame::core::CaptureSaveResult
 Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
                                   greenflame::core::CaptureSaveRequest const &request,
+                                  greenflame::CapturedCursorSnapshot const *cursor_snapshot,
                                   std::wstring_view path,
                                   greenflame::core::ImageSaveFormat format) {
     int32_t source_width = 0;
@@ -419,6 +432,13 @@ Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
     }
 
     if (request.padding_px.Is_zero()) {
+        if (!Maybe_composite_captured_cursor(
+                request, cursor_snapshot, request.source_rect_screen.Top_left(),
+                source_capture)) {
+            return Make_capture_save_result(
+                greenflame::core::CaptureSaveStatus::SaveFailed,
+                L"Error: Failed to prepare the capture bitmap.");
+        }
         if (!greenflame::Render_annotations_into_capture(
                 source_capture, request.annotations, request.source_rect_screen)) {
             return Make_capture_save_result(
@@ -426,6 +446,14 @@ Save_exact_source_capture_to_file(greenflame::GdiCaptureResult &source_capture,
                 L"Error: Failed to compose annotations onto the capture.");
         }
         return Save_bitmap_to_file(source_capture, path, format);
+    }
+
+    if (!Maybe_composite_captured_cursor(request, cursor_snapshot,
+                                         request.source_rect_screen.Top_left(),
+                                         source_capture)) {
+        return Make_capture_save_result(
+            greenflame::core::CaptureSaveStatus::SaveFailed,
+            L"Error: Failed to prepare the capture bitmap.");
     }
 
     greenflame::GdiCaptureResult final_capture{};
@@ -781,7 +809,8 @@ Win32WindowInspector::Count_minimized_windows_by_title(std::wstring_view needle)
     return state.match_count;
 }
 
-bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect) {
+bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect,
+                                                 bool include_cursor) {
     if (screen_rect.Is_empty()) {
         return false;
     }
@@ -797,6 +826,10 @@ bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect) {
     if (!greenflame::Capture_virtual_desktop(capture)) {
         return false;
     }
+    greenflame::CapturedCursorSnapshot cursor_snapshot = {};
+    if (include_cursor) {
+        (void)greenflame::Capture_cursor_snapshot(cursor_snapshot);
+    }
 
     core::RectPx const capture_rect =
         Capture_rect_from_screen_rect(*clipped_screen, virtual_bounds);
@@ -806,6 +839,13 @@ bool Win32CaptureService::Copy_rect_to_clipboard(core::RectPx screen_rect) {
                                  capture_rect.Width(), capture_rect.Height(), cropped);
     capture.Free();
     if (!cropped_ok) {
+        return false;
+    }
+
+    if (include_cursor &&
+        !greenflame::Composite_cursor_snapshot(cursor_snapshot,
+                                               clipped_screen->Top_left(), cropped)) {
+        cropped.Free();
         return false;
     }
 
@@ -840,8 +880,13 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
             return wgc_result;
         }
 
+        greenflame::CapturedCursorSnapshot cursor_snapshot = {};
+        if (request.include_cursor) {
+            (void)greenflame::Capture_cursor_snapshot(cursor_snapshot);
+        }
         core::CaptureSaveResult const save_result =
-            Save_exact_source_capture_to_file(source_capture, request, path, format);
+            Save_exact_source_capture_to_file(source_capture, request, &cursor_snapshot,
+                                              path, format);
         source_capture.Free();
         return save_result;
     }
@@ -862,6 +907,10 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
                                             L"Error: Failed to prepare the capture "
                                             L"bitmap.");
         }
+        greenflame::CapturedCursorSnapshot cursor_snapshot = {};
+        if (request.include_cursor) {
+            (void)greenflame::Capture_cursor_snapshot(cursor_snapshot);
+        }
 
         core::RectPx const capture_rect =
             Capture_rect_from_screen_rect(*clipped_screen, virtual_bounds);
@@ -871,6 +920,14 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
             capture_rect.Height(), cropped);
         capture.Free();
         if (!cropped_ok) {
+            return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                            L"Error: Failed to prepare the capture "
+                                            L"bitmap.");
+        }
+
+        if (!Maybe_composite_captured_cursor(request, &cursor_snapshot,
+                                             clipped_screen->Top_left(), cropped)) {
+            cropped.Free();
             return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
                                             L"Error: Failed to prepare the capture "
                                             L"bitmap.");
@@ -907,6 +964,10 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
                                         L"Error: Failed to prepare the capture "
                                         L"bitmap.");
     }
+    greenflame::CapturedCursorSnapshot cursor_snapshot = {};
+    if (request.include_cursor) {
+        (void)greenflame::Capture_cursor_snapshot(cursor_snapshot);
+    }
 
     GdiCaptureResult source_canvas{};
     if (!greenflame::Create_solid_capture(source_width, source_height,
@@ -933,6 +994,15 @@ Win32CaptureService::Save_capture_to_file(core::CaptureSaveRequest const &reques
                                  source_canvas, dst_left, dst_top);
     capture.Free();
     if (!blitted_source) {
+        source_canvas.Free();
+        return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
+                                        L"Error: Failed to prepare the capture "
+                                        L"bitmap.");
+    }
+
+    if (!Maybe_composite_captured_cursor(request, &cursor_snapshot,
+                                         request.source_rect_screen.Top_left(),
+                                         source_canvas)) {
         source_canvas.Free();
         return Make_capture_save_result(core::CaptureSaveStatus::SaveFailed,
                                         L"Error: Failed to prepare the capture "
@@ -1047,7 +1117,7 @@ core::InputImageSaveResult Win32InputImageService::Save_input_image_to_file(
         }
 
         save_result = Save_exact_source_capture_to_file(source_capture, capture_request,
-                                                        temp_path, format);
+                                                        nullptr, temp_path, format);
         if (save_result.status != core::CaptureSaveStatus::Success) {
             Delete_file_if_exists(temp_path);
             source_capture.Free();
@@ -1063,7 +1133,8 @@ core::InputImageSaveResult Win32InputImageService::Save_input_image_to_file(
         }
     } else {
         save_result = Save_exact_source_capture_to_file(source_capture, capture_request,
-                                                        output_path_string, format);
+                                                        nullptr, output_path_string,
+                                                        format);
         if (save_result.status != core::CaptureSaveStatus::Success) {
             source_capture.Free();
             return Make_input_save_result(core::InputImageSaveStatus::SaveFailed,

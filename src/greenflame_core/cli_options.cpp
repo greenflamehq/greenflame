@@ -20,9 +20,11 @@ enum class CliOptionId : uint8_t {
     PaddingColor = 11,
     Annotate = 12,
     WindowCapture = 13,
-    Overwrite = 14,
+    Cursor = 14,
+    NoCursor = 15,
+    Overwrite = 16,
 #ifdef DEBUG
-    Testing12 = 15,
+    Testing12 = 17,
 #endif
 };
 
@@ -194,6 +196,26 @@ constexpr CliOptionSpec kCliOptionSpecs[] = {
         L'\0',
         CliOptionId::WindowCapture,
         CliOptionValueKind::String,
+        CliOptionGroup::Optional,
+        false,
+    },
+    {
+        L"cursor",
+        nullptr,
+        L"Include the captured cursor for this live-capture invocation only.",
+        L'\0',
+        CliOptionId::Cursor,
+        CliOptionValueKind::None,
+        CliOptionGroup::Optional,
+        false,
+    },
+    {
+        L"no-cursor",
+        nullptr,
+        L"Exclude the captured cursor for this live-capture invocation only.",
+        L'\0',
+        CliOptionId::NoCursor,
+        CliOptionValueKind::None,
         CliOptionGroup::Optional,
         false,
     },
@@ -758,6 +780,24 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         options.window_capture_backend_explicit = true;
         return CliParseResult{{}, options, true};
     }
+    case CliOptionId::Cursor:
+        if (options.cursor_override == CliCursorOverride::ForceInclude) {
+            return Make_error(L"--cursor can only be specified once.");
+        }
+        if (options.cursor_override == CliCursorOverride::ForceExclude) {
+            return Make_error(L"--cursor and --no-cursor are mutually exclusive.");
+        }
+        options.cursor_override = CliCursorOverride::ForceInclude;
+        return CliParseResult{{}, options, true};
+    case CliOptionId::NoCursor:
+        if (options.cursor_override == CliCursorOverride::ForceExclude) {
+            return Make_error(L"--no-cursor can only be specified once.");
+        }
+        if (options.cursor_override == CliCursorOverride::ForceInclude) {
+            return Make_error(L"--cursor and --no-cursor are mutually exclusive.");
+        }
+        options.cursor_override = CliCursorOverride::ForceExclude;
+        return CliParseResult{{}, options, true};
     case CliOptionId::Overwrite:
         options.overwrite_output = true;
         return CliParseResult{{}, options, true};
@@ -782,6 +822,16 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
     if (options.padding_px.has_value() && !Has_cli_render_source(options)) {
         return Make_error(L"--padding requires one render source: --region, --window, "
                           L"--window-hwnd, --monitor, --desktop, or --input.");
+    }
+    if (options.cursor_override != CliCursorOverride::UseConfig &&
+        !options.input_path.empty()) {
+        return Make_error(L"--cursor and --no-cursor cannot be used with --input.");
+    }
+    if (options.cursor_override != CliCursorOverride::UseConfig &&
+        !Is_capture_mode(options.capture_mode)) {
+        return Make_error(L"--cursor and --no-cursor require one live capture source: "
+                          L"--region, --window, --window-hwnd, --monitor, or "
+                          L"--desktop.");
     }
     if (options.annotate_value.has_value() && !Has_cli_render_source(options)) {
         return Make_error(L"--annotate requires one render source: --region, --window, "

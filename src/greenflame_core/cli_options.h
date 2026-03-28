@@ -25,6 +25,12 @@ enum class CliAction : uint8_t {
     Version = 2,
 };
 
+enum class CliCursorOverride : uint8_t {
+    UseConfig = 0,
+    ForceInclude = 1,
+    ForceExclude = 2,
+};
+
 [[nodiscard]] constexpr bool Is_capture_mode(CliCaptureMode mode) noexcept {
     return mode == CliCaptureMode::Region || mode == CliCaptureMode::Window ||
            mode == CliCaptureMode::Monitor || mode == CliCaptureMode::Desktop;
@@ -45,6 +51,7 @@ struct CliOptions final {
     CliCaptureMode capture_mode = CliCaptureMode::None;
     WindowCaptureBackend window_capture_backend = WindowCaptureBackend::Auto;
     bool window_capture_backend_explicit = false;
+    CliCursorOverride cursor_override = CliCursorOverride::UseConfig;
     bool overwrite_output = false;
 #ifdef DEBUG
     bool testing_1_2 = false;

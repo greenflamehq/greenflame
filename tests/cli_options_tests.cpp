@@ -19,6 +19,7 @@ TEST(cli_options, CLI_parser_AcceptsNoOptions) {
     EXPECT_FALSE(result.options.output_format.has_value());
     EXPECT_EQ(result.options.window_capture_backend, WindowCaptureBackend::Auto);
     EXPECT_FALSE(result.options.window_capture_backend_explicit);
+    EXPECT_EQ(result.options.cursor_override, CliCursorOverride::UseConfig);
     EXPECT_FALSE(result.options.overwrite_output);
 #ifdef DEBUG
 #endif
@@ -345,6 +346,46 @@ TEST(cli_options, CLI_parser_RejectsWindowCaptureBackendWithoutWindowMode) {
     }
 }
 
+TEST(cli_options, CLI_parser_AcceptsCursorOverrideFlags) {
+    {
+        std::vector<std::wstring> args = {L"--desktop", L"--cursor"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.cursor_override, CliCursorOverride::ForceInclude);
+    }
+    {
+        std::vector<std::wstring> args = {L"--region", L"10,20,30,40", L"--no-cursor"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.cursor_override, CliCursorOverride::ForceExclude);
+    }
+}
+
+TEST(cli_options, CLI_parser_RejectsMutuallyExclusiveCursorOverrideFlags) {
+    std::vector<std::wstring> args = {L"--desktop", L"--cursor", L"--no-cursor"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"--cursor and --no-cursor are mutually exclusive"),
+              std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsCursorOverrideWithInput) {
+    for (std::vector<std::wstring> const &args :
+         {std::vector<std::wstring>{L"--input",     L"shot.png",
+                                    L"--annotate",  L"{\"annotations\":[]}",
+                                    L"--overwrite", L"--cursor"},
+          std::vector<std::wstring>{L"--input",     L"shot.png",
+                                    L"--annotate",  L"{\"annotations\":[]}",
+                                    L"--overwrite", L"--no-cursor"}}) {
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_FALSE(result.ok);
+        EXPECT_NE(
+            result.error_message.find(L"--cursor and --no-cursor cannot be used with --input"),
+            std::wstring::npos);
+    }
+}
+
 TEST(cli_options, CLI_parser_RejectsInvalidPaddingColorAndDuplicates) {
     {
         std::vector<std::wstring> args = {L"--desktop", L"--padding", L"4",
@@ -526,6 +567,8 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"--padding-color"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--annotate"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--window-capture"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--cursor"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"--no-cursor"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--overwrite"), std::wstring::npos);
     EXPECT_EQ(help_release.find(L"--testing-1-2"), std::wstring::npos);
 

@@ -13,6 +13,48 @@ namespace {
 
 constexpr DWORD kCaptureRop = SRCCOPY | CAPTUREBLT;
 
+class ScopedIconInfo final {
+  public:
+    ScopedIconInfo() = default;
+    ScopedIconInfo(ScopedIconInfo const &) = delete;
+    ScopedIconInfo &operator=(ScopedIconInfo const &) = delete;
+    ~ScopedIconInfo() {
+        if (info_.hbmColor != nullptr) {
+            DeleteObject(info_.hbmColor);
+        }
+        if (info_.hbmMask != nullptr) {
+            DeleteObject(info_.hbmMask);
+        }
+    }
+
+    [[nodiscard]] ICONINFO *Get() noexcept { return &info_; }
+    [[nodiscard]] ICONINFO const &Value() const noexcept { return info_; }
+
+  private:
+    ICONINFO info_ = {};
+};
+
+[[nodiscard]] bool Try_get_bitmap_dimensions(HBITMAP bitmap, int &width,
+                                             int &height) noexcept {
+    width = 0;
+    height = 0;
+    if (bitmap == nullptr) {
+        return false;
+    }
+
+    BITMAP info = {};
+    if (GetObjectW(bitmap, sizeof(info), &info) != sizeof(info)) {
+        return false;
+    }
+    if (info.bmWidth <= 0 || info.bmHeight <= 0) {
+        return false;
+    }
+
+    width = info.bmWidth;
+    height = info.bmHeight;
+    return true;
+}
+
 } // namespace
 
 void Fill_bmi32_top_down(BITMAPINFOHEADER &bmi, int width, int height) {
@@ -34,6 +76,43 @@ void GdiCaptureResult::Free() noexcept {
     }
     width = 0;
     height = 0;
+}
+
+CapturedCursorSnapshot::~CapturedCursorSnapshot() { Free(); }
+
+CapturedCursorSnapshot::CapturedCursorSnapshot(CapturedCursorSnapshot &&other) noexcept {
+    *this = std::move(other);
+}
+
+CapturedCursorSnapshot &
+CapturedCursorSnapshot::operator=(CapturedCursorSnapshot &&other) noexcept {
+    if (this == &other) {
+        return *this;
+    }
+
+    Free();
+    cursor = other.cursor;
+    other.cursor = nullptr;
+    image_width = other.image_width;
+    image_height = other.image_height;
+    other.image_width = 0;
+    other.image_height = 0;
+    hotspot_screen_px = other.hotspot_screen_px;
+    hotspot_offset_px = other.hotspot_offset_px;
+    other.hotspot_screen_px = {};
+    other.hotspot_offset_px = {};
+    return *this;
+}
+
+void CapturedCursorSnapshot::Free() noexcept {
+    if (cursor != nullptr) {
+        DestroyIcon(cursor);
+        cursor = nullptr;
+    }
+    image_width = 0;
+    image_height = 0;
+    hotspot_screen_px = {};
+    hotspot_offset_px = {};
 }
 
 bool Capture_virtual_desktop(GdiCaptureResult &out) {
@@ -76,6 +155,58 @@ bool Capture_virtual_desktop(GdiCaptureResult &out) {
         DeleteObject(dib);
     }
     return ok;
+}
+
+bool Capture_cursor_snapshot(CapturedCursorSnapshot &out) {
+    out.Free();
+
+    CURSORINFO cursor_info = {};
+    cursor_info.cbSize = sizeof(cursor_info);
+    if (GetCursorInfo(&cursor_info) == 0 ||
+        (cursor_info.flags & CURSOR_SHOWING) == 0 || cursor_info.hCursor == nullptr) {
+        return false;
+    }
+
+    HCURSOR const copied_cursor = CopyIcon(cursor_info.hCursor);
+    if (copied_cursor == nullptr) {
+        return false;
+    }
+
+    ScopedIconInfo icon_info = {};
+    if (GetIconInfo(copied_cursor, icon_info.Get()) == 0) {
+        DestroyIcon(copied_cursor);
+        return false;
+    }
+
+    int width = 0;
+    int height = 0;
+    bool have_size = false;
+    if (icon_info.Value().hbmColor != nullptr) {
+        have_size =
+            Try_get_bitmap_dimensions(icon_info.Value().hbmColor, width, height);
+    } else if (icon_info.Value().hbmMask != nullptr) {
+        int mask_width = 0;
+        int mask_height = 0;
+        have_size =
+            Try_get_bitmap_dimensions(icon_info.Value().hbmMask, mask_width, mask_height) &&
+            mask_height >= 2 && (mask_height % 2) == 0;
+        if (have_size) {
+            width = mask_width;
+            height = mask_height / 2;
+        }
+    }
+    if (!have_size || width <= 0 || height <= 0) {
+        DestroyIcon(copied_cursor);
+        return false;
+    }
+
+    out.cursor = copied_cursor;
+    out.image_width = width;
+    out.image_height = height;
+    out.hotspot_screen_px = {cursor_info.ptScreenPos.x, cursor_info.ptScreenPos.y};
+    out.hotspot_offset_px = {static_cast<int32_t>(icon_info.Value().xHotspot),
+                             static_cast<int32_t>(icon_info.Value().yHotspot)};
+    return true;
 }
 
 bool Save_capture_to_bmp(GdiCaptureResult const &capture, wchar_t const *path) {
@@ -313,6 +444,58 @@ bool Copy_capture_to_clipboard(GdiCaptureResult const &capture, HWND owner_windo
         GlobalFree(memory);
     }
     return copied_to_clipboard;
+}
+
+bool Composite_cursor_snapshot(CapturedCursorSnapshot const &cursor_snapshot,
+                               core::PointPx target_origin_px,
+                               GdiCaptureResult &target) {
+    if (!cursor_snapshot.Is_valid() || !target.Is_valid()) {
+        return true;
+    }
+
+    int64_t const draw_left64 = static_cast<int64_t>(cursor_snapshot.hotspot_screen_px.x) -
+                                cursor_snapshot.hotspot_offset_px.x -
+                                target_origin_px.x;
+    int64_t const draw_top64 = static_cast<int64_t>(cursor_snapshot.hotspot_screen_px.y) -
+                               cursor_snapshot.hotspot_offset_px.y -
+                               target_origin_px.y;
+    if (draw_left64 < static_cast<int64_t>(INT32_MIN) ||
+        draw_left64 > static_cast<int64_t>(INT32_MAX) ||
+        draw_top64 < static_cast<int64_t>(INT32_MIN) ||
+        draw_top64 > static_cast<int64_t>(INT32_MAX)) {
+        return true;
+    }
+    int64_t const draw_right64 =
+        draw_left64 + static_cast<int64_t>(cursor_snapshot.image_width);
+    int64_t const draw_bottom64 =
+        draw_top64 + static_cast<int64_t>(cursor_snapshot.image_height);
+
+    int const draw_left = static_cast<int>(draw_left64);
+    int const draw_top = static_cast<int>(draw_top64);
+    if (draw_left64 >= target.width || draw_top64 >= target.height || draw_right64 <= 0 ||
+        draw_bottom64 <= 0) {
+        return true;
+    }
+
+    HDC const screen_dc = GetDC(nullptr);
+    if (screen_dc == nullptr) {
+        return false;
+    }
+
+    bool ok = false;
+    HDC const target_dc = CreateCompatibleDC(screen_dc);
+    if (target_dc != nullptr) {
+        HGDIOBJ const old = SelectObject(target_dc, target.bitmap);
+        if (old != nullptr && old != HGDI_ERROR) {
+            ok = DrawIconEx(target_dc, draw_left, draw_top, cursor_snapshot.cursor,
+                            cursor_snapshot.image_width, cursor_snapshot.image_height, 0,
+                            nullptr, DI_NORMAL) != 0;
+            SelectObject(target_dc, old);
+        }
+        DeleteDC(target_dc);
+    }
+    ReleaseDC(nullptr, screen_dc);
+    return ok;
 }
 
 HBITMAP Scale_bitmap_to_thumbnail(HBITMAP src_bitmap, int src_width, int src_height,

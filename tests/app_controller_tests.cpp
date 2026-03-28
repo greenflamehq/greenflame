@@ -65,7 +65,7 @@ class MockCaptureService : public ICaptureService {
     MockCaptureService &operator=(MockCaptureService &&) = delete;
     ~MockCaptureService() override = default;
 
-    MOCK_METHOD(bool, Copy_rect_to_clipboard, (core::RectPx), (override));
+    MOCK_METHOD(bool, Copy_rect_to_clipboard, (core::RectPx, bool), (override));
     MOCK_METHOD(core::CaptureSaveResult, Save_capture_to_file,
                 (core::CaptureSaveRequest const &, std::wstring_view,
                  core::ImageSaveFormat),
@@ -153,13 +153,15 @@ struct ControllerFixture {
 [[nodiscard]] core::CaptureSaveRequest
 Make_screen_save_request(core::RectPx source_rect, core::InsetsPx padding = {},
                          COLORREF fill_color = static_cast<COLORREF>(0),
-                         bool preserve_source_extent = false) {
+                         bool preserve_source_extent = false,
+                         bool include_cursor = false) {
     core::CaptureSaveRequest request{};
     request.source_kind = core::CaptureSourceKind::ScreenRect;
     request.window_capture_backend = core::WindowCaptureBackend::Gdi;
     request.source_rect_screen = source_rect;
     request.padding_px = padding;
     request.fill_color = fill_color;
+    request.include_cursor = include_cursor;
     request.preserve_source_extent = preserve_source_extent;
     return request;
 }
@@ -167,7 +169,7 @@ Make_screen_save_request(core::RectPx source_rect, core::InsetsPx padding = {},
 [[nodiscard]] core::CaptureSaveRequest Make_window_save_request(
     core::RectPx source_rect, HWND hwnd, core::WindowCaptureBackend backend,
     core::InsetsPx padding = {}, COLORREF fill_color = static_cast<COLORREF>(0),
-    bool preserve_source_extent = false) {
+    bool preserve_source_extent = false, bool include_cursor = false) {
     core::CaptureSaveRequest request{};
     request.source_kind = core::CaptureSourceKind::Window;
     request.window_capture_backend = backend;
@@ -175,6 +177,7 @@ Make_screen_save_request(core::RectPx source_rect, core::InsetsPx padding = {},
     request.source_window = hwnd;
     request.padding_px = padding;
     request.fill_color = fill_color;
+    request.include_cursor = include_cursor;
     request.preserve_source_extent = preserve_source_extent;
     return request;
 }
@@ -251,7 +254,8 @@ TEST(app_controller, copy_window_uses_target_window_rect_and_copies) {
     RectPx const rect = RectPx::From_ltrb(10, 20, 310, 220);
 
     EXPECT_CALL(fixture.windows, Get_window_rect(hwnd)).WillOnce(Return(rect));
-    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(rect)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(rect, false))
+        .WillOnce(Return(true));
 
     ClipboardCopyResult const result =
         fixture.controller.On_copy_window_to_clipboard_requested(hwnd);
@@ -293,7 +297,7 @@ TEST(app_controller, copy_last_window_requeries_and_copies) {
     EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
     EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
     EXPECT_CALL(fixture.windows, Get_window_rect(hwnd)).WillOnce(Return(current));
-    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(current))
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(current, false))
         .WillOnce(Return(true));
 
     ClipboardCopyResult const result =
@@ -312,7 +316,7 @@ TEST(app_controller, copy_monitor_uses_cursor_monitor_bounds) {
     EXPECT_CALL(fixture.display, Get_monitors_with_bounds()).WillOnce(Return(monitors));
     EXPECT_CALL(fixture.display, Get_cursor_pos_px())
         .WillOnce(Return(PointPx{150, 50}));
-    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(monitor1.bounds))
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(monitor1.bounds, false))
         .WillOnce(Return(true));
 
     ClipboardCopyResult const result =
@@ -326,7 +330,22 @@ TEST(app_controller, copy_desktop_uses_virtual_desktop_bounds) {
 
     EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
         .WillOnce(Return(desktop));
-    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(desktop))
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(desktop, false))
+        .WillOnce(Return(true));
+
+    ClipboardCopyResult const result =
+        fixture.controller.On_copy_desktop_to_clipboard_requested();
+    EXPECT_TRUE(result.success);
+}
+
+TEST(app_controller, copy_desktop_uses_persisted_cursor_setting) {
+    ControllerFixture fixture;
+    fixture.config.include_cursor = true;
+    RectPx const desktop = RectPx::From_ltrb(-100, 0, 900, 700);
+
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(desktop));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(desktop, true))
         .WillOnce(Return(true));
 
     ClipboardCopyResult const result =
@@ -346,11 +365,104 @@ TEST(app_controller, on_selection_saved_builds_balloon_message_and_stores_state)
     EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
     EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
     EXPECT_CALL(fixture.windows, Get_window_rect(hwnd)).WillOnce(Return(rect));
-    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(rect)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(rect, false))
+        .WillOnce(Return(true));
 
     ClipboardCopyResult const copied =
         fixture.controller.On_copy_last_window_to_clipboard_requested();
     EXPECT_TRUE(copied.success);
+}
+
+TEST(app_controller, cli_capture_uses_config_cursor_setting_by_default) {
+    ControllerFixture fixture;
+    fixture.config.include_cursor = true;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop.png";
+    options.overwrite_output = true;
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\desktop.png"})))
+        .WillOnce(Return(L"C:\\shots\\desktop.png"));
+    EXPECT_CALL(fixture.capture,
+                Save_capture_to_file(
+                    _, Eq(std::wstring_view{L"C:\\shots\\desktop.png"}),
+                    ImageSaveFormat::Png))
+        .WillOnce([](core::CaptureSaveRequest const &request, std::wstring_view,
+                     ImageSaveFormat) {
+            EXPECT_TRUE(request.include_cursor);
+            return Make_capture_save_success();
+        });
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller, cli_capture_cursor_override_can_force_include) {
+    ControllerFixture fixture;
+    fixture.config.include_cursor = false;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop.png";
+    options.overwrite_output = true;
+    options.cursor_override = CliCursorOverride::ForceInclude;
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\desktop.png"})))
+        .WillOnce(Return(L"C:\\shots\\desktop.png"));
+    EXPECT_CALL(fixture.capture,
+                Save_capture_to_file(
+                    _, Eq(std::wstring_view{L"C:\\shots\\desktop.png"}),
+                    ImageSaveFormat::Png))
+        .WillOnce([](core::CaptureSaveRequest const &request, std::wstring_view,
+                     ImageSaveFormat) {
+            EXPECT_TRUE(request.include_cursor);
+            return Make_capture_save_success();
+        });
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
+}
+
+TEST(app_controller, cli_capture_cursor_override_can_force_exclude) {
+    ControllerFixture fixture;
+    fixture.config.include_cursor = true;
+
+    CliOptions options{};
+    options.capture_mode = CliCaptureMode::Desktop;
+    options.output_path = L"C:\\shots\\desktop.png";
+    options.overwrite_output = true;
+    options.cursor_override = CliCursorOverride::ForceExclude;
+
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 1920, 1080);
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .Times(2)
+        .WillRepeatedly(Return(desktop));
+    EXPECT_CALL(fixture.file_system,
+                Resolve_absolute_path(Eq(std::wstring_view{L"C:\\shots\\desktop.png"})))
+        .WillOnce(Return(L"C:\\shots\\desktop.png"));
+    EXPECT_CALL(fixture.capture,
+                Save_capture_to_file(
+                    _, Eq(std::wstring_view{L"C:\\shots\\desktop.png"}),
+                    ImageSaveFormat::Png))
+        .WillOnce([](core::CaptureSaveRequest const &request, std::wstring_view,
+                     ImageSaveFormat) {
+            EXPECT_FALSE(request.include_cursor);
+            return Make_capture_save_success();
+        });
+
+    CliResult const result = fixture.controller.Run_cli_capture_mode(options);
+    EXPECT_EQ(result.exit_code, ProcessExitCode::Success);
 }
 
 TEST(app_controller, cli_window_mode_filters_invocation_window_and_saves) {
