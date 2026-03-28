@@ -52,8 +52,8 @@ jobs:
       - name: Compute version tweak
         shell: bash
         run: |
-          CURRENT_SEMVER=$(grep -oP 'project\(greenflame VERSION \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)
-          NEXT_TWEAK=$(grep -oP 'set\(GREENFLAME_VERSION_TWEAK \K[0-9]+' CMakeLists.txt)
+          CURRENT_SEMVER=$(sed -n 's/.*project(greenflame VERSION \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' CMakeLists.txt)
+          NEXT_TWEAK=$(sed -n 's/.*set(GREENFLAME_VERSION_TWEAK \([0-9][0-9]*\).*/\1/p' CMakeLists.txt)
           if [[ "$CURRENT_SEMVER" == "$SEMVER" ]]; then
             BUILD_TWEAK=$NEXT_TWEAK
           else
