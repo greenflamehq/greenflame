@@ -2,6 +2,7 @@
 
 #include "console_output.h"
 #include "greenflame_app.h"
+#include "version_string.h"
 
 namespace {
 
@@ -13,13 +14,7 @@ constexpr bool kDebugBuild = false;
 constexpr wchar_t kTrayInstanceMutexName[] = L"Local\\greenflame.tray.single_instance";
 
 [[nodiscard]] std::wstring Build_semantic_version_text() {
-    std::wstring text = L"Greenflame v";
-    text += std::to_wstring(GREENFLAME_VERSION_MAJOR);
-    text += L".";
-    text += std::to_wstring(GREENFLAME_VERSION_MINOR);
-    text += L".";
-    text += std::to_wstring(GREENFLAME_VERSION_PATCH);
-    return text;
+    return L"Greenflame v" GREENFLAME_PRODUCT_VERSION_WIDE;
 }
 
 [[nodiscard]] std::vector<std::wstring> Command_line_args_without_program() {

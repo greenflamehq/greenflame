@@ -10,28 +10,78 @@ jobs:
     name: Release
     runs-on: windows-latest
     permissions:
-      contents: write  # required to create the GitHub Release and upload assets
+      contents: write  # required to push the version-bump commit and create the GitHub Release
 
     steps:
       # Glob filters in GitHub Actions are not full regex; validate strictly here.
       - name: Validate tag format
         shell: bash
         run: |
-          if ! echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Tag '${{ github.ref_name }}' must match v<major>.<minor>.<patch>"
+          if ! echo "${{ github.ref_name }}" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$'; then
+            echo "::error::Tag '${{ github.ref_name }}' must match v<major>.<minor>.<patch> or v<major>.<minor>.<patch>-<prerelease>"
             exit 1
           fi
 
-      - name: Checkout
+      - name: Checkout master
         uses: actions/checkout@v6
         with:
+          ref: master
           fetch-depth: 0  # required to fetch the full annotated tag object
+
+      - name: Parse tag
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          VERSION="${TAG#v}"
+          SEMVER="${VERSION%%-*}"
+          MAJOR="${SEMVER%%.*}"
+          REST="${SEMVER#*.}"
+          MINOR="${REST%%.*}"
+          PATCH="${REST#*.}"
+          if [[ "$VERSION" == *-* ]]; then
+            PRODUCT_VERSION="$VERSION"
+          else
+            PRODUCT_VERSION="$VERSION"
+          fi
+          echo "SEMVER=$SEMVER"             >> "$GITHUB_ENV"
+          echo "MAJOR=$MAJOR"               >> "$GITHUB_ENV"
+          echo "MINOR=$MINOR"               >> "$GITHUB_ENV"
+          echo "PATCH=$PATCH"               >> "$GITHUB_ENV"
+          echo "PRODUCT_VERSION=$PRODUCT_VERSION" >> "$GITHUB_ENV"
+
+      - name: Compute version tweak
+        shell: bash
+        run: |
+          CURRENT_SEMVER=$(grep -oP 'project\(greenflame VERSION \K[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt)
+          NEXT_TWEAK=$(grep -oP 'set\(GREENFLAME_VERSION_TWEAK \K[0-9]+' CMakeLists.txt)
+          if [[ "$CURRENT_SEMVER" == "$SEMVER" ]]; then
+            BUILD_TWEAK=$NEXT_TWEAK
+          else
+            BUILD_TWEAK=0
+          fi
+          NEW_NEXT_TWEAK=$((BUILD_TWEAK + 1))
+          echo "CURRENT_SEMVER=$CURRENT_SEMVER" >> "$GITHUB_ENV"
+          echo "BUILD_TWEAK=$BUILD_TWEAK"       >> "$GITHUB_ENV"
+          echo "NEW_NEXT_TWEAK=$NEW_NEXT_TWEAK" >> "$GITHUB_ENV"
+
+      - name: Bump version in CMakeLists.txt and push
+        shell: bash
+        run: |
+          if [[ "$CURRENT_SEMVER" != "$SEMVER" ]]; then
+            sed -i "s/project(greenflame VERSION [0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*/project(greenflame VERSION $SEMVER/" CMakeLists.txt
+          fi
+          sed -i "s/set(GREENFLAME_VERSION_TWEAK [0-9][0-9]*/set(GREENFLAME_VERSION_TWEAK $NEW_NEXT_TWEAK/" CMakeLists.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt
+          git commit -m "internal: bump version to $SEMVER tweak=$NEW_NEXT_TWEAK after ${{ github.ref_name }}"
+          git push origin HEAD:refs/heads/master
 
       - name: Set up MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
-        run: cmake --preset x64-release
+        run: cmake --preset x64-release -DGREENFLAME_VERSION_TWEAK=${{ env.BUILD_TWEAK }} "-DGREENFLAME_PRODUCT_VERSION=${{ env.PRODUCT_VERSION }}"
 
       - name: Build
         run: cmake --build --preset x64-release
@@ -49,10 +99,15 @@ jobs:
           else
             notes_flag="--generate-notes"
           fi
+          prerelease_flag=""
+          if [[ "${{ github.ref_name }}" == *-* ]]; then
+            prerelease_flag="--prerelease"
+          fi
           gh release create "${{ github.ref_name }}" \
             --draft \
-            --title "Greenflame ${{ github.ref_name }}" \
+            --title "Greenflame ${{ env.PRODUCT_VERSION }}" \
             $notes_flag \
+            $prerelease_flag \
             build/x64-release/greenflame.exe
         env:
           GH_TOKEN: ${{ github.token }}

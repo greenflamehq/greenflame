@@ -30,6 +30,10 @@ set(GREENFLAME_FILE_VERSION_COMMA
 set(GREENFLAME_FILE_VERSION_DOTTED
     "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.${GREENFLAME_VERSION_TWEAK}"
 )
+set(GREENFLAME_PRODUCT_VERSION
+    "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
+    CACHE STRING "Human-readable product version string (e.g. 0.8.0-rc1); overridden by CI"
+)
 
 set(GREENFLAME_COMPANY_NAME "Jocelyn Legault" CACHE STRING "Company name in VERSIONINFO")
 set(GREENFLAME_PRODUCT_NAME "Greenflame" CACHE STRING "Product name in VERSIONINFO")
@@ -119,6 +123,11 @@ configure_file(
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/greenflame.rc.in"
     "${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc"
+    @ONLY
+)
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/version_string.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/version_string.h"
     @ONLY
 )
 
@@ -346,6 +355,7 @@ add_executable(greenflame WIN32
 target_include_directories(greenflame PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/greenflame
+    ${CMAKE_CURRENT_BINARY_DIR}
 )
 
 target_compile_definitions(greenflame PRIVATE
@@ -353,9 +363,6 @@ target_compile_definitions(greenflame PRIVATE
     WIN32_LEAN_AND_MEAN
     UNICODE
     _UNICODE
-    GREENFLAME_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-    GREENFLAME_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-    GREENFLAME_VERSION_PATCH=${PROJECT_VERSION_PATCH}
     $<$<CONFIG:Debug>:DEBUG>
 )
 
