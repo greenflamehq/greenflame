@@ -7,7 +7,7 @@ audience:
 status: reference
 owners:
   - core-team
-last_updated: 2026-03-26
+last_updated: 2026-03-29
 tags:
   - testing
   - manual
@@ -643,6 +643,20 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Brush, Line, Arrow, Rectangle, Filled rectangle, Ellipse, and Filled ellipse show the 8-slot annotation palette.
   - Highlighter shows the 6-slot highlighter palette.
   - `Esc` closes the wheel without changing the current color.
+
+### GF-MAN-ANN-007A - Color Wheel Dismissed By Toolbar Click
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Activate any annotation tool except Obfuscate.
+  2. Right-click to open the color wheel.
+  3. Without moving the wheel, left-click directly on a toolbar button (e.g. switch to a different annotation tool).
+  4. Repeat, but this time right-click to open the wheel then click the Undo toolbar button if available, or the Help button.
+- Expected:
+  - The color wheel closes immediately on the toolbar click.
+  - The toolbar button's action is executed (tool switches, or Help opens) — the click is not swallowed.
+  - No phantom annotation is started and no stray mouse-up event fires after the dismiss.
 
 ### GF-MAN-ANN-008 - Tool Size Adjustment And Clamp
 

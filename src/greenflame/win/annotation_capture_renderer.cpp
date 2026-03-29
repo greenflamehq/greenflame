@@ -9,7 +9,7 @@ namespace greenflame {
 
 namespace {
 
-constexpr float kDefaultDpi = 96.f;
+constexpr float kCaptureScratchDpi = 96.f;
 
 struct CoInitGuard final {
     bool owned = false;
@@ -167,13 +167,13 @@ Create_scratch_render_target(IWICImagingFactory *wic_factory, ID2D1Factory *d2d_
         return false;
     }
 
-    // 96 DPI is correct here: annotation coordinates are in physical pixels (PointPx/
-    // RectPx), and this RT targets an in-memory WIC bitmap (not a display surface).
-    // At 96 DPI, 1 D2D DIP == 1 pixel, so physical-pixel coordinates map 1:1.
+    // This WIC render target is intentionally 96 DPI because capture compositing is
+    // still pixel-space output. At 96 DPI, 1 D2D DIP == 1 pixel, so the scratch
+    // surface maps capture pixels 1:1.
     D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-        kDefaultDpi, kDefaultDpi);
+        kCaptureScratchDpi, kCaptureScratchDpi);
     hr = d2d_factory->CreateWicBitmapRenderTarget(wic_bitmap.Get(), properties,
                                                   render_target.GetAddressOf());
     return SUCCEEDED(hr) && static_cast<bool>(render_target);

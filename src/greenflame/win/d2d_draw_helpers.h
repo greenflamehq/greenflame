@@ -101,4 +101,19 @@ Build_convex_hull(std::array<D2D1_POINT_2F, 8> points) noexcept {
     return result;
 }
 
+inline constexpr float kLegacyOverlayDpi = 96.f;
+
+[[nodiscard]] inline float Render_target_dpi(ID2D1RenderTarget *rt) noexcept {
+    if (rt == nullptr) {
+        return kLegacyOverlayDpi;
+    }
+    float dpi_x = kLegacyOverlayDpi;
+    float dpi_y = kLegacyOverlayDpi;
+    rt->GetDpi(&dpi_x, &dpi_y);
+    if (dpi_x <= 0.f || dpi_y <= 0.f) {
+        return kLegacyOverlayDpi;
+    }
+    return dpi_x;
+}
+
 } // namespace greenflame

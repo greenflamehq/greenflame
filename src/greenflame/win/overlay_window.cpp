@@ -2075,6 +2075,16 @@ LRESULT OverlayWindow::On_l_button_down() {
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
+    // If the wheel is up and the click lands on a toolbar button, dismiss the
+    // wheel and let the click fall through to normal toolbar handling below.
+    if (color_wheel_.visible && controller_.Can_interact_with_annotation_toolbar()) {
+        for (auto const &btn : toolbar_buttons_) {
+            if (btn.button && btn.button->Hit_test(cur)) {
+                Dismiss_color_wheel(false);
+                break;
+            }
+        }
+    }
     if (color_wheel_.visible) {
         suppress_next_lbutton_up_ = true;
         auto const lbd_tool = controller_.Active_annotation_tool();

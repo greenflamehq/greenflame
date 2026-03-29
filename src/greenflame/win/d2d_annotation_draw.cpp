@@ -6,7 +6,6 @@ namespace greenflame {
 
 namespace {
 
-constexpr float kDefaultDpi = 96.f;
 constexpr float kStrokeMiterLimit = 10.f;
 
 template <typename T>
@@ -164,9 +163,9 @@ void Draw_text(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext contex
         D2D1_BITMAP_PROPERTIES props{};
         props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
                                               D2D1_ALPHA_MODE_PREMULTIPLIED);
-        // Match the render target's 96 DPI so DrawBitmap places pixels 1:1.
-        props.dpiX = kDefaultDpi;
-        props.dpiY = kDefaultDpi;
+        float const dpi = Render_target_dpi(render_target);
+        props.dpiX = dpi;
+        props.dpiY = dpi;
 
         Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
         HRESULT const hr = render_target->CreateBitmap(
@@ -197,8 +196,9 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
     D2D1_BITMAP_PROPERTIES props{};
     props.pixelFormat =
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
-    props.dpiX = kDefaultDpi;
-    props.dpiY = kDefaultDpi;
+    float const dpi = Render_target_dpi(render_target);
+    props.dpiX = dpi;
+    props.dpiY = dpi;
 
     // Obfuscate rasters can change every preview frame while keeping the same
     // annotation id, so the bitmap must be refreshed instead of reusing a stale cache
@@ -236,9 +236,9 @@ void Draw_bubble(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext cont
         D2D1_BITMAP_PROPERTIES props{};
         props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
                                               D2D1_ALPHA_MODE_PREMULTIPLIED);
-        // Match the render target's 96 DPI so DrawBitmap places pixels 1:1.
-        props.dpiX = kDefaultDpi;
-        props.dpiY = kDefaultDpi;
+        float const dpi = Render_target_dpi(render_target);
+        props.dpiX = dpi;
+        props.dpiY = dpi;
 
         Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
         HRESULT const hr = render_target->CreateBitmap(

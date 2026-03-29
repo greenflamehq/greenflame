@@ -1,10 +1,11 @@
 #include "greenflame/win/d2d_overlay_resources.h"
 
+#include "greenflame/win/d2d_draw_helpers.h"
+
 namespace greenflame {
 
 namespace {
 
-constexpr float kDefaultDpi = 96.f;
 constexpr float kStrokeMiterLimit = 10.f;
 constexpr float kDimTextFormatSizePt = 12.f;
 constexpr float kCenterTextFormatSizePt = 27.f;
@@ -31,8 +32,9 @@ constexpr float kTextWheelHuePositionDivisor =
     D2D1_BITMAP_PROPERTIES props{};
     props.pixelFormat.format = DXGI_FORMAT_A8_UNORM;
     props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
-    props.dpiX = kDefaultDpi;
-    props.dpiY = kDefaultDpi;
+    float const dpi = Render_target_dpi(rt);
+    props.dpiX = dpi;
+    props.dpiY = dpi;
 
     UINT32 const row_bytes = static_cast<UINT32>(w); // 1 byte per pixel
     HRESULT const hr =
@@ -58,15 +60,23 @@ bool D2DOverlayResources::Initialize_factory() {
     return SUCCEEDED(hr);
 }
 
+void D2DOverlayResources::Set_target_dpi(float dpi) noexcept {
+    target_dpi = dpi > 0.f ? dpi : kDefaultTargetDpi;
+}
+
+float D2DOverlayResources::Target_dpi() const noexcept { return target_dpi; }
+
 bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height) {
     if (!factory) {
         return false;
     }
 
+    // The overlay surface still runs with a single target DPI for now. Later
+    // per-monitor plumbing can set this before creating the HWND render target.
     D2D1_RENDER_TARGET_PROPERTIES rt_props = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
-        kDefaultDpi, kDefaultDpi);
+        Target_dpi(), Target_dpi());
 
     // RETAIN_CONTENTS keeps the previous frame visible to DWM during BeginDraw,
     // preventing the blank-surface flicker that occurs with PRESENT_OPTIONS_NONE.
@@ -137,8 +147,9 @@ bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
     D2D1_BITMAP_PROPERTIES props{};
     props.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
     props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
-    props.dpiX = kDefaultDpi;
-    props.dpiY = kDefaultDpi;
+    float const dpi = Target_dpi();
+    props.dpiX = dpi;
+    props.dpiY = dpi;
 
     HRESULT const hr = hwnd_rt->CreateBitmap(
         D2D1::SizeU(static_cast<UINT32>(w), static_cast<UINT32>(h)), pixels.data(),
@@ -227,7 +238,8 @@ bool D2DOverlayResources::Create_shared_resources() {
 
     // Text formats.
     // GDI used CreateFontW with positive cell-height values (14, 36, 16 px).
-    // DWrite font size is in points; at 96 DPI: pt = px * 72 / 96.
+    // These point sizes preserve the historical overlay proportions; the
+    // render target DPI is handled separately by the target_dpi seam above.
     hr = dwrite_factory->CreateTextFormat(
         L"Segoe UI", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, kDimTextFormatSizePt, L"",

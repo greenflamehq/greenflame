@@ -6,7 +6,6 @@ namespace greenflame {
 
 namespace {
 
-constexpr float kDefaultDpi = 96.0f;
 constexpr float kLayoutMaxExtentPx = 32768.0f;
 constexpr float kRoundToNearestOffsetPx = 0.5f;
 constexpr float kColorChannelMaxF = 255.0f;
@@ -292,6 +291,12 @@ void D2DTextLayoutEngine::Set_font_families(std::array<std::wstring_view, 4> fam
     }
 }
 
+void D2DTextLayoutEngine::Set_target_dpi(float dpi) noexcept {
+    target_dpi_ = dpi > 0.0f ? dpi : kDefaultTargetDpi;
+}
+
+float D2DTextLayoutEngine::Target_dpi() const noexcept { return target_dpi_; }
+
 int32_t D2DTextLayoutEngine::Line_ascent(core::TextAnnotationBaseStyle const &style) {
     Microsoft::WRL::ComPtr<IDWriteTextFormat> format =
         Create_text_format(dwrite_factory_, style, font_families_);
@@ -324,7 +329,8 @@ D2DTextLayoutEngine::Build_draft_layout(core::TextDraftBuffer const &buf,
         if (!Build_placeholder_layout(dwrite_factory_, buf.base_style, font_families_,
                                       format, layout)) {
             int32_t const fallback_height =
-                std::max(1, (buf.base_style.point_size * 96 + 71) / 72);
+                std::max(1, Round_to_int(static_cast<float>(buf.base_style.point_size) *
+                                         Target_dpi() / 72.0f));
             result.caret_rect = core::RectPx::From_ltrb(
                 origin.x, origin.y, origin.x + 1, origin.y + fallback_height);
             result.overwrite_caret_rect =
@@ -595,7 +601,7 @@ void D2DTextLayoutEngine::Rasterize(core::TextAnnotation &annotation) {
     D2D1_RENDER_TARGET_PROPERTIES rt_props = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-        kDefaultDpi, kDefaultDpi);
+        Target_dpi(), Target_dpi());
 
     Microsoft::WRL::ComPtr<ID2D1RenderTarget> render_target;
     hr = d2d_factory_->CreateWicBitmapRenderTarget(wic_bitmap.Get(), rt_props,
@@ -688,7 +694,7 @@ void D2DTextLayoutEngine::Rasterize_bubble(core::BubbleAnnotation &annotation) {
     D2D1_RENDER_TARGET_PROPERTIES rt_props = D2D1::RenderTargetProperties(
         D2D1_RENDER_TARGET_TYPE_DEFAULT,
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-        kDefaultDpi, kDefaultDpi);
+        Target_dpi(), Target_dpi());
 
     Microsoft::WRL::ComPtr<ID2D1RenderTarget> render_target;
     hr = d2d_factory_->CreateWicBitmapRenderTarget(wic_bitmap.Get(), rt_props,
