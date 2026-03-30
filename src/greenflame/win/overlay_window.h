@@ -114,6 +114,13 @@ class OverlayWindow final {
     void Clear_transient_center_label(bool repaint);
     [[nodiscard]] bool Read_clipboard_text(std::wstring &out) const;
     void Write_clipboard_text(std::wstring_view text) const;
+    // Writes CF_UNICODETEXT, CF_RTF, and "HTML Format" in a single clipboard session.
+    void Write_clipboard_rich_text(std::wstring_view plain_text, std::string_view rtf,
+                                   std::string_view html) const;
+    [[nodiscard]] bool Read_clipboard_rtf(std::string &out) const;
+    [[nodiscard]] bool Read_clipboard_html(std::string &out) const;
+    // Core reader: opens clipboard, copies format data to out, closes clipboard.
+    [[nodiscard]] bool Read_clipboard_bytes(UINT fmt, std::string &out) const;
     void Reset_caret_blink();
     void Cancel_highlighter_straighten_pending() noexcept;
     void Handle_device_loss();

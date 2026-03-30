@@ -816,6 +816,139 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Saved or copied output includes committed text annotations.
   - Saved or copied output excludes live draft caret, selection highlight, and other draft chrome.
 
+### GF-MAN-TXT-RTF-001 - Rich Text Copy And Paste Within Greenflame
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Open a text draft and type mixed-style text: some bold, some italic, some plain.
+  2. Select the entire text and press Ctrl+C.
+  3. Dismiss the draft and open a new text annotation. Press Ctrl+V.
+- Expected:
+  - The pasted text reproduces the bold, italic, underline, and strikethrough flags exactly.
+  - Font face, color, and size are not imported (Greenflame uses its own text style system).
+
+### GF-MAN-TXT-RTF-002 - Rich Text Cut And Paste Within Greenflame
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Open a text draft with mixed-style content (bold, italic, plain).
+  2. Select a styled portion and press Ctrl+X.
+  3. Verify the cut range is deleted from the source annotation.
+  4. Open a new text annotation and press Ctrl+V.
+- Expected:
+  - The cut range is removed from the source.
+  - The pasted text in the new annotation reproduces the original style flags exactly.
+
+### GF-MAN-TXT-RTF-003 - Paste Rich Text From Word Into Greenflame
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Setup: Microsoft Word (or another RTF-capable app) available.
+- Steps:
+  1. In Word, type text with bold, italic, underline, a custom color, and a large font size applied.
+  2. Select it and press Ctrl+C.
+  3. In Greenflame, open a text annotation draft and press Ctrl+V.
+- Expected:
+  - Bold, italic, and underline flags are preserved in the pasted runs.
+  - Color and font size are stripped; Greenflame renders using its own text color and size.
+  - No crash occurs.
+
+### GF-MAN-TXT-RTF-004 - Copy Rich Text From Greenflame And Paste Into Word
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Setup: Microsoft Word (or another RTF-capable app) available.
+- Steps:
+  1. In Greenflame, create a text draft with bold, italic, underline, and strikethrough runs.
+  2. Select all and press Ctrl+C.
+  3. Paste into Word.
+- Expected:
+  - Bold, italic, underline, and strikethrough are visible in Word using Word's default font.
+
+### GF-MAN-TXT-RTF-005 - Paste Plain Text From Notepad Into Greenflame
+
+- Priority: `P2`
+- Run on: `ENV-A`
+- Steps:
+  1. Copy plain text from Notepad (no RTF on clipboard).
+  2. Open a Greenflame text draft with bold active.
+  3. Press Ctrl+V.
+- Expected:
+  - Text is inserted using the current typing style (bold in this case).
+  - No crash occurs.
+
+### GF-MAN-TXT-RTF-006 - Ctrl+C With No Selection Does Not Modify Clipboard
+
+- Priority: `P2`
+- Run on: `ENV-A`
+- Steps:
+  1. Copy some known text to the clipboard from another app.
+  2. Open a Greenflame text draft with no selection (cursor only).
+  3. Press Ctrl+C.
+  4. Paste into Notepad.
+- Expected:
+  - The clipboard retains the original text from step 1; Greenflame does not overwrite it.
+
+### GF-MAN-TXT-HTML-001 - Paste Bold/Italic/Underline From Chrome Or Edge
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Setup: Google Chrome or Microsoft Edge available.
+- Steps:
+  1. In a Google Doc (via Chrome or Edge), type text with bold, italic, and underline applied to separate words. Select it and press Ctrl+C.
+  2. In Greenflame, open a text annotation draft and press Ctrl+V.
+- Expected:
+  - Bold, italic, and underline flags appear in the pasted runs, matching the source.
+  - Font face, size, and color are not imported.
+  - No crash occurs.
+
+### GF-MAN-TXT-HTML-002 - Paste Strikethrough From Google Docs
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. In Google Docs, apply strikethrough to a word. Select and copy.
+  2. Paste into a Greenflame text annotation.
+- Expected:
+  - The strikethrough flag is present on the pasted run.
+
+### GF-MAN-TXT-HTML-003 - Paste From Firefox (text/html Fallback)
+
+- Priority: `P2`
+- Run on: `ENV-A`
+- Setup: Mozilla Firefox available.
+- Steps:
+  1. In Firefox, select styled text (bold + italic) from any web page and press Ctrl+C.
+  2. Paste into a Greenflame text annotation.
+- Expected:
+  - Bold and italic flags are preserved.
+  - No crash occurs.
+
+### GF-MAN-TXT-HTML-004 - HTML Paste Falls Back To Plain Text When No Style Present
+
+- Priority: `P2`
+- Run on: `ENV-A`
+- Steps:
+  1. In a browser, copy plain, unstyled text from a web page.
+  2. Paste into a Greenflame text annotation.
+- Expected:
+  - Text is inserted with the current typing style (no crash, no garbage).
+
+### GF-MAN-TXT-HTML-005 - Copy From Greenflame And Paste Into Google Docs
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Setup: Google Docs open in Chrome or Edge.
+- Steps:
+  1. In Greenflame, create a text annotation with bold, italic, underline, and strikethrough runs.
+  2. Select all and press Ctrl+C.
+  3. Paste into a Google Doc.
+- Expected:
+  - Bold, italic, underline, and strikethrough are visible in Google Docs using its default font.
+  - No extra formatting (no colored text, no unexpected font size change).
+
 ## Output, Clipboard, And Notifications
 
 ### GF-MAN-OUT-001 - Copy Selection To Clipboard

@@ -394,6 +394,58 @@ void TextEditController::Paste_text(std::wstring_view text) {
     Replace_selection_with_text(normalized, false);
 }
 
+std::vector<TextRun> TextEditController::Copy_selected_runs() const {
+    if (!Has_selection(buffer_.selection)) {
+        return {};
+    }
+
+    std::vector<StyledCodeUnit> const all_units = Expand_runs(buffer_.runs);
+    int32_t const start = Selection_start(buffer_.selection);
+    int32_t const end = Selection_end(buffer_.selection);
+    return Collapse_runs(std::span<const StyledCodeUnit>(all_units).subspan(
+        static_cast<size_t>(start), static_cast<size_t>(end - start)));
+}
+
+void TextEditController::Paste_runs(std::span<const TextRun> runs) {
+    if (runs.empty()) {
+        return;
+    }
+
+    // Normalize newlines and flatten the source runs to styled code units.
+    std::vector<StyledCodeUnit> normalized_units;
+    for (TextRun const &run : runs) {
+        std::wstring const text = Normalize_newlines(run.text);
+        for (wchar_t const ch : text) {
+            normalized_units.push_back(StyledCodeUnit{ch, run.flags});
+        }
+    }
+    if (normalized_units.empty()) {
+        return;
+    }
+
+    // Splice into the buffer, replacing the current selection.
+    std::vector<StyledCodeUnit> code_units = Expand_runs(buffer_.runs);
+    int32_t insert_offset = Selection_start(buffer_.selection);
+    int32_t const erase_end = Selection_end(buffer_.selection);
+    if (erase_end > insert_offset) {
+        code_units.erase(code_units.begin() +
+                             static_cast<std::ptrdiff_t>(insert_offset),
+                         code_units.begin() + static_cast<std::ptrdiff_t>(erase_end));
+    }
+    code_units.insert(code_units.begin() + static_cast<std::ptrdiff_t>(insert_offset),
+                      normalized_units.begin(), normalized_units.end());
+    insert_offset += static_cast<int32_t>(normalized_units.size());
+
+    buffer_.runs = Collapse_runs(code_units);
+    // Update typing_style so that continued typing after the paste uses the
+    // same formatting as the last pasted character.
+    buffer_.typing_style.flags = normalized_units.back().flags;
+    buffer_.selection = TextSelection{insert_offset, insert_offset};
+    Rebuild_layout();
+    Refresh_preferred_x_from_layout();
+    Push_snapshot_if_changed();
+}
+
 void TextEditController::Undo() {
     if (history_index_ == 0) {
         return;

@@ -449,6 +449,97 @@ TEST(text_draft_buffer, OverwriteMode_ReplacesWithinLineAndFallsBackAtLineEnd) {
     EXPECT_EQ(Flatten_text(controller.Build_view().annotation->runs), L"aZQ\nc");
 }
 
+TEST(text_draft_buffer, CopySelectedRuns_ReturnsRunsWithCorrectFlags) {
+    FakeTextLayoutEngine engine;
+    TextEditController controller = Make_controller(engine);
+
+    controller.Toggle_style(TextStyleToggle::Bold);
+    controller.On_text_input(L"bold");
+    controller.Toggle_style(TextStyleToggle::Bold);
+    controller.On_text_input(L"plain");
+    controller.On_select_all();
+
+    std::vector<TextRun> const runs = controller.Copy_selected_runs();
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(runs[0].text, L"bold");
+    EXPECT_TRUE(runs[0].flags.bold);
+    EXPECT_EQ(runs[1].text, L"plain");
+    EXPECT_FALSE(runs[1].flags.bold);
+}
+
+TEST(text_draft_buffer, CopySelectedRuns_EmptyWhenNoSelection) {
+    FakeTextLayoutEngine engine;
+    TextEditController controller = Make_controller(engine);
+
+    controller.On_text_input(L"hello");
+    // No selection — cursor at end.
+    EXPECT_TRUE(controller.Copy_selected_runs().empty());
+}
+
+TEST(text_draft_buffer, PasteRuns_InsertsWithCorrectFlags) {
+    FakeTextLayoutEngine engine;
+    TextEditController controller = Make_controller(engine);
+
+    std::vector<TextRun> const source = {
+        TextRun{L"bold", TextStyleFlags{.bold = true}},
+    };
+    controller.Paste_runs(source);
+
+    ASSERT_NE(controller.Build_view().annotation, nullptr);
+    std::vector<TextRun> const &runs = controller.Build_view().annotation->runs;
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(runs[0].text, L"bold");
+    EXPECT_TRUE(runs[0].flags.bold);
+}
+
+TEST(text_draft_buffer, PasteRuns_UpdatesTypingStyleToLastRun) {
+    FakeTextLayoutEngine engine;
+    TextEditController controller = Make_controller(engine);
+
+    std::vector<TextRun> const source = {
+        TextRun{L"a", TextStyleFlags{}},
+        TextRun{L"b", TextStyleFlags{.italic = true}},
+    };
+    controller.Paste_runs(source);
+
+    // Typing after the paste should produce italic text (matching the last run).
+    controller.On_text_input(L"c");
+    ASSERT_NE(controller.Build_view().annotation, nullptr);
+    std::vector<TextRun> const &runs = controller.Build_view().annotation->runs;
+    ASSERT_FALSE(runs.empty());
+    EXPECT_TRUE(runs.back().flags.italic);
+}
+
+TEST(text_draft_buffer, PasteRuns_ReplacesSelection) {
+    FakeTextLayoutEngine engine;
+    TextEditController controller = Make_controller(engine);
+
+    controller.On_text_input(L"abc");
+    controller.On_select_all();
+
+    std::vector<TextRun> const source = {
+        TextRun{L"XY", TextStyleFlags{.bold = true}},
+    };
+    controller.Paste_runs(source);
+
+    ASSERT_NE(controller.Build_view().annotation, nullptr);
+    EXPECT_EQ(Flatten_text(controller.Build_view().annotation->runs), L"XY");
+    EXPECT_TRUE(controller.Build_view().annotation->runs[0].flags.bold);
+}
+
+TEST(text_draft_buffer, PasteRuns_NormalizesNewlines) {
+    FakeTextLayoutEngine engine;
+    TextEditController controller = Make_controller(engine);
+
+    std::vector<TextRun> const source = {
+        TextRun{L"a\r\nb", TextStyleFlags{}},
+    };
+    controller.Paste_runs(source);
+
+    controller.On_select_all();
+    EXPECT_EQ(controller.Copy_selected_text(), L"a\nb");
+}
+
 TEST(text_draft_buffer, PointerSelection_UsesLayoutHitTesting) {
     FakeTextLayoutEngine engine;
     TextEditController controller = Make_controller(engine);

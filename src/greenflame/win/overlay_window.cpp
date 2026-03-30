@@ -12,6 +12,8 @@
 #include "greenflame_core/save_image_policy.h"
 #include "greenflame_core/selection_handles.h"
 #include "greenflame_core/snap_to_edges.h"
+#include "greenflame_core/text_html.h"
+#include "greenflame_core/text_rtf.h"
 #include "greenflame_core/toolbar_placement.h"
 #include "greenflame_core/window_query.h"
 #include "win/d2d_overlay_resources.h"
@@ -1358,6 +1360,165 @@ void OverlayWindow::Write_clipboard_text(std::wstring_view text) const {
     }
 }
 
+// Allocates a movable HGLOBAL and copies str (including null terminator) into it.
+// Returns nullptr on failure; caller owns the block and must GlobalFree it if unused.
+[[nodiscard]] static HGLOBAL Alloc_clipboard_bytes(std::string_view data) {
+    std::string const buf(data);
+    size_t const byte_count = buf.size() + 1;
+    HGLOBAL const hglobal = GlobalAlloc(GMEM_MOVEABLE, byte_count);
+    if (hglobal == nullptr) {
+        return nullptr;
+    }
+    void *const raw = GlobalLock(hglobal);
+    if (raw == nullptr) {
+        GlobalFree(hglobal);
+        return nullptr;
+    }
+    std::copy_n(buf.c_str(), byte_count, static_cast<char *>(raw));
+    GlobalUnlock(hglobal);
+    return hglobal;
+}
+
+[[nodiscard]] static HGLOBAL Alloc_clipboard_wide(std::wstring const &data) {
+    size_t const byte_count = (data.size() + 1) * sizeof(wchar_t);
+    HGLOBAL const hglobal = GlobalAlloc(GMEM_MOVEABLE, byte_count);
+    if (hglobal == nullptr) {
+        return nullptr;
+    }
+    void *const raw = GlobalLock(hglobal);
+    if (raw == nullptr) {
+        GlobalFree(hglobal);
+        return nullptr;
+    }
+    std::copy_n(data.c_str(), data.size() + 1, static_cast<wchar_t *>(raw));
+    GlobalUnlock(hglobal);
+    return hglobal;
+}
+
+void OverlayWindow::Write_clipboard_rich_text(std::wstring_view plain_text,
+                                              std::string_view rtf,
+                                              std::string_view html) const {
+    if (plain_text.empty()) {
+        return;
+    }
+
+    static UINT const kCfRtf = RegisterClipboardFormat(L"Rich Text Format");
+    static UINT const kCfHtmlFormat = RegisterClipboardFormat(L"HTML Format");
+
+    // All HGLOBAL blocks must be allocated before OpenClipboard is called.
+    std::wstring const clipboard_text = Normalize_text_for_clipboard(plain_text);
+    HGLOBAL hglobal_text = Alloc_clipboard_wide(clipboard_text);
+    if (hglobal_text == nullptr) {
+        return;
+    }
+
+    HGLOBAL hglobal_rtf = nullptr;
+    if (!rtf.empty() && kCfRtf != 0) {
+        hglobal_rtf = Alloc_clipboard_bytes(rtf);
+        if (hglobal_rtf == nullptr) {
+            GlobalFree(hglobal_text);
+            return;
+        }
+    }
+
+    HGLOBAL hglobal_html = nullptr;
+    if (!html.empty() && kCfHtmlFormat != 0) {
+        hglobal_html = Alloc_clipboard_bytes(html);
+        if (hglobal_html == nullptr) {
+            if (hglobal_rtf != nullptr) {
+                GlobalFree(hglobal_rtf);
+            }
+            GlobalFree(hglobal_text);
+            return;
+        }
+    }
+
+    HWND const clipboard_owner =
+        (hwnd_ != nullptr && IsWindow(hwnd_) != 0) ? hwnd_ : nullptr;
+    if (OpenClipboard(clipboard_owner) == 0) {
+        if (hglobal_html != nullptr) {
+            GlobalFree(hglobal_html);
+        }
+        if (hglobal_rtf != nullptr) {
+            GlobalFree(hglobal_rtf);
+        }
+        GlobalFree(hglobal_text);
+        return;
+    }
+
+    if (EmptyClipboard() != 0) {
+        if (SetClipboardData(CF_UNICODETEXT, hglobal_text) != nullptr) {
+            hglobal_text = nullptr;
+        }
+        if (hglobal_rtf != nullptr &&
+            SetClipboardData(kCfRtf, hglobal_rtf) != nullptr) {
+            hglobal_rtf = nullptr;
+        }
+        if (hglobal_html != nullptr &&
+            SetClipboardData(kCfHtmlFormat, hglobal_html) != nullptr) {
+            hglobal_html = nullptr;
+        }
+    }
+    CloseClipboard();
+
+    if (hglobal_text != nullptr) {
+        GlobalFree(hglobal_text);
+    }
+    if (hglobal_rtf != nullptr) {
+        GlobalFree(hglobal_rtf);
+    }
+    if (hglobal_html != nullptr) {
+        GlobalFree(hglobal_html);
+    }
+}
+
+bool OverlayWindow::Read_clipboard_bytes(UINT fmt, std::string &out) const {
+    out.clear();
+    HWND const clipboard_owner =
+        (hwnd_ != nullptr && IsWindow(hwnd_) != 0) ? hwnd_ : nullptr;
+    if (OpenClipboard(clipboard_owner) == 0) {
+        return false;
+    }
+
+    bool read_ok = false;
+    do {
+        HGLOBAL const clipboard_data = GetClipboardData(fmt);
+        if (clipboard_data == nullptr) {
+            break;
+        }
+        void const *const raw = GlobalLock(clipboard_data);
+        if (raw == nullptr) {
+            break;
+        }
+        size_t const byte_count = GlobalSize(clipboard_data);
+        std::string_view const view(static_cast<char const *>(raw), byte_count);
+        size_t const nul_pos = view.find('\0');
+        out.assign(view.data(),
+                   (nul_pos != std::string_view::npos) ? nul_pos : byte_count);
+        GlobalUnlock(clipboard_data);
+        read_ok = !out.empty();
+    } while (false);
+
+    CloseClipboard();
+    return read_ok;
+}
+
+bool OverlayWindow::Read_clipboard_rtf(std::string &out) const {
+    static UINT const kCfRtf = RegisterClipboardFormat(L"Rich Text Format");
+    if (kCfRtf == 0 || IsClipboardFormatAvailable(kCfRtf) == 0) {
+        return false;
+    }
+    return Read_clipboard_bytes(kCfRtf, out);
+}
+
+bool OverlayWindow::Read_clipboard_html(std::string &out) const {
+    static UINT const kCfHtmlFormat = RegisterClipboardFormat(L"HTML Format");
+    if (kCfHtmlFormat == 0 || IsClipboardFormatAvailable(kCfHtmlFormat) == 0) {
+        return false;
+    }
+    return Read_clipboard_bytes(kCfHtmlFormat, out);
+}
+
 void OverlayWindow::Cancel_highlighter_straighten_pending() noexcept {
     if (highlighter_straighten_pending_) {
         (void)KillTimer(hwnd_, kHighlighterStraightenTimerId);
@@ -1869,21 +2030,49 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
             return 0;
         }
         if (eff_ctrl && wparam == L'C') {
+            std::vector<core::TextRun> const selected_runs =
+                text_edit->Copy_selected_runs();
             std::wstring const copied_text = text_edit->Copy_selected_text();
             if (!copied_text.empty()) {
-                Write_clipboard_text(copied_text);
+                Write_clipboard_rich_text(copied_text, core::Encode_rtf(selected_runs),
+                                          core::Encode_html_clipboard(selected_runs));
             }
             return 0;
         }
         if (eff_ctrl && wparam == L'X') {
+            // Capture runs before the cut removes them from the buffer.
+            std::vector<core::TextRun> const cut_runs = text_edit->Copy_selected_runs();
             std::wstring const cut_text = text_edit->Cut_selected_text();
             if (!cut_text.empty()) {
-                Write_clipboard_text(cut_text);
+                Write_clipboard_rich_text(cut_text, core::Encode_rtf(cut_runs),
+                                          core::Encode_html_clipboard(cut_runs));
                 repaint_text_draft();
             }
             return 0;
         }
         if (eff_ctrl && wparam == L'V') {
+            // Try CF_RTF first (highest fidelity: Greenflame→Greenflame).
+            std::string rtf_bytes;
+            if (Read_clipboard_rtf(rtf_bytes)) {
+                std::vector<core::TextRun> runs = core::Decode_rtf(rtf_bytes);
+                if (!runs.empty()) {
+                    text_edit->Paste_runs(runs);
+                    repaint_text_draft();
+                    return 0;
+                }
+            }
+            // Fall back to HTML Format (browser clipboard).
+            std::string html_bytes;
+            if (Read_clipboard_html(html_bytes)) {
+                std::vector<core::TextRun> runs =
+                    core::Decode_html_clipboard(html_bytes);
+                if (!runs.empty()) {
+                    text_edit->Paste_runs(runs);
+                    repaint_text_draft();
+                    return 0;
+                }
+            }
+            // Final fallback: plain text.
             std::wstring clipboard_text;
             if (Read_clipboard_text(clipboard_text)) {
                 text_edit->Paste_text(clipboard_text);

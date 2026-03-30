@@ -66,6 +66,13 @@ class TextEditController final {
     [[nodiscard]] std::wstring Copy_selected_text() const;
     [[nodiscard]] std::wstring Cut_selected_text();
     void Paste_text(std::wstring_view text);
+    // Returns the selected runs with their TextStyleFlags preserved.
+    // Returns an empty vector when there is no selection.
+    [[nodiscard]] std::vector<TextRun> Copy_selected_runs() const;
+    // Replaces the current selection with the given runs, applying each run's own
+    // TextStyleFlags. After insertion, typing_style.flags is updated to match the
+    // last inserted character so that continued typing uses the pasted style.
+    void Paste_runs(std::span<const TextRun> runs);
     void Undo();
     void Redo();
     void On_pointer_press(PointPx cursor);

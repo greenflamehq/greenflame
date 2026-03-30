@@ -188,6 +188,10 @@ add_library(greenflame_core STATIC
     src/greenflame_core/text_layout_engine.h
     src/greenflame_core/text_edit_controller.cpp
     src/greenflame_core/text_edit_controller.h
+    src/greenflame_core/text_html.cpp
+    src/greenflame_core/text_html.h
+    src/greenflame_core/text_rtf.cpp
+    src/greenflame_core/text_rtf.h
     src/greenflame_core/text_annotation_tool.cpp
     src/greenflame_core/text_annotation_tool.h
     src/greenflame_core/bubble_annotation_types.cpp
