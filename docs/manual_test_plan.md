@@ -498,7 +498,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Both committed strokes render cleanly.
   - The Highlighter stroke remains semi-transparent, darkens underlying content with a marker-like multiply effect, and leaves the underlying detail legible.
   - Pause-to-straighten snaps the in-progress highlighter stroke to a straight bar from the original start point to the live cursor position.
-  - Selecting either stroke shows L-bracket corner markers hugging the tight bounding box of the stroke geometry.
+  - Selecting either stroke shows a clockwise animated marquee around the tight bounding box of the visible stroke geometry.
+  - Once selected, dragging from blank pixels inside that marquee still moves the whole stroke.
   - A straightened highlighter stroke exposes draggable start and end handles in default mode, and dragging either handle reshapes only that endpoint.
   - Both strokes can be moved in default mode.
 
@@ -520,7 +521,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Pressing the left mouse button shows the live bubble immediately on mouse-down.
   - Dragging before release moves the live bubble so the committed bubble lands at the release position.
   - Bubble numbering increments with each committed placement and decrements correctly when the latest bubble is undone and replaced.
-  - Committed bubbles can be selected and moved in default mode.
+  - Selecting a committed bubble shows a clockwise animated marquee around the bubble bounds, and the bubble remains movable in default mode.
+  - Once selected, dragging from empty pixels inside the bubble marquee still moves the bubble.
   - The Bubble style wheel shows annotation colors plus font choices, and the next placed bubble uses the chosen style.
 
 ### GF-MAN-ANN-003 - Line And Arrow Editing
@@ -537,7 +539,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Line and arrow drawing show a direction-aligned square size preview.
   - The live arrow being drawn renders as a clean single silhouette without a contrasting outline around it.
   - The committed arrow renders with a visible outline that improves contrast against the screenshot.
-  - Selected line and arrow annotations show endpoint handles and L-bracket corner markers around the tight bounding box of the drawn geometry (not including the endpoint handles themselves).
+  - Selected line and arrow annotations show endpoint handles plus a clockwise animated marquee around the tight bounding box of the drawn geometry (not including the endpoint handles themselves).
+  - Once selected, dragging from blank pixels inside that marquee moves the whole annotation.
   - Dragging the body moves the whole annotation.
   - Dragging an endpoint reshapes the annotation.
 
@@ -554,7 +557,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - Rectangle and Ellipse show an axis-aligned square cursor preview sized to their stroke width while armed.
   - Filled Rectangle and Filled Ellipse do not expose a cursor stroke-size preview while armed.
-  - Selected rectangles and ellipses show resize handles when space permits but no L-bracket corner markers.
+  - Selected rectangles and ellipses show resize handles when space permits plus a clockwise animated marquee that sits 1 px outside the visible shape instead of covering shape pixels.
+  - For outlined shapes, dragging from the empty interior still moves the selected annotation.
   - Filled rectangles render as filled shapes and remain movable.
   - Filled ellipses render as filled shapes and remain movable.
   - Resizing follows the dragged handle correctly for both outlined shapes.
@@ -579,7 +583,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The committed block-pixelated result matches the preview state at mouse-up aside from minor GPU-vs-CPU sampling differences.
   - The second obfuscate commits as blur rather than block pixelation.
   - The committed blur result matches the preview state at mouse-up aside from minor GPU-vs-CPU sampling differences.
-  - Selected obfuscates show resize handles when space permits and no L-bracket corner markers.
+  - Selected obfuscates show resize handles when space permits plus a clockwise animated marquee that sits 1 px outside the obfuscate bounds.
   - Moving and resizing keep the live preview aligned to the dragged bounds, and the committed result matches the final bounds after release.
 
 ### GF-MAN-ANN-004B - Reactive Obfuscate Preview, Stacking, And Output
@@ -703,7 +707,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - The live preview does not leave stray blocks or extra segments from an earlier direction of travel.
   - The committed stroke matches what was shown during the live preview.
-  - The selected-annotation brackets enclose all visible highlighter pixels.
+  - The selected-annotation marquee encloses all visible highlighter pixels and advances clockwise.
 
 ### GF-MAN-ANN-010A - Live Brush And Text Drafts Stay Under The Dim
 
@@ -862,7 +866,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   3. Create and commit another text annotation, then attempt to re-enter text-editing on it.
   4. With a live draft still visible, save or copy the selection.
 - Expected:
-  - Committed text annotations can be selected, moved, and deleted.
+  - Committed text annotations can be selected, moved, and deleted, and selection shows a clockwise animated marquee around the text visual bounds.
+  - Once selected, dragging from transparent pixels inside the text marquee still moves the whole annotation.
   - Committed text annotations are not re-editable as text.
   - Saved or copied output includes committed text annotations.
   - Saved or copied output excludes live draft caret, selection highlight, and other draft chrome.

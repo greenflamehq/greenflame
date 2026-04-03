@@ -306,24 +306,45 @@ TEST(annotation_hit_test, TranslateAnnotation_ObfuscateMovesBounds) {
               (RectPx::From_ltrb(15, 7, 26, 18)));
 }
 
-TEST(annotation_hit_test, AnnotationShowsCornerBrackets_FreehandReturnsTrue) {
-    EXPECT_TRUE(Annotation_shows_corner_brackets(AnnotationKind::Freehand));
+TEST(annotation_hit_test, AnnotationSelectionFrameBounds_FreehandMatchesVisualBounds) {
+    Annotation ann{};
+    ann.id = 1;
+    ann.data = FreehandStrokeAnnotation{
+        .points = {PointPx{10, 20}, PointPx{30, 40}, PointPx{50, 20}},
+        .style = {.width_px = 4},
+    };
+
+    EXPECT_EQ(Annotation_selection_frame_bounds(ann), Annotation_visual_bounds(ann));
 }
 
-TEST(annotation_hit_test, AnnotationShowsCornerBrackets_LineReturnsTrue) {
-    EXPECT_TRUE(Annotation_shows_corner_brackets(AnnotationKind::Line));
+TEST(annotation_hit_test, AnnotationSelectionFrameBounds_LineMatchesVisualBounds) {
+    Annotation const line = Make_line(1, {10, 20}, {50, 60}, 4);
+
+    EXPECT_EQ(Annotation_selection_frame_bounds(line), Annotation_visual_bounds(line));
 }
 
-TEST(annotation_hit_test, AnnotationShowsCornerBrackets_RectangleReturnsFalse) {
-    EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Rectangle));
+TEST(annotation_hit_test,
+     AnnotationSelectionFrameBounds_RectangleExpandsOutwardByOnePx) {
+    Annotation const rect = Make_rectangle(1, RectPx::From_ltrb(10, 20, 50, 60), 4);
+
+    EXPECT_EQ(Annotation_selection_frame_bounds(rect),
+              (RectPx::From_ltrb(9, 19, 51, 61)));
 }
 
-TEST(annotation_hit_test, AnnotationShowsCornerBrackets_EllipseReturnsFalse) {
-    EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Ellipse));
+TEST(annotation_hit_test, AnnotationSelectionFrameBounds_EllipseExpandsOutwardByOnePx) {
+    Annotation const ellipse = Make_ellipse(1, RectPx::From_ltrb(10, 20, 50, 60), 4);
+
+    EXPECT_EQ(Annotation_selection_frame_bounds(ellipse),
+              (RectPx::From_ltrb(9, 19, 51, 61)));
 }
 
-TEST(annotation_hit_test, AnnotationShowsCornerBrackets_ObfuscateReturnsFalse) {
-    EXPECT_FALSE(Annotation_shows_corner_brackets(AnnotationKind::Obfuscate));
+TEST(annotation_hit_test,
+     AnnotationSelectionFrameBounds_ObfuscateExpandsOutwardByOnePx) {
+    Annotation const obfuscate =
+        Make_obfuscate(7, RectPx::From_ltrb(10, 20, 50, 60), 4);
+
+    EXPECT_EQ(Annotation_selection_frame_bounds(obfuscate),
+              (RectPx::From_ltrb(9, 19, 51, 61)));
 }
 
 TEST(annotation_hit_test, AnnotationVisualBounds_FreehandMatchesHitTestBounds) {

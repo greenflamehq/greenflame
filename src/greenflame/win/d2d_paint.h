@@ -10,6 +10,9 @@
 
 namespace greenflame {
 
+// Length of the repeating color pattern for the selected-annotation marquee, in pixels.
+inline constexpr int32_t kSelectedAnnotationMarqueePatternLengthPx = 8;
+
 struct D2DOverlayResources;
 class IOverlayButton;
 class IOverlayTopLayer;
@@ -46,6 +49,7 @@ struct D2DPaintInput {
     std::array<std::wstring_view, 4> selection_wheel_font_families = {};
     float draft_freehand_blit_opacity = 1.0f;
     int32_t highlighter_wheel_current_opacity_percent = 0;
+    int32_t selected_annotation_marquee_phase_px = 0;
     COLORREF highlighter_wheel_current_color = 0;
     // Ring layout for clamped-nav wheels: the last segment is a phantom (not drawn).
     float selection_wheel_ring_angle_offset = 0.0f;
@@ -58,7 +62,6 @@ struct D2DPaintInput {
     core::RectPx final_selection = {};
     core::RectPx draft_text_caret_rect = {};
     std::optional<core::StrokeStyle> draft_freehand_style = std::nullopt;
-    std::optional<core::RectPx> selected_annotation_bounds = std::nullopt;
     std::optional<core::RectPx> hovered_toolbar_bounds = std::nullopt;
     bool draft_text_insert_mode = true;
     bool draft_text_blink_visible = true;

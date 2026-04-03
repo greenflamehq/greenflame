@@ -429,6 +429,12 @@ Hit_test_annotation_edit_target(Annotation const *selected_annotation,
         }
     }
 
+    if (selected_annotation != nullptr &&
+        Annotation_selection_frame_bounds(*selected_annotation).Contains(cursor)) {
+        return AnnotationEditTarget{selected_annotation->id,
+                                    AnnotationEditTargetKind::Body};
+    }
+
     std::optional<size_t> const index =
         Index_of_topmost_annotation_at(annotations, cursor);
     if (!index.has_value()) {

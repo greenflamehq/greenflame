@@ -40,7 +40,8 @@ The annotation system applies only to the interactive overlay flow.
 - After a region exists, border/corner drag still resizes the selection.
 - When no annotation tool is selected, the overlay is in its default interaction
   mode:
-  - click and drag an annotation to select it and move it
+  - click and drag an annotation to select it; once selected, dragging anywhere
+    inside its selection box moves it
   - if the selected annotation is a line, drag either endpoint handle to edit it
   - click and drag empty space inside the selection to move the selection
   - clicking empty space outside the selection clears the selected annotation

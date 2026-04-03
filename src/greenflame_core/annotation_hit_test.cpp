@@ -563,22 +563,6 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
         annotation.data);
 }
 
-bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept {
-    switch (kind) {
-    case AnnotationKind::Freehand:
-    case AnnotationKind::Line:
-    case AnnotationKind::Text:
-        return true;
-    case AnnotationKind::Rectangle:
-    case AnnotationKind::Ellipse:
-    case AnnotationKind::Obfuscate:
-        return false;
-    case AnnotationKind::Bubble:
-        return true;
-    }
-    return true;
-}
-
 RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept {
     return std::visit(
         Overloaded{
@@ -617,6 +601,27 @@ RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept {
             },
         },
         annotation.data);
+}
+
+RectPx Annotation_selection_frame_bounds(Annotation const &annotation) noexcept {
+    RectPx const bounds = Annotation_visual_bounds(annotation).Normalized();
+    if (bounds.Is_empty()) {
+        return bounds;
+    }
+
+    switch (annotation.Kind()) {
+    case AnnotationKind::Rectangle:
+    case AnnotationKind::Ellipse:
+    case AnnotationKind::Obfuscate:
+        return RectPx::From_ltrb(bounds.left - 1, bounds.top - 1, bounds.right + 1,
+                                 bounds.bottom + 1);
+    case AnnotationKind::Freehand:
+    case AnnotationKind::Line:
+    case AnnotationKind::Text:
+    case AnnotationKind::Bubble:
+        return bounds;
+    }
+    return bounds;
 }
 
 bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept {

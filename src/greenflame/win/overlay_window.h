@@ -122,6 +122,7 @@ class OverlayWindow final {
     // Core reader: opens clipboard, copies format data to out, closes clipboard.
     [[nodiscard]] bool Read_clipboard_bytes(UINT fmt, std::string &out) const;
     void Reset_caret_blink();
+    void Update_selected_annotation_marquee_timer() noexcept;
     void Cancel_highlighter_straighten_pending() noexcept;
     void Handle_device_loss();
     [[nodiscard]] bool Can_show_selection_wheel() const noexcept;
@@ -227,6 +228,7 @@ class OverlayWindow final {
     int mouse_wheel_delta_remainder_ = 0;
     std::wstring transient_center_label_text_ = {};
     bool caret_blink_visible_ = true;
+    int32_t selected_annotation_marquee_phase_px_ = 0;
     bool suppress_next_lbutton_up_ = false;
     std::vector<ToolbarButtonEntry> toolbar_buttons_;
     SelectionWheelState selection_wheel_ = {};

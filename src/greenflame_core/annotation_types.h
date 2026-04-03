@@ -118,6 +118,4 @@ struct AnnotationDocument final {
     constexpr bool operator==(AnnotationDocument const &) const noexcept = default;
 };
 
-[[nodiscard]] bool Annotation_shows_corner_brackets(AnnotationKind kind) noexcept;
-
 } // namespace greenflame::core

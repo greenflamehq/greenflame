@@ -1449,6 +1449,10 @@ TEST(annotation_controller,
     EXPECT_EQ(controller.Annotation_edit_target_at({50, 42}),
               (std::optional<AnnotationEditTarget>{
                   AnnotationEditTarget{1, AnnotationEditTargetKind::Body}}));
+    EXPECT_FALSE(Annotation_hits_point(controller.Annotations()[0], {60, 60}));
+    EXPECT_EQ(controller.Annotation_edit_target_at({60, 60}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{1, AnnotationEditTargetKind::Body}}));
 }
 
 TEST(annotation_controller,

@@ -73,6 +73,19 @@ Annotation Make_obfuscate(uint64_t id, RectPx bounds, int32_t block_size) {
     return annotation;
 }
 
+Annotation Make_bubble(uint64_t id, PointPx center, int32_t diameter_px) {
+    Annotation annotation{};
+    annotation.id = id;
+    annotation.data = BubbleAnnotation{
+        .center = center,
+        .diameter_px = diameter_px,
+        .color = RGB(0x88, 0xcc, 0x44),
+        .font_choice = TextFontChoice::Sans,
+        .counter_value = 1,
+    };
+    return annotation;
+}
+
 class RecordingEditInteractionHost final : public IAnnotationEditInteractionHost {
   public:
     [[nodiscard]] Annotation const *
@@ -215,6 +228,10 @@ TEST(annotation_edit_interaction,
     EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {48, 40}),
               (std::optional<AnnotationEditTarget>{
                   AnnotationEditTarget{3, AnnotationEditTargetKind::Body}}));
+    EXPECT_FALSE(Annotation_hits_point(annotations[0], {60, 60}));
+    EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {60, 60}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{3, AnnotationEditTargetKind::Body}}));
 }
 
 TEST(annotation_edit_interaction,
@@ -346,6 +363,17 @@ TEST(annotation_edit_interaction, HitTest_FreehandStroke_NoHandlesForRoundTip) {
     EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {40, 40}),
               (std::optional<AnnotationEditTarget>{
                   AnnotationEditTarget{6, AnnotationEditTargetKind::Body}}));
+}
+
+TEST(annotation_edit_interaction, HitTest_SelectedBubbleBodyUsesSelectionFrameBounds) {
+    Annotation const bubble = Make_bubble(18, {50, 50}, 20);
+    std::vector<Annotation> const annotations = {bubble};
+
+    EXPECT_FALSE(Annotation_hits_point(annotations[0], {40, 40}));
+    EXPECT_TRUE(Annotation_selection_frame_bounds(annotations[0]).Contains({40, 40}));
+    EXPECT_EQ(Hit_test_annotation_edit_target(&annotations[0], annotations, {40, 40}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{18, AnnotationEditTargetKind::Body}}));
 }
 
 TEST(annotation_edit_interaction,

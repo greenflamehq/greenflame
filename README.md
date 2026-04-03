@@ -45,7 +45,7 @@ Once a region is selected:
 With **no annotation tool selected** (the default mode):
 
 - **Click and drag inside the selection** to **move** it (hold **Alt** to disable snapping).
-- **Click and drag an annotation** to **select** and **move** it.
+- **Click and drag an annotation** to **select** it; once selected, drag anywhere inside its selection box to move it.
 - A **selected line or arrow annotation** shows draggable endpoint handles you can drag to reshape it.
 - **Selected rectangle, ellipse, and obfuscate annotations** show draggable resize handles on the corners and sides.
 

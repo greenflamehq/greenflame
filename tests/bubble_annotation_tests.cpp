@@ -123,11 +123,14 @@ TEST(bubble_annotation, Translate_PreservesOtherFields) {
 }
 
 // ---------------------------------------------------------------------------
-// Annotation_shows_corner_brackets
+// Annotation_selection_frame_bounds
 // ---------------------------------------------------------------------------
 
-TEST(bubble_annotation, ShowsCornerBrackets_ReturnsTrue) {
-    EXPECT_TRUE(Annotation_shows_corner_brackets(AnnotationKind::Bubble));
+TEST(bubble_annotation, SelectionFrameBounds_MatchesVisualBounds) {
+    Annotation const bubble = Make_bubble(9, {50, 50}, 20);
+
+    EXPECT_EQ(Annotation_selection_frame_bounds(bubble),
+              Annotation_visual_bounds(bubble));
 }
 
 // ---------------------------------------------------------------------------

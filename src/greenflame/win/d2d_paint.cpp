@@ -31,6 +31,9 @@ constexpr size_t kSelectionWheelHubOpacitySwipeBandCount = 6u;
 constexpr D2D1_COLOR_F kSelectionWheelHubInactiveFill = Make_d2d_color(244, 246, 241);
 constexpr D2D1_COLOR_F kSelectionWheelHubActiveFill = Make_d2d_color(220, 239, 216);
 constexpr D2D1_COLOR_F kSelectionWheelHubHoverFill = Make_d2d_color(206, 231, 199);
+constexpr D2D1_COLOR_F kSelectedAnnotationMarqueeBlack = Make_d2d_color(0, 0, 0);
+constexpr D2D1_COLOR_F kSelectedAnnotationMarqueeGray = Make_d2d_color(187, 187, 187);
+constexpr D2D1_COLOR_F kSelectedAnnotationMarqueeWhite = Make_d2d_color(255, 255, 255);
 
 void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot,
                                   core::RectPx restore_rect, int vd_width,
@@ -63,6 +66,34 @@ Blend_colors(D2D1_COLOR_F base, D2D1_COLOR_F overlay, float overlay_alpha) noexc
             base.b * inverse_alpha + overlay.b * overlay_alpha,
             base.a * inverse_alpha + overlay.a * overlay_alpha};
 }
+
+enum class SelectedAnnotationMarqueeColor : uint8_t { Black, Gray, White };
+
+[[nodiscard]] constexpr int32_t Positive_mod(int32_t value, int32_t modulus) noexcept {
+    int32_t const remainder = value % modulus;
+    return remainder < 0 ? remainder + modulus : remainder;
+}
+
+// Color at each position in the repeating 8-pixel pattern (Black–Gray–White–Gray).
+constexpr std::array<SelectedAnnotationMarqueeColor,
+                     kSelectedAnnotationMarqueePatternLengthPx>
+    kMarqueePattern = {{
+        SelectedAnnotationMarqueeColor::Black,
+        SelectedAnnotationMarqueeColor::Black,
+        SelectedAnnotationMarqueeColor::Black,
+        SelectedAnnotationMarqueeColor::Gray,
+        SelectedAnnotationMarqueeColor::White,
+        SelectedAnnotationMarqueeColor::White,
+        SelectedAnnotationMarqueeColor::White,
+        SelectedAnnotationMarqueeColor::Gray,
+    }};
+
+// D2D color for each SelectedAnnotationMarqueeColor ordinal.
+constexpr std::array<D2D1_COLOR_F, 3> kMarqueeColors = {{
+    kSelectedAnnotationMarqueeBlack, // Black
+    kSelectedAnnotationMarqueeGray,  // Gray
+    kSelectedAnnotationMarqueeWhite, // White
+}};
 
 [[nodiscard]] std::wstring_view
 Resolve_text_font_family(core::TextAnnotationBaseStyle const &style,
@@ -897,12 +928,148 @@ void Draw_endpoint_handle(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     Draw_square_outline_d2d(rt, res, square(body - halo * 2), RGB(255, 255, 255));
 }
 
-void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                             core::Annotation const *ann,
-                             std::optional<core::RectPx> ann_bounds) {
+void Fill_horizontal_marquee_run(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                                 int32_t start_x, int32_t end_x, int32_t y,
+                                 SelectedAnnotationMarqueeColor color) {
+    if (start_x > end_x) {
+        return;
+    }
+
+    res.solid_brush->SetColor(kMarqueeColors[static_cast<size_t>(color)]);
+    rt->FillRectangle(D2D1::RectF(static_cast<float>(start_x), static_cast<float>(y),
+                                  static_cast<float>(end_x + 1),
+                                  static_cast<float>(y + 1)),
+                      res.solid_brush.Get());
+}
+
+void Fill_vertical_marquee_run(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                               int32_t x, int32_t start_y, int32_t end_y,
+                               SelectedAnnotationMarqueeColor color) {
+    if (start_y > end_y) {
+        return;
+    }
+
+    res.solid_brush->SetColor(kMarqueeColors[static_cast<size_t>(color)]);
+    rt->FillRectangle(D2D1::RectF(static_cast<float>(x), static_cast<float>(start_y),
+                                  static_cast<float>(x + 1),
+                                  static_cast<float>(end_y + 1)),
+                      res.solid_brush.Get());
+}
+
+void Draw_horizontal_marquee_edge(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                                  int32_t start_x, int32_t y, int32_t length,
+                                  int32_t path_start, int32_t phase_px, bool reverse) {
+    if (length <= 0) {
+        return;
+    }
+
+    int32_t run_start = 0;
+    while (run_start < length) {
+        SelectedAnnotationMarqueeColor const color =
+            kMarqueePattern[static_cast<size_t>(
+                Positive_mod(path_start + run_start - phase_px,
+                             kSelectedAnnotationMarqueePatternLengthPx))];
+        int32_t run_end = run_start;
+        while (run_end + 1 < length) {
+            SelectedAnnotationMarqueeColor const next_color =
+                kMarqueePattern[static_cast<size_t>(
+                    Positive_mod(path_start + run_end + 1 - phase_px,
+                                 kSelectedAnnotationMarqueePatternLengthPx))];
+            if (next_color != color) {
+                break;
+            }
+            ++run_end;
+        }
+
+        int32_t const edge_start_x = reverse ? start_x - run_end : start_x + run_start;
+        int32_t const edge_end_x = reverse ? start_x - run_start : start_x + run_end;
+        Fill_horizontal_marquee_run(rt, res, edge_start_x, edge_end_x, y, color);
+        run_start = run_end + 1;
+    }
+}
+
+void Draw_vertical_marquee_edge(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                                int32_t x, int32_t start_y, int32_t length,
+                                int32_t path_start, int32_t phase_px, bool reverse) {
+    if (length <= 0) {
+        return;
+    }
+
+    int32_t run_start = 0;
+    while (run_start < length) {
+        SelectedAnnotationMarqueeColor const color =
+            kMarqueePattern[static_cast<size_t>(
+                Positive_mod(path_start + run_start - phase_px,
+                             kSelectedAnnotationMarqueePatternLengthPx))];
+        int32_t run_end = run_start;
+        while (run_end + 1 < length) {
+            SelectedAnnotationMarqueeColor const next_color =
+                kMarqueePattern[static_cast<size_t>(
+                    Positive_mod(path_start + run_end + 1 - phase_px,
+                                 kSelectedAnnotationMarqueePatternLengthPx))];
+            if (next_color != color) {
+                break;
+            }
+            ++run_end;
+        }
+
+        int32_t const edge_start_y = reverse ? start_y - run_end : start_y + run_start;
+        int32_t const edge_end_y = reverse ? start_y - run_start : start_y + run_end;
+        Fill_vertical_marquee_run(rt, res, x, edge_start_y, edge_end_y, color);
+        run_start = run_end + 1;
+    }
+}
+
+void Draw_selected_annotation_marquee(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                                      core::Annotation const *ann, int32_t phase_px) {
     if (!ann) {
         return;
     }
+
+    core::RectPx const bounds =
+        core::Annotation_selection_frame_bounds(*ann).Normalized();
+    if (bounds.Is_empty()) {
+        return;
+    }
+
+    int32_t const width = bounds.Width();
+    int32_t const height = bounds.Height();
+    if (width == 1) {
+        Draw_vertical_marquee_edge(rt, res, bounds.left, bounds.top, height, 0,
+                                   phase_px, false);
+        return;
+    }
+    if (height == 1) {
+        Draw_horizontal_marquee_edge(rt, res, bounds.left, bounds.top, width, 0,
+                                     phase_px, false);
+        return;
+    }
+
+    // Clockwise perimeter traversal with unique corner ownership:
+    // top row owns both top corners, right edge owns bottom-right, bottom row owns
+    // bottom-left, and left edge excludes both corners.
+    int32_t const top_length = width;
+    int32_t const right_length = height - 1;
+    int32_t const bottom_length = width - 1;
+    int32_t const left_length = height - 2;
+    Draw_horizontal_marquee_edge(rt, res, bounds.left, bounds.top, top_length, 0,
+                                 phase_px, false);
+    Draw_vertical_marquee_edge(rt, res, bounds.right - 1, bounds.top + 1, right_length,
+                               top_length, phase_px, false);
+    Draw_horizontal_marquee_edge(rt, res, bounds.right - 2, bounds.bottom - 1,
+                                 bottom_length, top_length + right_length, phase_px,
+                                 true);
+    Draw_vertical_marquee_edge(rt, res, bounds.left, bounds.bottom - 2, left_length,
+                               top_length + right_length + bottom_length, phase_px,
+                               true);
+}
+
+void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                             core::Annotation const *ann) {
+    if (!ann) {
+        return;
+    }
+
     // Type-specific interactive handles.
     if (core::LineAnnotation const *const line =
             std::get_if<core::LineAnnotation>(&ann->data)) {
@@ -951,42 +1118,6 @@ void Draw_annotation_handles(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                         obfuscate->bounds, static_cast<core::SelectionHandle>(i)));
             }
         }
-    }
-    // L-bracket selection frame. ann_bounds is the tight axis-aligned bounding
-    // box of the annotation's drawn geometry, not including interactive handles.
-    if (core::Annotation_shows_corner_brackets(ann->Kind()) && ann_bounds.has_value() &&
-        !ann_bounds->Is_empty()) {
-        core::RectPx const r = ann_bounds->Normalized();
-        int const cw = std::min(core::kMaxCornerSizePx, r.Width() / 2);
-        int const ch = std::min(core::kMaxCornerSizePx, r.Height() / 2);
-        res.solid_brush->SetColor(kBorderColor);
-        float const l = static_cast<float>(r.left);
-        float const t = static_cast<float>(r.top);
-        float const ri = static_cast<float>(r.right - 1);
-        float const b = static_cast<float>(r.bottom - 1);
-        float const fcw = static_cast<float>(cw);
-        float const fch = static_cast<float>(ch);
-
-        // Top-left corner
-        rt->DrawLine(D2D1::Point2F(l, t + fch), D2D1::Point2F(l, t),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        rt->DrawLine(D2D1::Point2F(l, t), D2D1::Point2F(l + fcw, t),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        // Top-right corner
-        rt->DrawLine(D2D1::Point2F(ri - fcw, t), D2D1::Point2F(ri, t),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        rt->DrawLine(D2D1::Point2F(ri, t), D2D1::Point2F(ri, t + fch),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        // Bottom-left corner
-        rt->DrawLine(D2D1::Point2F(l, b - fch), D2D1::Point2F(l, b),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        rt->DrawLine(D2D1::Point2F(l, b), D2D1::Point2F(l + fcw, b),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        // Bottom-right corner
-        rt->DrawLine(D2D1::Point2F(ri - fcw, b), D2D1::Point2F(ri, b),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
-        rt->DrawLine(D2D1::Point2F(ri, b), D2D1::Point2F(ri, b - fch),
-                     res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
     }
 }
 
@@ -2094,10 +2225,11 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         Draw_border_highlight(rt, res, disp_sel, *input.highlight_handle);
     }
 
-    // Annotation handles (selected annotation).
+    // Selected annotation chrome.
     if (input.selected_annotation != nullptr) {
-        Draw_annotation_handles(rt, res, input.selected_annotation,
-                                input.selected_annotation_bounds);
+        Draw_selected_annotation_marquee(rt, res, input.selected_annotation,
+                                         input.selected_annotation_marquee_phase_px);
+        Draw_annotation_handles(rt, res, input.selected_annotation);
     }
 
     // Cursor previews (clipped to final selection).

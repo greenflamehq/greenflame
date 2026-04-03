@@ -46,6 +46,9 @@ constexpr int kCursorToolGlyphResourceId = 115;
 constexpr UINT_PTR kBrushSizeOverlayTimerId = 1;
 constexpr UINT_PTR kCaretBlinkTimerId = 2;
 constexpr UINT_PTR kHighlighterStraightenTimerId = 3;
+constexpr UINT_PTR kSelectedAnnotationMarqueeTimerId = 4;
+constexpr UINT kSelectedAnnotationMarqueeTimerIntervalMs = 60;
+constexpr int32_t kSelectedAnnotationMarqueePhaseStepPx = 1;
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -1573,6 +1576,21 @@ void OverlayWindow::Reset_caret_blink() {
     (void)SetTimer(hwnd_, kCaretBlinkTimerId, interval, nullptr);
 }
 
+void OverlayWindow::Update_selected_annotation_marquee_timer() noexcept {
+    if (hwnd_ == nullptr) {
+        return;
+    }
+
+    if (controller_.Should_show_selected_annotation_handles()) {
+        (void)SetTimer(hwnd_, kSelectedAnnotationMarqueeTimerId,
+                       kSelectedAnnotationMarqueeTimerIntervalMs, nullptr);
+        return;
+    }
+
+    selected_annotation_marquee_phase_px_ = 0;
+    (void)KillTimer(hwnd_, kSelectedAnnotationMarqueeTimerId);
+}
+
 bool OverlayWindow::Can_show_selection_wheel() const noexcept {
     auto const &s = controller_.State();
     std::optional<core::AnnotationToolId> const active_tool =
@@ -2065,6 +2083,7 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
     if (action != core::OverlayAction::None) {
         Rebuild_toolbar_buttons();
     }
+    Update_selected_annotation_marquee_timer();
     if (selection_wheel_.visible && !Can_show_selection_wheel()) {
         Dismiss_selection_wheel(false);
     }
@@ -2994,6 +3013,19 @@ LRESULT OverlayWindow::On_timer(WPARAM wparam) {
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
+    if (wparam == kSelectedAnnotationMarqueeTimerId) {
+        if (!controller_.Should_show_selected_annotation_handles()) {
+            selected_annotation_marquee_phase_px_ = 0;
+            (void)KillTimer(hwnd_, kSelectedAnnotationMarqueeTimerId);
+            return 0;
+        }
+        selected_annotation_marquee_phase_px_ =
+            (selected_annotation_marquee_phase_px_ +
+             kSelectedAnnotationMarqueePhaseStepPx) %
+            greenflame::kSelectedAnnotationMarqueePatternLengthPx;
+        InvalidateRect(hwnd_, nullptr, FALSE);
+        return 0;
+    }
     return DefWindowProcW(hwnd_, WM_TIMER, wparam, 0);
 }
 
@@ -3556,6 +3588,8 @@ LRESULT OverlayWindow::On_paint() {
                       core::StrokeStyle::kMaxOpacityPercent)) /
                       100.f
                 : 1.0f;
+        input.selected_annotation_marquee_phase_px =
+            selected_annotation_marquee_phase_px_;
         if (draft_text_view.has_value()) {
             input.draft_text_annotation = draft_text_view->annotation;
             input.draft_text_selection_rects =
@@ -3571,7 +3605,6 @@ LRESULT OverlayWindow::On_paint() {
         }
         if (controller_.Should_show_selected_annotation_handles()) {
             input.selected_annotation = controller_.Selected_annotation();
-            input.selected_annotation_bounds = controller_.Selected_annotation_bounds();
         }
         input.transient_center_label_text = transient_center_label_text_;
         input.toolbar_tooltip_text = Hovered_toolbar_tooltip_text();
@@ -3724,7 +3757,9 @@ void OverlayWindow::Handle_device_loss() {
 LRESULT OverlayWindow::On_destroy() {
     Clear_transient_center_label(false);
     caret_blink_visible_ = true;
+    selected_annotation_marquee_phase_px_ = 0;
     (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+    (void)KillTimer(hwnd_, kSelectedAnnotationMarqueeTimerId);
     Cancel_highlighter_straighten_pending();
     mouse_wheel_delta_remainder_ = 0;
     suppress_next_lbutton_up_ = false;
