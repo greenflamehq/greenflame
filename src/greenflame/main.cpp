@@ -3,6 +3,7 @@
 #include "console_output.h"
 #include "greenflame_app.h"
 #include "version_string.h"
+#include "win/debug_log.h"
 
 namespace {
 
@@ -87,6 +88,8 @@ Acquire_tray_single_instance_lock(ScopedHandle &lock) {
 } // namespace
 
 int WINAPI wWinMain(HINSTANCE h_instance, HINSTANCE, PWSTR, int) {
+    GREENFLAME_INSTALL_DEBUG_CRASH_LOGGING();
+
     std::vector<std::wstring> const args = Command_line_args_without_program();
     greenflame::core::CliParseResult const parse_result =
         greenflame::core::Parse_cli_arguments(args, kDebugBuild);

@@ -98,6 +98,7 @@ class OverlayWindow final {
                                  std::span<wchar_t> out) const;
     [[nodiscard]] std::wstring Resolve_default_save_directory() const;
     [[nodiscard]] core::RectPx Selection_screen_rect() const;
+    [[nodiscard]] core::RectPx Selection_visible_screen_rect() const;
     void Save_directly_and_close(bool copy_saved_file_to_clipboard);
     void Save_as_and_close(bool copy_saved_file_to_clipboard);
     void Copy_to_clipboard_and_close();
@@ -167,6 +168,17 @@ class OverlayWindow final {
     [[nodiscard]] std::wstring Build_captured_cursor_tooltip() const;
     [[nodiscard]] std::wstring Build_pin_tooltip() const;
     [[nodiscard]] bool Rebuild_display_capture();
+    [[nodiscard]] core::RectPx
+    Visible_window_rect_screen(core::RectPx window_rect_screen) const noexcept;
+    [[nodiscard]] std::optional<HWND>
+    Resolve_ctrl_preview_window(core::PointPx cursor_screen,
+                                std::optional<core::RectPx> &window_rect_screen) const;
+    [[nodiscard]] bool Update_ctrl_window_preview(HWND window,
+                                                  core::RectPx capture_rect_screen);
+    [[nodiscard]] core::PointPx
+    Update_pointer_state_from_current_input(core::OverlayModifierState mods);
+    void Refresh_pointer_visual_overlays(core::PointPx cursor_client);
+    void Restore_selection_state(core::OverlaySelectionState const &state);
     [[nodiscard]] bool Maybe_show_obfuscate_warning();
     [[nodiscard]] IOverlayTopLayer *Active_top_layer() noexcept;
     [[nodiscard]] std::wstring_view Hovered_toolbar_tooltip_text() const noexcept;

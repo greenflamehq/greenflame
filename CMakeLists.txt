@@ -321,6 +321,8 @@ add_executable(greenflame WIN32
     src/greenflame/app_config_store.h
     src/greenflame/win/display_queries.cpp
     src/greenflame/win/display_queries.h
+    src/greenflame/win/debug_log.cpp
+    src/greenflame/win/debug_log.h
     src/greenflame/win/gdi_capture.cpp
     src/greenflame/win/gdi_capture.h
     src/greenflame/win/save_image.cpp
@@ -372,6 +374,9 @@ target_include_directories(greenflame PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
+# Optional temp-file debug/crash logging for local investigation.
+# Uncomment to write diagnostic logs to %TEMP%\greenflame-debug.log.
+# target_compile_definitions(greenflame PRIVATE GREENFLAME_LOG)
 target_compile_definitions(greenflame PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN

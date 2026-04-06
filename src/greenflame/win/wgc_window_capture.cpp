@@ -1,4 +1,5 @@
 #include "win/wgc_window_capture.h"
+#include "win/debug_log.h"
 
 namespace {
 
@@ -31,7 +32,11 @@ class ScopedHandle final {
         handle_ = handle;
     }
 
-    [[nodiscard]] HANDLE Get() const noexcept { return handle_; }
+    [[nodiscard]] HANDLE Release() noexcept {
+        HANDLE const handle = handle_;
+        handle_ = nullptr;
+        return handle;
+    }
 
     [[nodiscard]] explicit operator bool() const noexcept {
         return handle_ != nullptr && handle_ != INVALID_HANDLE_VALUE;
@@ -41,21 +46,26 @@ class ScopedHandle final {
     HANDLE handle_ = nullptr;
 };
 
-class ScopedApartment final {
+class FrameArrivalState final {
   public:
-    explicit ScopedApartment(bool owns_apartment) noexcept
-        : owns_apartment_(owns_apartment) {}
-    ~ScopedApartment() {
-        if (owns_apartment_) {
-            winrt::uninit_apartment();
+    explicit FrameArrivalState(HANDLE event_handle) noexcept
+        : frame_arrived_event(event_handle) {}
+    ~FrameArrivalState() {
+        if (frame_arrived_event != nullptr &&
+            frame_arrived_event != INVALID_HANDLE_VALUE) {
+            CloseHandle(frame_arrived_event);
         }
     }
 
-    ScopedApartment(ScopedApartment const &) = delete;
-    ScopedApartment &operator=(ScopedApartment const &) = delete;
+    FrameArrivalState(FrameArrivalState const &) = delete;
+    FrameArrivalState &operator=(FrameArrivalState const &) = delete;
 
-  private:
-    bool owns_apartment_ = false;
+    HANDLE frame_arrived_event = nullptr;
+    Direct3D11CaptureFrame captured_frame{nullptr};
+    std::wstring frame_error_message = {};
+    bool frame_ready = false;
+    bool frame_failed = false;
+    std::mutex frame_mutex = {};
 };
 
 class ScopedTextureMap final {
@@ -105,6 +115,21 @@ class ScopedTextureMap final {
     bool mapped_ = false;
 };
 
+enum class WgcSupportState : uint8_t {
+    Unknown = 0,
+    Supported = 1,
+    Unsupported = 2,
+    SehFailed = 3,
+};
+
+enum class WgcApartmentState : uint8_t {
+    Unknown = 0,
+    InitializedSta = 1,
+    ExistingApartment = 2,
+};
+
+[[nodiscard]] std::wstring Build_hresult_error(std::wstring_view prefix, HRESULT hr);
+
 [[nodiscard]] std::wstring Trim_trailing_wspace(std::wstring text) {
     while (!text.empty() && std::iswspace(text.back()) != 0) {
         text.pop_back();
@@ -137,6 +162,146 @@ class ScopedTextureMap final {
     std::wstring message(buffer, static_cast<size_t>(length));
     LocalFree(buffer);
     return Trim_trailing_wspace(std::move(message));
+}
+
+[[nodiscard]] std::wstring Format_exception_code(DWORD code) {
+    constexpr std::array<wchar_t, 16> hex_chars = {{L'0', L'1', L'2', L'3', L'4', L'5',
+                                                    L'6', L'7', L'8', L'9', L'A', L'B',
+                                                    L'C', L'D', L'E', L'F'}};
+    constexpr int nibbles = 8;
+    constexpr uint32_t nibble_mask = 0xFu;
+    std::wstring message = L"0x00000000";
+    for (int i = 0; i < nibbles; ++i) {
+        message[message.size() - 1u - static_cast<size_t>(i)] =
+            hex_chars[(code >> (i * 4)) & nibble_mask];
+    }
+    return message;
+}
+
+#define LOG_WGC_MESSAGE(message_expression)                                            \
+    GREENFLAME_LOG_WRITE(L"wgc", (message_expression))
+
+[[nodiscard]] std::mutex &Wgc_support_mutex() noexcept {
+    static std::mutex mutex = {};
+    return mutex;
+}
+
+[[nodiscard]] WgcSupportState &Cached_wgc_support_state() noexcept {
+    static WgcSupportState state = WgcSupportState::Unknown;
+    return state;
+}
+
+[[nodiscard]] WgcApartmentState &Capture_thread_apartment_state() noexcept {
+    thread_local WgcApartmentState state = WgcApartmentState::Unknown;
+    return state;
+}
+
+LONG Capture_support_probe_exception(EXCEPTION_POINTERS *exception_pointers,
+                                     DWORD *exception_code) noexcept {
+    if (exception_code != nullptr) {
+        *exception_code = (exception_pointers != nullptr &&
+                           exception_pointers->ExceptionRecord != nullptr)
+                              ? exception_pointers->ExceptionRecord->ExceptionCode
+                              : EXCEPTION_ACCESS_VIOLATION;
+    }
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+
+[[nodiscard]] bool Probe_wgc_support_with_seh(bool &is_supported,
+                                              DWORD &exception_code) noexcept {
+    is_supported = false;
+    exception_code = ERROR_SUCCESS;
+    __try {
+        is_supported = GraphicsCaptureSession::IsSupported();
+        return true;
+    } __except (
+        Capture_support_probe_exception(GetExceptionInformation(), &exception_code)) {
+        return false;
+    }
+}
+
+[[nodiscard]] bool
+Ensure_wgc_support(std::wstring &error_message,
+                   [[maybe_unused]] std::wstring const &log_context) {
+    std::lock_guard<std::mutex> const lock(Wgc_support_mutex());
+    WgcSupportState &cached_state = Cached_wgc_support_state();
+    switch (cached_state) {
+    case WgcSupportState::Supported:
+        LOG_WGC_MESSAGE(log_context + L" support_cache_hit=supported");
+        return true;
+    case WgcSupportState::Unsupported:
+        LOG_WGC_MESSAGE(log_context + L" support_cache_hit=unsupported");
+        error_message = L"Error: WGC window capture is not supported on this system.";
+        return false;
+    case WgcSupportState::SehFailed:
+        LOG_WGC_MESSAGE(log_context + L" support_cache_hit=seh_failed");
+        error_message =
+            L"Error: WGC support probing previously faulted in this process.";
+        return false;
+    case WgcSupportState::Unknown:
+        break;
+    }
+
+    LOG_WGC_MESSAGE(log_context + L" checking_support");
+    bool is_supported = false;
+    DWORD exception_code = ERROR_SUCCESS;
+    if (!Probe_wgc_support_with_seh(is_supported, exception_code)) {
+        cached_state = WgcSupportState::SehFailed;
+        error_message = L"Error: WGC support probing faulted with exception " +
+                        Format_exception_code(exception_code) + L".";
+        LOG_WGC_MESSAGE(log_context + L" support_check_seh=" +
+                        Format_exception_code(exception_code));
+        return false;
+    }
+
+    cached_state =
+        is_supported ? WgcSupportState::Supported : WgcSupportState::Unsupported;
+    LOG_WGC_MESSAGE(log_context + std::wstring(L" support_check_result=") +
+                    (is_supported ? L"supported" : L"unsupported"));
+    if (!is_supported) {
+        error_message = L"Error: WGC window capture is not supported on this system.";
+        return false;
+    }
+    return true;
+}
+
+[[nodiscard]] bool
+Ensure_wgc_capture_thread_apartment(std::wstring &error_message,
+                                    [[maybe_unused]] std::wstring const &log_context) {
+    WgcApartmentState &cached_state = Capture_thread_apartment_state();
+    switch (cached_state) {
+    case WgcApartmentState::InitializedSta:
+    case WgcApartmentState::ExistingApartment:
+        LOG_WGC_MESSAGE(log_context +
+                        (cached_state == WgcApartmentState::InitializedSta
+                             ? std::wstring(L" apartment_cache_hit=initialized_sta")
+                             : std::wstring(L" apartment_cache_hit=existing")));
+        return true;
+    case WgcApartmentState::Unknown:
+        break;
+    }
+
+    try {
+        // Keep the apartment alive for the UI thread lifetime. Repeated
+        // init/uninit around interactive preview destabilized the capture-item
+        // activation path on subsequent captures.
+        winrt::init_apartment(winrt::apartment_type::single_threaded);
+        cached_state = WgcApartmentState::InitializedSta;
+        LOG_WGC_MESSAGE(log_context + L" apartment_initialized=sta");
+        return true;
+    } catch (winrt::hresult_error const &error) {
+        if (error.code() == RPC_E_CHANGED_MODE) {
+            cached_state = WgcApartmentState::ExistingApartment;
+            LOG_WGC_MESSAGE(log_context + L" apartment_initialized=existing");
+            return true;
+        }
+
+        error_message =
+            Build_hresult_error(L"Error: Failed to initialize the WinRT apartment "
+                                L"for WGC window capture",
+                                error.code());
+        return false;
+    }
 }
 
 [[nodiscard]] std::wstring Build_hresult_error(std::wstring_view prefix, HRESULT hr) {
@@ -225,28 +390,45 @@ Try_create_d3d11_device(Microsoft::WRL::ComPtr<ID3D11Device> &device,
     return true;
 }
 
-[[nodiscard]] bool Try_create_capture_item(HWND hwnd, GraphicsCaptureItem &item,
-                                           std::wstring &error_message) {
+[[nodiscard]] bool
+Try_create_capture_item(HWND hwnd, GraphicsCaptureItem &item,
+                        std::wstring &error_message,
+                        [[maybe_unused]] std::wstring const &log_context) {
     if (hwnd == nullptr) {
         error_message = L"Error: WGC window capture requires a valid HWND.";
         return false;
     }
 
-    try {
-        auto const interop =
-            winrt::get_activation_factory<GraphicsCaptureItem,
-                                          IGraphicsCaptureItemInterop>();
-        winrt::check_hresult(interop->CreateForWindow(
-            hwnd,
-            winrt::guid_of<winrt::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
-            winrt::put_abi(item)));
-    } catch (winrt::hresult_error const &error) {
+    LOG_WGC_MESSAGE(log_context + L" acquiring_capture_item_factory");
+    std::wstring_view const class_name_view = winrt::name_of<GraphicsCaptureItem>();
+    winrt::hstring const class_name(
+        class_name_view.data(),
+        static_cast<winrt::hstring::size_type>(class_name_view.size()));
+    winrt::com_ptr<IGraphicsCaptureItemInterop> interop;
+    HRESULT const factory_hr = RoGetActivationFactory(
+        reinterpret_cast<HSTRING>(winrt::get_abi(class_name)),
+        __uuidof(IGraphicsCaptureItemInterop), interop.put_void());
+    if (FAILED(factory_hr) || !interop) {
+        error_message =
+            Build_hresult_error(L"Error: Failed to acquire the WGC capture-item "
+                                L"activation factory",
+                                factory_hr);
+        return false;
+    }
+    LOG_WGC_MESSAGE(log_context + L" capture_item_factory_ready");
+
+    LOG_WGC_MESSAGE(log_context + L" invoking_CreateForWindow");
+    HRESULT const create_hr = interop->CreateForWindow(
+        hwnd, winrt::guid_of<winrt::Windows::Graphics::Capture::IGraphicsCaptureItem>(),
+        winrt::put_abi(item));
+    if (FAILED(create_hr)) {
         error_message =
             Build_hresult_error(L"Error: Failed to create a WGC capture item for "
                                 L"the target window",
-                                error.code());
+                                create_hr);
         return false;
     }
+    LOG_WGC_MESSAGE(log_context + L" CreateForWindow_succeeded");
     return true;
 }
 
@@ -384,11 +566,23 @@ Try_create_d3d11_device(Microsoft::WRL::ComPtr<ID3D11Device> &device,
         error_message = L"Error: Failed to compute WGC window capture row bytes.";
         return false;
     }
+    if (map.Get().RowPitch < static_cast<UINT>(row_bytes)) {
+        capture.Free();
+        error_message =
+            L"Error: WGC window capture returned an invalid staging row pitch.";
+        return false;
+    }
 
     size_t const destination_byte_count =
         static_cast<size_t>(row_bytes) * static_cast<size_t>(content_size.Height);
-    size_t const source_byte_count = static_cast<size_t>(map.Get().RowPitch) *
-                                     static_cast<size_t>(content_size.Height);
+    size_t const source_row_bytes = static_cast<size_t>(map.Get().RowPitch);
+    size_t const height_size = static_cast<size_t>(content_size.Height);
+    if (height_size > std::numeric_limits<size_t>::max() / source_row_bytes) {
+        capture.Free();
+        error_message = L"Error: WGC window capture source frame size overflowed.";
+        return false;
+    }
+    size_t const source_byte_count = source_row_bytes * height_size;
     CLANG_WARN_IGNORE_PUSH("-Wunsafe-buffer-usage-in-container")
     std::span<uint8_t> destination_bytes{reinterpret_cast<uint8_t *>(bitmap_bits),
                                          destination_byte_count};
@@ -418,75 +612,90 @@ core::CaptureSaveResult Capture_window_with_wgc(HWND hwnd,
                                                 core::RectPx window_rect_screen,
                                                 GdiCaptureResult &capture_out) {
     capture_out.Free();
-    if (hwnd == nullptr || window_rect_screen.Is_empty()) {
-        return Make_backend_failure(
+    core::RectPx const normalized_window_rect = window_rect_screen.Normalized();
+#if defined(GREENFLAME_LOG)
+    std::wstring const log_context = std::wstring(L"hwnd=") +
+                                     Format_hwnd_for_debug_log(hwnd) + L" rect=" +
+                                     Format_rect_for_debug_log(normalized_window_rect);
+#else
+    std::wstring const log_context = {};
+#endif
+    auto log_and_fail = [&](std::wstring const &message) {
+        LOG_WGC_MESSAGE(log_context + L" failure: " + message);
+        return Make_backend_failure(message);
+    };
+
+    if (hwnd == nullptr || normalized_window_rect.Is_empty()) {
+        return log_and_fail(
             L"Error: WGC window capture requires a valid window target.");
     }
+    LOG_WGC_MESSAGE(log_context + L" begin");
 
-    bool owns_apartment = false;
-    try {
-        winrt::init_apartment(winrt::apartment_type::single_threaded);
-        owns_apartment = true;
-    } catch (winrt::hresult_error const &error) {
-        if (error.code() != RPC_E_CHANGED_MODE) {
-            return Make_backend_failure(Build_hresult_error(
-                L"Error: Failed to initialize the WinRT apartment for CLI WGC "
-                L"window capture",
-                error.code()));
-        }
+    std::wstring error_message = {};
+    if (!Ensure_wgc_capture_thread_apartment(error_message, log_context)) {
+        return log_and_fail(error_message);
     }
-    ScopedApartment const apartment(owns_apartment);
+    LOG_WGC_MESSAGE(log_context + L" apartment_ready");
 
     std::wstring failure_context = L"checking WGC support";
     try {
-        if (!GraphicsCaptureSession::IsSupported()) {
-            return Make_backend_failure(
-                L"Error: WGC window capture is not supported on this system.");
+        error_message.clear();
+        if (!Ensure_wgc_support(error_message, log_context)) {
+            return log_and_fail(error_message);
         }
+        LOG_WGC_MESSAGE(log_context + L" support_confirmed");
 
         int32_t expected_width = 0;
         int32_t expected_height = 0;
-        if (!window_rect_screen.Try_get_size(expected_width, expected_height)) {
-            return Make_backend_failure(
+        if (!normalized_window_rect.Try_get_size(expected_width, expected_height)) {
+            return log_and_fail(
                 L"Error: WGC window capture received an invalid window rect.");
         }
+        LOG_WGC_MESSAGE(log_context + L" expected_size=" +
+                        std::to_wstring(expected_width) + L"x" +
+                        std::to_wstring(expected_height));
 
         Microsoft::WRL::ComPtr<ID3D11Device> d3d_device;
         Microsoft::WRL::ComPtr<ID3D11DeviceContext> d3d_context;
-        std::wstring error_message = {};
+        error_message.clear();
+        LOG_WGC_MESSAGE(log_context + L" creating_d3d_device");
         if (!Try_create_d3d11_device(d3d_device, d3d_context, error_message)) {
-            return Make_backend_failure(error_message);
+            return log_and_fail(error_message);
         }
+        LOG_WGC_MESSAGE(log_context + L" d3d_device_ready");
 
         IDirect3DDevice winrt_device{nullptr};
+        LOG_WGC_MESSAGE(log_context + L" creating_winrt_device");
         if (!Try_create_winrt_d3d_device(d3d_device.Get(), winrt_device,
                                          error_message)) {
-            return Make_backend_failure(error_message);
+            return log_and_fail(error_message);
         }
+        LOG_WGC_MESSAGE(log_context + L" winrt_device_ready");
 
         GraphicsCaptureItem item{nullptr};
-        if (!Try_create_capture_item(hwnd, item, error_message)) {
-            return Make_backend_failure(error_message);
+        LOG_WGC_MESSAGE(log_context + L" creating_capture_item");
+        if (!Try_create_capture_item(hwnd, item, error_message, log_context)) {
+            return log_and_fail(error_message);
         }
+        LOG_WGC_MESSAGE(log_context + L" capture_item_ready");
 
         failure_context = L"reading the WGC capture item size";
+        LOG_WGC_MESSAGE(log_context + L" reading_item_size");
         winrt::Windows::Graphics::SizeInt32 const initial_size = item.Size();
         if (initial_size.Width <= 0 || initial_size.Height <= 0) {
-            return Make_backend_failure(
+            return log_and_fail(
                 L"Error: WGC window capture item reported an invalid window size.");
         }
+        LOG_WGC_MESSAGE(log_context + L" item_size=" +
+                        std::to_wstring(initial_size.Width) + L"x" +
+                        std::to_wstring(initial_size.Height));
 
         ScopedHandle frame_arrived_event(CreateEventW(nullptr, TRUE, FALSE, nullptr));
         if (!frame_arrived_event) {
-            return Make_backend_failure(
-                L"Error: Failed to create the WGC frame wait event.");
+            return log_and_fail(L"Error: Failed to create the WGC frame wait event.");
         }
-
-        Direct3D11CaptureFrame captured_frame{nullptr};
-        std::wstring frame_error_message = {};
-        bool frame_ready = false;
-        bool frame_failed = false;
-        std::mutex frame_mutex;
+        std::shared_ptr<FrameArrivalState> const frame_state =
+            std::make_shared<FrameArrivalState>(frame_arrived_event.Release());
 
         failure_context = L"creating the WGC frame pool";
         Direct3D11CaptureFramePool frame_pool =
@@ -495,70 +704,117 @@ core::CaptureSaveResult Capture_window_with_wgc(HWND hwnd,
                 winrt::Windows::Graphics::DirectX::DirectXPixelFormat::
                     B8G8R8A8UIntNormalized,
                 kWgcFramePoolBufferCount, initial_size);
-        [[maybe_unused]] auto const frame_arrived_revoker = frame_pool.FrameArrived(
-            winrt::auto_revoke, [&](Direct3D11CaptureFramePool const &sender,
+        [[maybe_unused]] auto frame_arrived_revoker = frame_pool.FrameArrived(
+            winrt::auto_revoke, [frame_state, log_context](
+                                    Direct3D11CaptureFramePool const &sender,
                                     winrt::Windows::Foundation::IInspectable const &) {
-                std::lock_guard<std::mutex> const lock(frame_mutex);
-                if (frame_ready || frame_failed) {
+                std::lock_guard<std::mutex> const lock(frame_state->frame_mutex);
+                if (frame_state->frame_ready || frame_state->frame_failed) {
                     return;
                 }
 
                 try {
-                    captured_frame = sender.TryGetNextFrame();
-                    if (!captured_frame) {
-                        frame_failed = true;
-                        frame_error_message =
+                    frame_state->captured_frame = sender.TryGetNextFrame();
+                    if (!frame_state->captured_frame) {
+                        frame_state->frame_failed = true;
+                        frame_state->frame_error_message =
                             L"Error: WGC window capture did not yield a frame.";
+                        LOG_WGC_MESSAGE(log_context +
+                                        L" FrameArrived returned an empty frame");
                     } else {
-                        frame_ready = true;
+                        frame_state->frame_ready = true;
+                        LOG_WGC_MESSAGE(log_context + L" FrameArrived captured frame");
                     }
                 } catch (winrt::hresult_error const &error) {
-                    frame_failed = true;
-                    frame_error_message = Build_hresult_error(
+                    frame_state->frame_failed = true;
+                    frame_state->frame_error_message = Build_hresult_error(
                         L"Error: WGC window capture failed while acquiring a frame",
                         error.code());
+                    LOG_WGC_MESSAGE(log_context + L" FrameArrived hresult failure");
+                } catch (std::bad_alloc const &) {
+                    frame_state->frame_failed = true;
+                    LOG_WGC_MESSAGE(log_context + L" FrameArrived bad_alloc");
+                } catch (...) {
+                    frame_state->frame_failed = true;
+                    LOG_WGC_MESSAGE(log_context +
+                                    L" FrameArrived unexpected exception");
                 }
 
-                (void)SetEvent(frame_arrived_event.Get());
+                if (frame_state->frame_arrived_event != nullptr &&
+                    frame_state->frame_arrived_event != INVALID_HANDLE_VALUE) {
+                    (void)SetEvent(frame_state->frame_arrived_event);
+                }
             });
 
         failure_context = L"creating the WGC capture session";
-        GraphicsCaptureSession const session = frame_pool.CreateCaptureSession(item);
+        GraphicsCaptureSession session = frame_pool.CreateCaptureSession(item);
+        failure_context = L"disabling WGC cursor capture";
+        session.IsCursorCaptureEnabled(false);
+        LOG_WGC_MESSAGE(log_context + L" cursor_capture_disabled");
         failure_context = L"starting the WGC capture session";
         session.StartCapture();
+        LOG_WGC_MESSAGE(log_context + L" session started");
+
+        auto stop_capture = [&]() noexcept {
+            frame_arrived_revoker.revoke();
+            try {
+                session.Close();
+            } catch ([[maybe_unused]] winrt::hresult_error const &error) {
+                LOG_WGC_MESSAGE(log_context + L" session.Close hresult failure " +
+                                std::to_wstring(static_cast<uint32_t>(error.code())));
+            } catch (...) {
+                LOG_WGC_MESSAGE(log_context + L" session.Close unexpected exception");
+            }
+            try {
+                frame_pool.Close();
+            } catch ([[maybe_unused]] winrt::hresult_error const &error) {
+                LOG_WGC_MESSAGE(log_context + L" frame_pool.Close hresult failure " +
+                                std::to_wstring(static_cast<uint32_t>(error.code())));
+            } catch (...) {
+                LOG_WGC_MESSAGE(log_context +
+                                L" frame_pool.Close unexpected exception");
+            }
+        };
 
         DWORD const wait_result =
-            WaitForSingleObject(frame_arrived_event.Get(), kWgcFrameTimeoutMs);
+            WaitForSingleObject(frame_state->frame_arrived_event, kWgcFrameTimeoutMs);
+        stop_capture();
+        LOG_WGC_MESSAGE(log_context + L" wait_result=" + std::to_wstring(wait_result));
         if (wait_result == WAIT_TIMEOUT) {
-            return Make_backend_failure(
+            return log_and_fail(
                 L"Error: WGC window capture timed out waiting for the first frame.");
         }
         if (wait_result != WAIT_OBJECT_0) {
-            return Make_backend_failure(
+            if (wait_result == WAIT_FAILED) {
+                LOG_WGC_MESSAGE(log_context + L" wait_failed_last_error=" +
+                                std::to_wstring(GetLastError()));
+            }
+            return log_and_fail(
                 L"Error: WGC window capture failed while waiting for the first frame.");
         }
+        LOG_WGC_MESSAGE(log_context + L" first frame signaled");
 
         Direct3D11CaptureFrame frame_to_convert{nullptr};
         {
-            std::lock_guard<std::mutex> const lock(frame_mutex);
-            if (frame_failed) {
-                return Make_backend_failure(frame_error_message.empty()
-                                                ? L"Error: WGC window capture "
-                                                  L"failed while acquiring a frame."
-                                                : frame_error_message);
+            std::lock_guard<std::mutex> const lock(frame_state->frame_mutex);
+            if (frame_state->frame_failed) {
+                return log_and_fail(frame_state->frame_error_message.empty()
+                                        ? L"Error: WGC window capture failed while "
+                                          L"acquiring a frame."
+                                        : frame_state->frame_error_message);
             }
-            if (!frame_ready || !captured_frame) {
-                return Make_backend_failure(
+            if (!frame_state->frame_ready || !frame_state->captured_frame) {
+                return log_and_fail(
                     L"Error: WGC window capture did not receive a usable frame.");
             }
-            frame_to_convert = captured_frame;
+            frame_to_convert = frame_state->captured_frame;
         }
 
         failure_context = L"converting the WGC frame";
         if (!Try_copy_frame_to_capture(d3d_device.Get(), d3d_context.Get(),
                                        frame_to_convert, capture_out, error_message)) {
             capture_out.Free();
-            return Make_backend_failure(error_message);
+            return log_and_fail(error_message);
         }
 
         int const actual_width = capture_out.width;
@@ -574,15 +830,29 @@ core::CaptureSaveResult Capture_window_with_wgc(HWND hwnd,
             message += L"x";
             message += std::to_wstring(expected_height);
             message += L".";
-            return Make_backend_failure(message);
+            return log_and_fail(message);
         }
 
+        LOG_WGC_MESSAGE(log_context + L" success capture_size=" +
+                        std::to_wstring(actual_width) + L"x" +
+                        std::to_wstring(actual_height));
         return Make_success();
     } catch (winrt::hresult_error const &error) {
         std::wstring prefix = L"Error: WGC window capture failed while ";
         prefix += failure_context;
         capture_out.Free();
-        return Make_backend_failure(Build_hresult_error(prefix, error.code()));
+        return log_and_fail(Build_hresult_error(prefix, error.code()));
+    } catch (std::bad_alloc const &) {
+        capture_out.Free();
+        return log_and_fail(L"Error: WGC window capture ran out of memory.");
+    } catch (std::exception const &) {
+        capture_out.Free();
+        std::wstring message = L"Error: WGC window capture hit a standard exception.";
+        LOG_WGC_MESSAGE(log_context + L" std::exception while " + failure_context);
+        return Make_backend_failure(message);
+    } catch (...) {
+        capture_out.Free();
+        return log_and_fail(L"Error: WGC window capture hit an unexpected exception.");
     }
 }
 

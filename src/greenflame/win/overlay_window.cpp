@@ -18,10 +18,12 @@
 #include "greenflame_core/window_query.h"
 #include "win/d2d_overlay_resources.h"
 #include "win/d2d_paint.h"
+#include "win/debug_log.h"
 #include "win/display_queries.h"
 #include "win/gdi_capture.h"
 #include "win/save_image.h"
 #include "win/ui_palette.h"
+#include "win/wgc_window_capture.h"
 
 namespace {
 
@@ -216,6 +218,53 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
     out.x = p.x;
     out.y = p.y;
     return out;
+}
+
+[[nodiscard]] greenflame::core::RectPx
+Capture_bounds_screen(greenflame::core::PointPx origin,
+                      greenflame::GdiCaptureResult const &capture) noexcept {
+    if (!capture.Is_valid()) {
+        return {};
+    }
+    return greenflame::core::RectPx::From_ltrb(
+        origin.x, origin.y, origin.x + capture.width, origin.y + capture.height);
+}
+
+[[nodiscard]] bool Rebuild_capture_display(
+    greenflame::GdiCaptureResult const &base_capture,
+    std::optional<greenflame::CapturedCursorSnapshot> const &captured_cursor,
+    bool include_captured_cursor, greenflame::core::PointPx capture_origin_px,
+    greenflame::GdiCaptureResult &display_capture) {
+    if (!base_capture.Is_valid()) {
+        return false;
+    }
+
+    int const width = base_capture.width;
+    int const height = base_capture.height;
+    if (display_capture.Is_valid() && display_capture.width == width &&
+        display_capture.height == height) {
+        if (!greenflame::Blit_capture(base_capture, 0, 0, width, height,
+                                      display_capture, 0, 0)) {
+            display_capture.Free();
+            return false;
+        }
+    } else {
+        display_capture.Free();
+        if (!greenflame::Crop_capture(base_capture, 0, 0, width, height,
+                                      display_capture)) {
+            return false;
+        }
+    }
+
+    if (include_captured_cursor && captured_cursor.has_value() &&
+        captured_cursor->Is_valid() &&
+        !greenflame::Composite_cursor_snapshot(*captured_cursor, capture_origin_px,
+                                               display_capture)) {
+        display_capture.Free();
+        return false;
+    }
+
+    return true;
 }
 
 [[nodiscard]] HCURSOR Cursor_for_handle(greenflame::core::SelectionHandle handle) {
@@ -608,10 +657,31 @@ Build_preview_obfuscate_annotation(
 namespace greenflame {
 
 struct OverlayWindow::OverlayResources {
+    struct WindowCaptureState final {
+        HWND window = nullptr;
+        GdiCaptureResult base_capture = {};
+        GdiCaptureResult display_capture = {};
+        core::RectPx capture_rect_screen = {};
+        core::RectPx visible_rect_screen = {};
+        core::PointPx visible_offset_px = {};
+        bool has_full_capture = false;
+
+        void Reset() noexcept {
+            window = nullptr;
+            base_capture.Free();
+            display_capture.Free();
+            capture_rect_screen = {};
+            visible_rect_screen = {};
+            visible_offset_px = {};
+            has_full_capture = false;
+        }
+    };
+
     GdiCaptureResult base_capture = {};
     GdiCaptureResult display_capture = {};
     std::optional<CapturedCursorSnapshot> captured_cursor = std::nullopt;
     core::PointPx capture_origin_px = {};
+    WindowCaptureState window_capture = {};
     std::array<std::shared_ptr<OverlayButtonGlyph const>,
                static_cast<size_t>(OverlayToolbarGlyphId::Count)>
         toolbar_glyphs = {};
@@ -650,6 +720,7 @@ struct OverlayWindow::OverlayResources {
         display_capture.Free();
         captured_cursor.reset();
         capture_origin_px = {};
+        window_capture.Reset();
         for (auto &glyph : toolbar_glyphs) {
             glyph.reset();
         }
@@ -663,8 +734,7 @@ struct OverlayWindow::ObfuscateSourceProvider final
     [[nodiscard]] std::optional<core::BgraBitmap> Build_composited_source(
         core::RectPx bounds,
         std::span<const core::Annotation> lower_annotations) override {
-        if (owner_ == nullptr || owner_->resources_ == nullptr ||
-            !owner_->resources_->display_capture.Is_valid()) {
+        if (owner_ == nullptr || owner_->resources_ == nullptr) {
             return std::nullopt;
         }
 
@@ -673,10 +743,33 @@ struct OverlayWindow::ObfuscateSourceProvider final
             return std::nullopt;
         }
 
+        GdiCaptureResult const *source_capture = nullptr;
+        core::RectPx source_bounds = {};
+        auto const &state = owner_->controller_.State();
+        if (state.selection_uses_full_window_capture &&
+            owner_->resources_->window_capture.display_capture.Is_valid() &&
+            !state.selection_capture_rect_screen.Is_empty()) {
+            RECT overlay_rect{};
+            if (GetWindowRect(owner_->hwnd_, &overlay_rect) == 0) {
+                return std::nullopt;
+            }
+            source_capture = &owner_->resources_->window_capture.display_capture;
+            source_bounds =
+                core::Screen_rect_to_client_rect(state.selection_capture_rect_screen,
+                                                 overlay_rect.left, overlay_rect.top);
+        } else if (owner_->resources_->display_capture.Is_valid()) {
+            source_capture = &owner_->resources_->display_capture;
+            source_bounds = {};
+        } else {
+            return std::nullopt;
+        }
+
         GdiCaptureResult cropped{};
-        if (!Crop_capture(owner_->resources_->display_capture, normalized_bounds.left,
-                          normalized_bounds.top, normalized_bounds.Width(),
-                          normalized_bounds.Height(), cropped)) {
+        int32_t const crop_left = normalized_bounds.left - source_bounds.left;
+        int32_t const crop_top = normalized_bounds.top - source_bounds.top;
+        if (!Crop_capture(*source_capture, crop_left, crop_top,
+                          normalized_bounds.Width(), normalized_bounds.Height(),
+                          cropped)) {
             return std::nullopt;
         }
 
@@ -754,37 +847,228 @@ bool OverlayWindow::Rebuild_display_capture() {
     if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
         return false;
     }
-
-    int const w = resources_->base_capture.width;
-    int const h = resources_->base_capture.height;
-
-    // Reuse the existing allocation when dimensions match to avoid a large DIB
-    // alloc/free cycle on every cursor toggle.
-    if (resources_->display_capture.Is_valid() &&
-        resources_->display_capture.width == w &&
-        resources_->display_capture.height == h) {
-        if (!Blit_capture(resources_->base_capture, 0, 0, w, h,
-                          resources_->display_capture, 0, 0)) {
-            resources_->display_capture.Free();
-            return false;
-        }
-    } else {
-        resources_->display_capture.Free();
-        if (!Crop_capture(resources_->base_capture, 0, 0, w, h,
-                          resources_->display_capture)) {
-            return false;
-        }
-    }
-
-    if (Is_captured_cursor_visible() && Current_capture_has_captured_cursor() &&
-        !Composite_cursor_snapshot(*resources_->captured_cursor,
-                                   resources_->capture_origin_px,
-                                   resources_->display_capture)) {
-        resources_->display_capture.Free();
+    if (!Rebuild_capture_display(resources_->base_capture, resources_->captured_cursor,
+                                 Is_captured_cursor_visible(),
+                                 resources_->capture_origin_px,
+                                 resources_->display_capture)) {
         return false;
     }
 
+    if (resources_->window_capture.base_capture.Is_valid()) {
+        if (!Rebuild_capture_display(
+                resources_->window_capture.base_capture, resources_->captured_cursor,
+                Is_captured_cursor_visible(),
+                resources_->window_capture.capture_rect_screen.Top_left(),
+                resources_->window_capture.display_capture)) {
+            resources_->window_capture.Reset();
+        }
+    }
+
     return true;
+}
+
+core::RectPx OverlayWindow::Visible_window_rect_screen(
+    core::RectPx window_rect_screen) const noexcept {
+    if (resources_ == nullptr) {
+        return {};
+    }
+
+    core::RectPx const capture_bounds =
+        Capture_bounds_screen(resources_->capture_origin_px, resources_->base_capture);
+    std::optional<core::RectPx> const visible =
+        core::RectPx::Intersect(window_rect_screen.Normalized(), capture_bounds);
+    return visible.value_or(core::RectPx{});
+}
+
+std::optional<HWND> OverlayWindow::Resolve_ctrl_preview_window(
+    core::PointPx cursor_screen,
+    std::optional<core::RectPx> &window_rect_screen) const {
+    window_rect_screen = std::nullopt;
+    if (window_query_ == nullptr || hwnd_ == nullptr || resources_ == nullptr) {
+        return std::nullopt;
+    }
+
+    if (controller_.State().modifier_preview &&
+        resources_->window_capture.window != nullptr &&
+        resources_->window_capture.visible_rect_screen.Contains(cursor_screen)) {
+        window_rect_screen = resources_->window_capture.capture_rect_screen;
+        return resources_->window_capture.window;
+    }
+
+    std::optional<HWND> const window =
+        window_query_->Get_window_under_cursor(To_point(cursor_screen), hwnd_);
+    if (!window.has_value()) {
+        return std::nullopt;
+    }
+
+    window_rect_screen = window_query_->Get_window_rect(*window);
+    if (!window_rect_screen.has_value()) {
+        return std::nullopt;
+    }
+    return window;
+}
+
+bool OverlayWindow::Update_ctrl_window_preview(HWND window,
+                                               core::RectPx capture_rect_screen) {
+    if (resources_ == nullptr) {
+        return false;
+    }
+
+    core::RectPx const normalized_capture_rect = capture_rect_screen.Normalized();
+    core::RectPx const visible_rect_screen =
+        Visible_window_rect_screen(normalized_capture_rect);
+    core::PointPx const visible_offset_px = {
+        visible_rect_screen.left - normalized_capture_rect.left,
+        visible_rect_screen.top - normalized_capture_rect.top};
+
+    auto &window_capture = resources_->window_capture;
+    if (window_capture.window == window &&
+        window_capture.capture_rect_screen == normalized_capture_rect) {
+        window_capture.visible_rect_screen = visible_rect_screen;
+        window_capture.visible_offset_px = visible_offset_px;
+        return window_capture.has_full_capture;
+    }
+
+    GREENFLAME_LOG_WRITE(L"overlay",
+                         std::wstring(L"Ctrl preview capture request hwnd=") +
+                             Format_hwnd_for_debug_log(window) + L" capture_rect=" +
+                             Format_rect_for_debug_log(normalized_capture_rect) +
+                             L" visible_rect=" +
+                             Format_rect_for_debug_log(visible_rect_screen));
+
+    window_capture.Reset();
+    window_capture.window = window;
+    window_capture.capture_rect_screen = normalized_capture_rect;
+    window_capture.visible_rect_screen = visible_rect_screen;
+    window_capture.visible_offset_px = visible_offset_px;
+
+    core::CaptureSaveResult const capture_result = Capture_window_with_wgc(
+        window, normalized_capture_rect, window_capture.base_capture);
+    if (capture_result.status != core::CaptureSaveStatus::Success ||
+        !window_capture.base_capture.Is_valid()) {
+        GREENFLAME_LOG_WRITE(
+            L"overlay", std::wstring(L"Ctrl preview WGC capture failed hwnd=") +
+                            Format_hwnd_for_debug_log(window) + L" status=" +
+                            std::to_wstring(static_cast<int>(capture_result.status)) +
+                            L" message=" + capture_result.error_message);
+        window_capture.base_capture.Free();
+        window_capture.display_capture.Free();
+        window_capture.has_full_capture = false;
+        if (d2d_resources_ != nullptr) {
+            d2d_resources_->Clear_lifted_window_capture();
+        }
+        return false;
+    }
+
+    window_capture.has_full_capture = Rebuild_capture_display(
+        window_capture.base_capture, resources_->captured_cursor,
+        Is_captured_cursor_visible(), normalized_capture_rect.Top_left(),
+        window_capture.display_capture);
+    if (!window_capture.has_full_capture) {
+        GREENFLAME_LOG_WRITE(
+            L"overlay", std::wstring(L"Ctrl preview display rebuild failed hwnd=") +
+                            Format_hwnd_for_debug_log(window));
+        window_capture.base_capture.Free();
+        window_capture.display_capture.Free();
+        if (d2d_resources_ != nullptr) {
+            d2d_resources_->Clear_lifted_window_capture();
+        }
+    } else if (d2d_resources_ != nullptr &&
+               !d2d_resources_->Upload_lifted_window_capture(
+                   window_capture.display_capture)) {
+        GREENFLAME_LOG_WRITE(
+            L"overlay",
+            std::wstring(L"Ctrl preview lifted bitmap upload failed hwnd=") +
+                Format_hwnd_for_debug_log(window) + L" capture_size=" +
+                std::to_wstring(window_capture.display_capture.width) + L"x" +
+                std::to_wstring(window_capture.display_capture.height));
+        window_capture.base_capture.Free();
+        window_capture.display_capture.Free();
+        window_capture.has_full_capture = false;
+        d2d_resources_->Clear_lifted_window_capture();
+    } else {
+        GREENFLAME_LOG_WRITE(
+            L"overlay", std::wstring(L"Ctrl preview capture ready hwnd=") +
+                            Format_hwnd_for_debug_log(window) + L" capture_size=" +
+                            std::to_wstring(window_capture.display_capture.width) +
+                            L"x" +
+                            std::to_wstring(window_capture.display_capture.height));
+    }
+
+    return window_capture.has_full_capture;
+}
+
+core::PointPx OverlayWindow::Update_pointer_state_from_current_input(
+    core::OverlayModifierState mods) {
+    core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
+
+    auto const &s = controller_.State();
+    bool const needs_preview = !s.dragging && !s.handle_dragging && !s.move_dragging &&
+                               s.final_selection.Is_empty() &&
+                               (mods.shift || mods.ctrl);
+    core::PointPx cursor_screen{};
+    std::optional<core::RectPx> win_rect;
+    core::RectPx vdesk{};
+    std::optional<size_t> monitor_idx;
+    int32_t ox = 0;
+    int32_t oy = 0;
+    if (needs_preview) {
+        cursor_screen = Get_cursor_pos_px();
+        RECT wr{};
+        GetWindowRect(hwnd_, &wr);
+        ox = wr.left;
+        oy = wr.top;
+        if (mods.ctrl && !mods.shift) {
+            std::optional<HWND> const preview_window =
+                Resolve_ctrl_preview_window(cursor_screen, win_rect);
+            if (preview_window.has_value() && win_rect.has_value()) {
+                (void)Update_ctrl_window_preview(*preview_window, *win_rect);
+            }
+        }
+        if (mods.shift && mods.ctrl) {
+            vdesk = Get_virtual_desktop_bounds_px();
+        }
+        monitor_idx =
+            (mods.shift && !mods.ctrl)
+                ? core::Index_of_monitor_containing(cursor_screen, s.cached_monitors)
+                : std::nullopt;
+    }
+
+    core::OverlayAction const action = controller_.On_pointer_move(
+        mods, cursor_client, cursor_screen, win_rect, vdesk, monitor_idx, ox, oy);
+    Apply_action(action);
+    return cursor_client;
+}
+
+void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client) {
+    if (Refresh_hover_handle()) {
+        InvalidateRect(hwnd_, nullptr, TRUE);
+    }
+
+    if (Update_toolbar_hover_states(cursor_client)) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+
+    if (Should_force_obfuscate_repaint() ||
+        (!controller_.Has_active_annotation_gesture() &&
+         (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
+          controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+    }
+}
+
+void OverlayWindow::Restore_selection_state(core::OverlaySelectionState const &state) {
+    controller_.Restore_selection_state(state);
+    if (d2d_resources_ != nullptr) {
+        if (state.selection_uses_full_window_capture && resources_ != nullptr &&
+            resources_->window_capture.display_capture.Is_valid()) {
+            (void)d2d_resources_->Upload_lifted_window_capture(
+                resources_->window_capture.display_capture);
+        }
+        d2d_resources_->Invalidate_annotations();
+    }
+    InvalidateRect(hwnd_, nullptr, TRUE);
 }
 
 void OverlayWindow::Toggle_captured_cursor_visibility() {
@@ -807,6 +1091,15 @@ void OverlayWindow::Toggle_captured_cursor_visibility() {
         if (!d2d_resources_->Upload_screenshot(resources_->display_capture)) {
             Handle_device_loss();
             return;
+        }
+        if (resources_->window_capture.display_capture.Is_valid()) {
+            if (!d2d_resources_->Upload_lifted_window_capture(
+                    resources_->window_capture.display_capture)) {
+                Handle_device_loss();
+                return;
+            }
+        } else {
+            d2d_resources_->Clear_lifted_window_capture();
         }
         d2d_resources_->Invalidate_annotations();
     }
@@ -1155,6 +1448,12 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
                                               resources_->display_capture.height)) {
         d2d_resources_.reset();
     } else {
+        if (resources_->window_capture.display_capture.Is_valid()) {
+            (void)d2d_resources_->Upload_lifted_window_capture(
+                resources_->window_capture.display_capture);
+        } else {
+            d2d_resources_->Clear_lifted_window_capture();
+        }
         auto const glyphs = resources_->Glyph_pointers();
         (void)d2d_resources_->Upload_glyph_bitmaps(
             std::span<OverlayButtonGlyph const *const>(glyphs));
@@ -2457,35 +2756,12 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         }
     }
     if (wparam == VK_SHIFT || wparam == VK_CONTROL || wparam == VK_MENU) {
-        core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt};
-        // Pre-resolve preview hints only when a preview update is needed.
-        core::PointPx cursor_screen{};
-        std::optional<core::RectPx> win_rect;
-        core::RectPx vdesk{};
-        std::optional<size_t> monitor_idx;
-        int32_t ox = 0, oy = 0;
-        auto const &s = controller_.State();
-        bool const needs_preview = !s.dragging && !s.handle_dragging &&
-                                   s.final_selection.Is_empty() &&
-                                   (eff_shift || eff_ctrl);
-        if (needs_preview) {
-            cursor_screen = Get_cursor_pos_px();
-            RECT wr{};
-            GetWindowRect(hwnd_, &wr);
-            ox = wr.left;
-            oy = wr.top;
-            win_rect = (eff_ctrl && !eff_shift)
-                           ? window_query_->Get_window_rect_under_cursor(
-                                 To_point(cursor_screen), hwnd_)
-                           : std::nullopt;
-            if (eff_shift && eff_ctrl) vdesk = Get_virtual_desktop_bounds_px();
-            monitor_idx = (eff_shift && !eff_ctrl)
-                              ? core::Index_of_monitor_containing(cursor_screen,
-                                                                  s.cached_monitors)
-                              : std::nullopt;
-        }
-        Apply_action(controller_.On_modifier_changed(new_mods, cursor_screen, win_rect,
-                                                     vdesk, monitor_idx, ox, oy));
+        bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
+        core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt, primary_down};
+        core::PointPx const cursor_client =
+            Update_pointer_state_from_current_input(new_mods);
+        Refresh_pointer_visual_overlays(cursor_client);
+        Refresh_cursor();
         return 0;
     }
     UINT const message_id =
@@ -2514,9 +2790,12 @@ LRESULT OverlayWindow::On_key_up(WPARAM wparam, LPARAM lparam) {
         (wparam != VK_CONTROL) && (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool const eff_alt = (wparam != VK_MENU) && (GetKeyState(VK_MENU) & 0x8000) != 0;
     if (wparam == VK_SHIFT || wparam == VK_CONTROL || wparam == VK_MENU) {
-        core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt};
-        // On key-up, no preview hints: preview is being cleared, not set.
-        Apply_action(controller_.On_modifier_changed(new_mods, {}, {}, {}, {}, 0, 0));
+        bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
+        core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt, primary_down};
+        core::PointPx const cursor_client =
+            Update_pointer_state_from_current_input(new_mods);
+        Refresh_pointer_visual_overlays(cursor_client);
+        Refresh_cursor();
         return 0;
     }
     UINT const message_id =
@@ -2682,7 +2961,7 @@ LRESULT OverlayWindow::On_l_button_down() {
             }
         }
     }
-    core::RectPx const before_selection = controller_.State().final_selection;
+    core::OverlaySelectionState const before_selection = controller_.Selection_state();
     bool const shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     bool const ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -2695,11 +2974,16 @@ LRESULT OverlayWindow::On_l_button_down() {
     // Pre-resolve only the hint relevant to the active preview mode.
     std::optional<HWND> win_handle;
     std::optional<size_t> monitor_idx;
+    std::optional<core::RectPx> win_rect;
     core::RectPx vdesk{};
+    bool window_full_capture_available = false;
     bool const in_preview = controller_.State().modifier_preview;
     if (ctrl && !shift && in_preview) {
-        win_handle =
-            window_query_->Get_window_under_cursor(To_point(cursor_screen), hwnd_);
+        win_handle = Resolve_ctrl_preview_window(cursor_screen, win_rect);
+        if (win_handle.has_value() && win_rect.has_value()) {
+            window_full_capture_available =
+                Update_ctrl_window_preview(*win_handle, *win_rect);
+        }
     }
     if (shift && !ctrl && in_preview) {
         monitor_idx = core::Index_of_monitor_containing(
@@ -2709,10 +2993,9 @@ LRESULT OverlayWindow::On_l_button_down() {
         vdesk = Get_virtual_desktop_bounds_px();
     }
 
-    Apply_action(
-        controller_.On_primary_press(mods, cursor_client, cursor_screen, win_handle,
-                                     monitor_idx, std::optional<core::RectPx>{}, vdesk,
-                                     Collect_visible_snap_edges(), wr.left, wr.top));
+    Apply_action(controller_.On_primary_press(
+        mods, cursor_client, cursor_screen, win_handle, monitor_idx, win_rect, vdesk,
+        Collect_visible_snap_edges(), wr.left, wr.top, window_full_capture_available));
     if (controller_.Has_active_annotation_gesture() ||
         controller_.Has_active_text_edit()) {
         Clear_transient_center_label(false);
@@ -2752,17 +3035,17 @@ LRESULT OverlayWindow::On_l_button_down() {
         RedrawWindow(hwnd_, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
-    core::RectPx const after_selection = controller_.State().final_selection;
+    core::OverlaySelectionState const after_selection = controller_.Selection_state();
     auto const &after_state = controller_.State();
-    if (before_selection != after_selection && before_selection.Is_empty() &&
-        !after_selection.Is_empty() && !after_state.dragging &&
+    if (before_selection != after_selection &&
+        before_selection.final_selection.Is_empty() &&
+        !after_selection.final_selection.Is_empty() && !after_state.dragging &&
         !after_state.handle_dragging && !after_state.move_dragging) {
         controller_.Push_command(
-            std::make_unique<core::ModificationCommand<core::RectPx>>(
+            std::make_unique<core::ModificationCommand<core::OverlaySelectionState>>(
                 "Create selection",
-                [this](core::RectPx const &r) {
-                    controller_.Set_final_selection(r);
-                    InvalidateRect(hwnd_, nullptr, TRUE);
+                [this](core::OverlaySelectionState const &state) {
+                    Restore_selection_state(state);
                 },
                 before_selection, after_selection));
     }
@@ -2805,35 +3088,7 @@ LRESULT OverlayWindow::On_mouse_move() {
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
     core::OverlayModifierState mods{shift, ctrl, alt, primary_down};
-    core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
-
-    // Resolve expensive screen queries lazily — only when a preview update is needed.
-    auto const &s = controller_.State();
-    bool const needs_preview = !s.dragging && !s.handle_dragging && !s.move_dragging &&
-                               s.final_selection.Is_empty() && (shift || ctrl);
-    core::PointPx cursor_screen{};
-    std::optional<core::RectPx> win_rect;
-    core::RectPx vdesk{};
-    std::optional<size_t> monitor_idx;
-    int32_t ox = 0, oy = 0;
-    if (needs_preview) {
-        cursor_screen = Get_cursor_pos_px();
-        RECT wr{};
-        GetWindowRect(hwnd_, &wr);
-        ox = wr.left;
-        oy = wr.top;
-        win_rect = (ctrl && !shift) ? window_query_->Get_window_rect_under_cursor(
-                                          To_point(cursor_screen), hwnd_)
-                                    : std::nullopt;
-        if (shift && ctrl) vdesk = Get_virtual_desktop_bounds_px();
-        monitor_idx =
-            (shift && !ctrl)
-                ? core::Index_of_monitor_containing(cursor_screen, s.cached_monitors)
-                : std::nullopt;
-    }
-    core::OverlayAction const action = controller_.On_pointer_move(
-        mods, cursor_client, cursor_screen, win_rect, vdesk, monitor_idx, ox, oy);
-    Apply_action(action);
+    core::PointPx const cursor_client = Update_pointer_state_from_current_input(mods);
     if (highlighter_straighten_pending_) {
         int32_t const deadzone =
             config_ != nullptr ? config_->highlighter_pause_straighten_deadzone_px : 0;
@@ -2855,21 +3110,7 @@ LRESULT OverlayWindow::On_mouse_move() {
         Reset_caret_blink();
     }
 
-    if (Refresh_hover_handle()) {
-        InvalidateRect(hwnd_, nullptr, TRUE);
-    }
-
-    if (Update_toolbar_hover_states(cursor_client)) {
-        InvalidateRect(hwnd_, nullptr, FALSE);
-    }
-
-    if (Should_force_obfuscate_repaint() ||
-        (!controller_.Has_active_annotation_gesture() &&
-         (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
-          controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
-        RedrawWindow(hwnd_, nullptr, nullptr,
-                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
-    }
+    Refresh_pointer_visual_overlays(cursor_client);
 
     return 0;
 }
@@ -2969,13 +3210,20 @@ LRESULT OverlayWindow::On_l_button_up() {
         }
     }
     auto const &s = controller_.State();
-    core::RectPx const selection_before = s.final_selection;
+    core::OverlaySelectionState const selection_before = controller_.Selection_state();
     bool const was_drag = s.dragging;
     bool const was_move = s.move_dragging;
     bool const was_resize = s.handle_dragging;
-    core::RectPx const before =
-        was_move ? s.move_anchor_rect
-                 : (was_resize ? s.resize_anchor_rect : core::RectPx{});
+    // Build the "before" snapshot with the pre-drag rect, but leave other fields
+    // (including selection_uses_full_window_capture) as they are now — On_pointer_move
+    // already cleared them on the first movement. Undoing a move/resize therefore
+    // restores the selection position but not window-backed capture semantics.
+    core::OverlaySelectionState before = selection_before;
+    if (was_move) {
+        before.final_selection = s.move_anchor_rect;
+    } else if (was_resize) {
+        before.final_selection = s.resize_anchor_rect;
+    }
 
     Cancel_highlighter_straighten_pending();
     core::OverlayModifierState mods{};
@@ -2993,25 +3241,25 @@ LRESULT OverlayWindow::On_l_button_up() {
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
-    core::RectPx const after = controller_.State().final_selection;
+    core::OverlaySelectionState const after = controller_.Selection_state();
     if ((was_move || was_resize)) {
         if (before != after) {
             controller_.Push_command(
-                std::make_unique<core::ModificationCommand<core::RectPx>>(
+                std::make_unique<
+                    core::ModificationCommand<core::OverlaySelectionState>>(
                     was_move ? "Move selection" : "Resize selection",
-                    [this](core::RectPx const &r) {
-                        controller_.Set_final_selection(r);
-                        InvalidateRect(hwnd_, nullptr, TRUE);
+                    [this](core::OverlaySelectionState const &state) {
+                        Restore_selection_state(state);
                     },
                     before, after));
         }
-    } else if (was_drag && selection_before != after && !after.Is_empty()) {
+    } else if (was_drag && selection_before != after &&
+               !after.final_selection.Is_empty()) {
         controller_.Push_command(
-            std::make_unique<core::ModificationCommand<core::RectPx>>(
+            std::make_unique<core::ModificationCommand<core::OverlaySelectionState>>(
                 "Draw selection",
-                [this](core::RectPx const &r) {
-                    controller_.Set_final_selection(r);
-                    InvalidateRect(hwnd_, nullptr, TRUE);
+                [this](core::OverlaySelectionState const &state) {
+                    Restore_selection_state(state);
                 },
                 selection_before, after));
     }
@@ -3211,6 +3459,16 @@ void OverlayWindow::Build_default_save_name(std::wstring_view save_dir_for_num_s
 }
 
 core::RectPx OverlayWindow::Selection_screen_rect() const {
+    auto const &state = controller_.State();
+    if (state.selection_uses_full_window_capture &&
+        !state.selection_capture_rect_screen.Is_empty()) {
+        return state.selection_capture_rect_screen;
+    }
+
+    return Selection_visible_screen_rect();
+}
+
+core::RectPx OverlayWindow::Selection_visible_screen_rect() const {
     RECT overlay_rect{};
     GetWindowRect(hwnd_, &overlay_rect);
     core::RectPx const &sel = controller_.State().final_selection;
@@ -3380,12 +3638,22 @@ bool OverlayWindow::Build_selection_capture(GdiCaptureResult &out) const {
         return false;
     }
 
+    auto const &state = controller_.State();
+    if (state.selection_uses_full_window_capture) {
+        if (!resources_->window_capture.display_capture.Is_valid()) {
+            return false;
+        }
+        return Crop_capture(resources_->window_capture.display_capture, 0, 0,
+                            resources_->window_capture.display_capture.width,
+                            resources_->window_capture.display_capture.height, out);
+    }
+
     if (!Crop_capture(resources_->base_capture, selection.left, selection.top,
                       selection.Width(), selection.Height(), out)) {
         return false;
     }
 
-    core::RectPx const selection_screen_rect = Selection_screen_rect();
+    core::RectPx const selection_screen_rect = Selection_visible_screen_rect();
     if (Is_captured_cursor_visible() && Current_capture_has_captured_cursor() &&
         !Composite_cursor_snapshot(
             *resources_->captured_cursor,
@@ -3403,7 +3671,15 @@ bool OverlayWindow::Build_rendered_selection_capture(GdiCaptureResult &out) cons
         return false;
     }
 
-    core::RectPx const &selection = controller_.State().final_selection;
+    RECT overlay_rect{};
+    GetWindowRect(hwnd_, &overlay_rect);
+    auto const &state = controller_.State();
+    core::RectPx const selection =
+        state.selection_uses_full_window_capture &&
+                !state.selection_capture_rect_screen.Is_empty()
+            ? core::Screen_rect_to_client_rect(state.selection_capture_rect_screen,
+                                               overlay_rect.left, overlay_rect.top)
+            : state.final_selection;
     if (!Render_annotations_into_capture(out, controller_.Annotations(), selection)) {
         out.Free();
         return false;
@@ -3621,6 +3897,54 @@ LRESULT OverlayWindow::On_paint() {
         input.live_rect = s.live_rect;
         input.annotation_selection_live_rect = s.annotation_selection_live_rect;
         input.final_selection = s.final_selection;
+        bool const has_committed_full_window_capture =
+            s.selection_uses_full_window_capture &&
+            resources_->window_capture.has_full_capture &&
+            !s.selection_capture_rect_screen.Is_empty();
+        bool const has_preview_full_window_capture =
+            s.modifier_preview && resources_->window_capture.has_full_capture &&
+            !resources_->window_capture.visible_rect_screen.Is_empty();
+        if ((has_committed_full_window_capture || has_preview_full_window_capture) &&
+            d2d_resources_->lifted_window_capture) {
+            input.lifted_window_bitmap = d2d_resources_->lifted_window_capture.Get();
+            if (has_committed_full_window_capture) {
+                input.lifted_window_dest_rect = s.final_selection;
+                input.lifted_window_source_rect = core::RectPx::From_ltrb(
+                    s.selection_capture_offset_px.x, s.selection_capture_offset_px.y,
+                    s.selection_capture_offset_px.x + s.final_selection.Width(),
+                    s.selection_capture_offset_px.y + s.final_selection.Height());
+            } else {
+                RECT overlay_rect{};
+                GetWindowRect(hwnd_, &overlay_rect);
+                core::RectPx const visible_rect_client =
+                    core::Screen_rect_to_client_rect(
+                        resources_->window_capture.visible_rect_screen,
+                        overlay_rect.left, overlay_rect.top);
+                input.live_rect = visible_rect_client;
+                input.lifted_window_dest_rect = visible_rect_client;
+                input.lifted_window_source_rect = core::RectPx::From_ltrb(
+                    resources_->window_capture.visible_offset_px.x,
+                    resources_->window_capture.visible_offset_px.y,
+                    resources_->window_capture.visible_offset_px.x +
+                        resources_->window_capture.visible_rect_screen.Width(),
+                    resources_->window_capture.visible_offset_px.y +
+                        resources_->window_capture.visible_rect_screen.Height());
+            }
+        }
+        if (has_committed_full_window_capture) {
+            input.selection_size_override =
+                core::SizePx{s.selection_capture_rect_screen.Width(),
+                             s.selection_capture_rect_screen.Height()};
+        } else if (has_preview_full_window_capture) {
+            input.selection_size_override =
+                core::SizePx{resources_->window_capture.capture_rect_screen.Width(),
+                             resources_->window_capture.capture_rect_screen.Height()};
+        }
+        input.show_offscreen_capture_note =
+            (has_committed_full_window_capture && s.selection_has_offscreen_capture) ||
+            (has_preview_full_window_capture &&
+             resources_->window_capture.capture_rect_screen !=
+                 resources_->window_capture.visible_rect_screen);
         input.monitor_rects_client =
             std::span<const core::RectPx>(monitor_client_rects);
         input.cursor_client_px = cursor;
@@ -3793,6 +4117,14 @@ void OverlayWindow::Handle_device_loss() {
         d2d_resources_.reset();
         InvalidateRect(hwnd_, nullptr, TRUE);
         return;
+    }
+    if (resources_->window_capture.display_capture.Is_valid()) {
+        if (!d2d_resources_->Upload_lifted_window_capture(
+                resources_->window_capture.display_capture)) {
+            d2d_resources_->Clear_lifted_window_capture();
+        }
+    } else {
+        d2d_resources_->Clear_lifted_window_capture();
     }
     auto const glyphs = resources_->Glyph_pointers();
     (void)d2d_resources_->Upload_glyph_bitmaps(

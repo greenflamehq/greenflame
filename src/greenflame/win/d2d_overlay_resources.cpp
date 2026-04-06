@@ -15,6 +15,7 @@ constexpr float kTextWheelHuePositionDivisor =
     static_cast<float>(kTextWheelHueStopCount - 1);
 constexpr UINT32 kCheckerCellPx = 8;
 constexpr UINT32 kCheckerBitmapPx = kCheckerCellPx * 2;
+constexpr int kBytesPerPixel = 4;
 
 // Convert an OverlayButtonGlyph alpha mask (single-channel, row-major) into an
 // A8_UNORM D2D bitmap and store it in out_bitmap.
@@ -43,6 +44,74 @@ constexpr UINT32 kCheckerBitmapPx = kCheckerCellPx * 2;
         rt->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(w), static_cast<UINT32>(h)),
                          glyph->alpha_mask.data(), row_bytes, props,
                          out_bitmap.ReleaseAndGetAddressOf());
+    return SUCCEEDED(hr);
+}
+
+[[nodiscard]] bool
+Upload_capture_bitmap(ID2D1HwndRenderTarget *hwnd_rt, GdiCaptureResult const &cap,
+                      float target_dpi,
+                      Microsoft::WRL::ComPtr<ID2D1Bitmap> &out_bitmap) {
+    if (hwnd_rt == nullptr || !cap.Is_valid()) {
+        return false;
+    }
+
+    int const width = cap.width;
+    int const height = cap.height;
+    int const row_bytes =
+        width > 0 && width <= (std::numeric_limits<int>::max() / kBytesPerPixel)
+            ? width * kBytesPerPixel
+            : 0;
+    if (row_bytes <= 0 || height <= 0) {
+        return false;
+    }
+
+    size_t const row_bytes_size = static_cast<size_t>(row_bytes);
+    size_t const height_size = static_cast<size_t>(height);
+    if (height_size > std::numeric_limits<size_t>::max() / row_bytes_size) {
+        return false;
+    }
+    size_t const pixel_byte_count = row_bytes_size * height_size;
+
+    std::vector<uint8_t> pixels = {};
+    try {
+        pixels.resize(pixel_byte_count);
+    } catch (std::bad_alloc const &) {
+        return false;
+    }
+    BITMAPINFOHEADER bmi{};
+    bmi.biSize = sizeof(bmi);
+    bmi.biWidth = width;
+    bmi.biHeight = -height;
+    bmi.biPlanes = 1;
+    bmi.biBitCount = 32;
+    bmi.biCompression = BI_RGB;
+
+    HDC screen_dc = GetDC(nullptr);
+    if (screen_dc == nullptr) {
+        return false;
+    }
+    int const lines =
+        GetDIBits(screen_dc, cap.bitmap, 0, static_cast<UINT>(height), pixels.data(),
+                  reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
+    ReleaseDC(nullptr, screen_dc);
+    if (lines != height) {
+        return false;
+    }
+
+    for (size_t index = 3; index < pixels.size(); index += 4) {
+        pixels[index] = 0xFF;
+    }
+
+    D2D1_BITMAP_PROPERTIES props{};
+    props.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
+    props.dpiX = target_dpi;
+    props.dpiY = target_dpi;
+
+    HRESULT const hr = hwnd_rt->CreateBitmap(
+        D2D1::SizeU(static_cast<UINT32>(width), static_cast<UINT32>(height)),
+        pixels.data(), static_cast<UINT32>(row_bytes), props,
+        out_bitmap.ReleaseAndGetAddressOf());
     return SUCCEEDED(hr);
 }
 
@@ -109,54 +178,16 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height) {
 }
 
 bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
-    if (!hwnd_rt || !cap.Is_valid()) {
-        return false;
-    }
+    return Upload_capture_bitmap(hwnd_rt.Get(), cap, Target_dpi(), screenshot);
+}
 
-    int const w = cap.width;
-    int const h = cap.height;
-    int const row_bytes = w * 4;
+bool D2DOverlayResources::Upload_lifted_window_capture(GdiCaptureResult const &cap) {
+    return Upload_capture_bitmap(hwnd_rt.Get(), cap, Target_dpi(),
+                                 lifted_window_capture);
+}
 
-    std::vector<uint8_t> pixels(static_cast<size_t>(row_bytes) *
-                                static_cast<size_t>(h));
-    BITMAPINFOHEADER bmi{};
-    bmi.biSize = sizeof(bmi);
-    bmi.biWidth = w;
-    bmi.biHeight = -h; // top-down
-    bmi.biPlanes = 1;
-    bmi.biBitCount = 32;
-    bmi.biCompression = BI_RGB;
-
-    HDC screen_dc = GetDC(nullptr);
-    if (!screen_dc) {
-        return false;
-    }
-    int const lines =
-        GetDIBits(screen_dc, cap.bitmap, 0, static_cast<UINT>(h), pixels.data(),
-                  reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
-    ReleaseDC(nullptr, screen_dc);
-    if (lines != h) {
-        return false;
-    }
-
-    // GDI DIBs leave the alpha byte undefined (typically 0x00). Set it to 0xFF so
-    // the D2D effects pipeline sees fully-opaque pixels when using this bitmap as an
-    // ArithmeticComposite input, regardless of how it handles D2D1_ALPHA_MODE_IGNORE.
-    for (size_t i = 3; i < pixels.size(); i += 4) {
-        pixels[i] = 0xFF;
-    }
-
-    D2D1_BITMAP_PROPERTIES props{};
-    props.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
-    props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
-    float const dpi = Target_dpi();
-    props.dpiX = dpi;
-    props.dpiY = dpi;
-
-    HRESULT const hr = hwnd_rt->CreateBitmap(
-        D2D1::SizeU(static_cast<UINT32>(w), static_cast<UINT32>(h)), pixels.data(),
-        static_cast<UINT32>(row_bytes), props, screenshot.ReleaseAndGetAddressOf());
-    return SUCCEEDED(hr);
+void D2DOverlayResources::Clear_lifted_window_capture() noexcept {
+    lifted_window_capture.Reset();
 }
 
 bool D2DOverlayResources::Create_shared_resources() {
@@ -447,6 +478,7 @@ void D2DOverlayResources::Invalidate_frozen() noexcept { frozen_valid = false; }
 
 void D2DOverlayResources::Release_device_resources() {
     screenshot.Reset();
+    lifted_window_capture.Reset();
     annotations_rt.Reset();
     frozen_rt.Reset();
     draft_stroke_rt.Reset();

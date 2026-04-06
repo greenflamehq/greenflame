@@ -1,4 +1,5 @@
 #include "fake_text_layout_engine.h"
+#include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/snap_edge_builder.h"
@@ -251,6 +252,18 @@ TEST(overlay_controller, C_Ctrl_SetsModifierPreview) {
     EXPECT_EQ(c.State().live_rect, win_screen);
 }
 
+TEST(overlay_controller, C_CtrlPreview_ClipsOffscreenWindowToVisibleDesktop) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+
+    OverlayAction const action = c.On_modifier_changed(
+        Ctrl_only(), {100, 150}, offscreen_window, {}, std::nullopt, 0, 0);
+
+    EXPECT_EQ(action, OverlayAction::Repaint);
+    EXPECT_TRUE(c.State().modifier_preview);
+    EXPECT_EQ(c.State().live_rect, (RectPx::From_ltrb(0, 50, 400, 300)));
+}
+
 TEST(overlay_controller, C_Shift_SetsModifierPreview_MonitorBounds) {
     auto c = Make_controller(); // 1920x1080 monitor at 0,0
     OverlayAction action = c.On_modifier_changed(Shift_only(), {500, 300}, {}, {},
@@ -343,6 +356,50 @@ TEST(overlay_controller, D_CtrlPreview_PressCommitsWindow) {
     EXPECT_FALSE(c.State().dragging);
 }
 
+TEST(overlay_controller, D_CtrlPreview_PressCommitsFullWindowCaptureMetadata) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    ASSERT_TRUE(c.State().modifier_preview);
+
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCDE));
+    OverlayAction const action = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(0, 50, 400, 300)));
+    EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Window);
+    EXPECT_EQ(c.State().selection_window, std::optional<HWND>{fake_hwnd});
+    EXPECT_EQ(c.State().selection_capture_rect_screen, offscreen_window);
+    EXPECT_EQ(c.State().selection_capture_offset_px, (PointPx{10, 0}));
+    EXPECT_TRUE(c.State().selection_uses_full_window_capture);
+    EXPECT_TRUE(c.State().selection_has_offscreen_capture);
+}
+
+TEST(overlay_controller,
+     D_CtrlPreview_PressWithoutFullCaptureCommitsVisibleWindowSelectionOnly) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    ASSERT_TRUE(c.State().modifier_preview);
+
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCDF));
+    OverlayAction const action = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, false);
+
+    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(0, 50, 400, 300)));
+    EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Window);
+    EXPECT_EQ(c.State().selection_window, std::optional<HWND>{fake_hwnd});
+    EXPECT_FALSE(c.State().selection_uses_full_window_capture);
+    EXPECT_FALSE(c.State().selection_has_offscreen_capture);
+    EXPECT_TRUE(c.State().selection_capture_rect_screen.Is_empty());
+}
+
 TEST(overlay_controller, D_ShiftPreview_PressCommitsMonitor) {
     auto c = Make_controller();
     std::ignore = c.On_modifier_changed(Shift_only(), {500, 300}, {}, {},
@@ -373,6 +430,98 @@ TEST(overlay_controller, D_ShiftCtrlPreview_PressCommitsDesktop) {
     EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Desktop);
     EXPECT_FALSE(c.State().dragging);
+}
+
+TEST(overlay_controller,
+     D_FullWindowCapture_AnnotationPressOutsideVisibleRegionIsBlocked) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCE0));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    ASSERT_TRUE(c.State().selection_uses_full_window_capture);
+    ASSERT_EQ(c.State().final_selection, (RectPx::From_ltrb(0, 50, 400, 300)));
+
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::Repaint);
+
+    // Press outside visible region with active annotation tool → blocked
+    EXPECT_EQ(c.On_primary_press(No_mods(), {450, 150}, {450, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::None);
+
+    // Press inside visible region with active annotation tool → proceeds
+    EXPECT_EQ(c.On_primary_press(No_mods(), {200, 150}, {200, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+}
+
+TEST(overlay_controller, D_FullWindowCapture_LineAnnotationEndpointClamped) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCE1));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    ASSERT_EQ(c.State().final_selection, (RectPx::From_ltrb(0, 50, 400, 300)));
+    ASSERT_TRUE(c.State().selection_uses_full_window_capture);
+
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'L'), OverlayAction::Repaint);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {200, 150}, {200, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_pointer_move(No_mods(), {500, 200}, {500, 200}, std::nullopt, {},
+                                std::nullopt, 0, 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {500, 200}),
+              OverlayAction::InvalidateFrozenCache);
+
+    ASSERT_EQ(c.Annotations().size(), 1u);
+    auto const &line = std::get<LineAnnotation>(c.Annotations()[0].data);
+    EXPECT_EQ(line.start, (PointPx{200, 150}));
+    // right edge of final_selection is 400; clamped x = right-1 = 399
+    EXPECT_EQ(line.end, (PointPx{399, 200}));
+}
+
+TEST(overlay_controller, D_FullWindowCapture_SelectionStateUndoRedoRoundtrip) {
+    auto c = Make_controller();
+    OverlaySelectionState const empty_state = c.Selection_state();
+    ASSERT_TRUE(empty_state.final_selection.Is_empty());
+    ASSERT_FALSE(empty_state.selection_uses_full_window_capture);
+
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCE2));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    OverlaySelectionState const window_state = c.Selection_state();
+    ASSERT_TRUE(window_state.selection_uses_full_window_capture);
+    ASSERT_EQ(window_state.selection_capture_rect_screen, offscreen_window);
+
+    c.Push_command(std::make_unique<ModificationCommand<OverlaySelectionState>>(
+        "test", [&c](OverlaySelectionState const &s) { c.Restore_selection_state(s); },
+        empty_state, window_state));
+
+    c.Undo();
+    EXPECT_EQ(c.Selection_state(), empty_state);
+    EXPECT_FALSE(c.State().selection_uses_full_window_capture);
+    EXPECT_TRUE(c.State().final_selection.Is_empty());
+
+    c.Redo();
+    EXPECT_EQ(c.Selection_state(), window_state);
+    EXPECT_TRUE(c.State().selection_uses_full_window_capture);
+    EXPECT_EQ(c.State().selection_capture_rect_screen, offscreen_window);
+    EXPECT_EQ(c.State().selection_capture_offset_px, (PointPx{10, 0}));
 }
 
 // ===========================================================================
@@ -423,6 +572,63 @@ TEST(overlay_controller, E_HandleRelease_CommitsFinalSelection) {
     EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_FALSE(c.State().handle_dragging);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
+}
+
+TEST(overlay_controller, E_ResizeRelease_ConvertsWindowBackedSelectionToRegion) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCF1));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    ASSERT_TRUE(c.State().selection_uses_full_window_capture);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {0, 50}, {0, 50}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_TRUE(c.State().handle_dragging);
+    ASSERT_EQ(c.On_pointer_move(No_mods(), {20, 70}, {20, 70}, std::nullopt, {},
+                                std::nullopt, 0, 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {20, 70}),
+              OverlayAction::InvalidateFrozenCache);
+
+    EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
+    EXPECT_FALSE(c.State().selection_window.has_value());
+    EXPECT_FALSE(c.State().selection_uses_full_window_capture);
+    EXPECT_FALSE(c.State().selection_has_offscreen_capture);
+    EXPECT_TRUE(c.State().selection_capture_rect_screen.Is_empty());
+}
+
+TEST(overlay_controller,
+     E_ResizeMove_ConvertsWindowBackedSelectionToRegionImmediately) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCF3));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    ASSERT_TRUE(c.State().selection_uses_full_window_capture);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {0, 50}, {0, 50}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_TRUE(c.State().handle_dragging);
+    ASSERT_EQ(c.On_pointer_move(No_mods(), {20, 70}, {20, 70}, std::nullopt, {},
+                                std::nullopt, 0, 0),
+              OverlayAction::Repaint);
+
+    EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
+    EXPECT_FALSE(c.State().selection_window.has_value());
+    EXPECT_FALSE(c.State().selection_uses_full_window_capture);
+    EXPECT_FALSE(c.State().selection_has_offscreen_capture);
+    EXPECT_TRUE(c.State().selection_capture_rect_screen.Is_empty());
 }
 
 TEST(overlay_controller, E_HandleDragPastDesktop_ClipsSelectionToDesktopBounds) {
@@ -505,6 +711,62 @@ TEST(overlay_controller, F_MoveRelease_CommitsFinalSelection) {
     EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
     EXPECT_FALSE(c.State().move_dragging);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
+}
+
+TEST(overlay_controller, F_MoveRelease_ConvertsWindowBackedSelectionToRegion) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCF0));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    ASSERT_TRUE(c.State().selection_uses_full_window_capture);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {100, 150}, {100, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_TRUE(c.State().move_dragging);
+    ASSERT_EQ(c.On_pointer_move(No_mods(), {140, 180}, {140, 180}, std::nullopt, {},
+                                std::nullopt, 0, 0),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {140, 180}),
+              OverlayAction::InvalidateFrozenCache);
+
+    EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
+    EXPECT_FALSE(c.State().selection_window.has_value());
+    EXPECT_FALSE(c.State().selection_uses_full_window_capture);
+    EXPECT_FALSE(c.State().selection_has_offscreen_capture);
+    EXPECT_TRUE(c.State().selection_capture_rect_screen.Is_empty());
+}
+
+TEST(overlay_controller, F_MoveDrag_ConvertsWindowBackedSelectionToRegionImmediately) {
+    auto c = Make_controller();
+    RectPx const offscreen_window = RectPx::From_ltrb(-10, 50, 400, 300);
+    std::ignore = c.On_modifier_changed(Ctrl_only(), {100, 150}, offscreen_window, {},
+                                        std::nullopt, 0, 0);
+    HWND const fake_hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0xBCF2));
+    std::ignore = c.On_primary_press(
+        Ctrl_only(), {100, 150}, {100, 150}, std::optional<HWND>{fake_hwnd},
+        std::nullopt, offscreen_window, {}, Make_snap_edges(c), 0, 0, true);
+    ASSERT_TRUE(c.State().selection_uses_full_window_capture);
+
+    ASSERT_EQ(c.On_primary_press(No_mods(), {100, 150}, {100, 150}, std::nullopt,
+                                 std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0,
+                                 0),
+              OverlayAction::Repaint);
+    ASSERT_TRUE(c.State().move_dragging);
+    ASSERT_EQ(c.On_pointer_move(No_mods(), {140, 180}, {140, 180}, std::nullopt, {},
+                                std::nullopt, 0, 0),
+              OverlayAction::Repaint);
+
+    EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
+    EXPECT_FALSE(c.State().selection_window.has_value());
+    EXPECT_FALSE(c.State().selection_uses_full_window_capture);
+    EXPECT_FALSE(c.State().selection_has_offscreen_capture);
+    EXPECT_TRUE(c.State().selection_capture_rect_screen.Is_empty());
 }
 
 TEST(overlay_controller, F_MoveDragPastDesktop_ClampsInsideDesktopBounds) {

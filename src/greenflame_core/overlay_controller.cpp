@@ -100,9 +100,13 @@ void OverlaySessionData::Reset_for_session() {
     live_rect = {};
     annotation_selection_live_rect = {};
     final_selection = {};
+    selection_capture_rect_screen = {};
+    selection_capture_offset_px = {};
     selection_source = SaveSelectionSource::Region;
     selection_window = std::nullopt;
     selection_monitor_index = std::nullopt;
+    selection_uses_full_window_capture = false;
+    selection_has_offscreen_capture = false;
     vertical_edges.clear();
     horizontal_edges.clear();
     cached_monitors.clear();
@@ -139,9 +143,69 @@ void OverlayController::Update_virtual_desktop_client_bounds(
         virtual_desktop_bounds, state_.cached_monitors, origin_x, origin_y);
 }
 
+void OverlayController::Reset_window_selection_metadata(bool reset_source) noexcept {
+    state_.selection_capture_rect_screen = {};
+    state_.selection_capture_offset_px = {};
+    state_.selection_window = std::nullopt;
+    state_.selection_monitor_index = std::nullopt;
+    state_.selection_uses_full_window_capture = false;
+    state_.selection_has_offscreen_capture = false;
+    if (reset_source) {
+        state_.selection_source = SaveSelectionSource::Region;
+    }
+}
+
+bool OverlayController::Restricts_annotation_edits_to_visible_selection()
+    const noexcept {
+    return state_.selection_uses_full_window_capture &&
+           !state_.final_selection.Is_empty();
+}
+
+PointPx OverlayController::Clamp_annotation_cursor_to_visible_selection(
+    PointPx cursor) const noexcept {
+    if (!Restricts_annotation_edits_to_visible_selection()) {
+        return cursor;
+    }
+
+    RectPx const selection = state_.final_selection.Normalized();
+    PointPx clamped = cursor;
+    clamped.x = std::clamp(clamped.x, selection.left, selection.right - 1);
+    clamped.y = std::clamp(clamped.y, selection.top, selection.bottom - 1);
+    return clamped;
+}
+
+OverlaySelectionState OverlayController::Selection_state() const noexcept {
+    return OverlaySelectionState{
+        .final_selection = state_.final_selection,
+        .selection_source = state_.selection_source,
+        .selection_window = state_.selection_window,
+        .selection_monitor_index = state_.selection_monitor_index,
+        .selection_capture_rect_screen = state_.selection_capture_rect_screen,
+        .selection_capture_offset_px = state_.selection_capture_offset_px,
+        .selection_uses_full_window_capture = state_.selection_uses_full_window_capture,
+        .selection_has_offscreen_capture = state_.selection_has_offscreen_capture,
+    };
+}
+
 void OverlayController::Set_final_selection(RectPx r) {
     state_.final_selection = r;
     if (r.Is_empty()) {
+        Reset_window_selection_metadata(true);
+        annotation_controller_.Reset_for_selection_mode();
+    }
+}
+
+void OverlayController::Restore_selection_state(OverlaySelectionState const &state) {
+    state_.final_selection = state.final_selection;
+    state_.selection_source = state.selection_source;
+    state_.selection_window = state.selection_window;
+    state_.selection_monitor_index = state.selection_monitor_index;
+    state_.selection_capture_rect_screen = state.selection_capture_rect_screen;
+    state_.selection_capture_offset_px = state.selection_capture_offset_px;
+    state_.selection_uses_full_window_capture =
+        state.selection_uses_full_window_capture;
+    state_.selection_has_offscreen_capture = state.selection_has_offscreen_capture;
+    if (state.final_selection.Is_empty()) {
         annotation_controller_.Reset_for_selection_mode();
     }
 }
@@ -454,8 +518,10 @@ void OverlayController::Apply_modifier_preview(OverlayModifierState mods,
         state_.modifier_preview = true;
     } else if (mods.ctrl) {
         if (window_rect_screen.has_value()) {
-            state_.live_rect =
-                Screen_rect_to_client_rect(*window_rect_screen, origin_x, origin_y);
+            RectPx const window_client_rect = Screen_rect_to_client_rect(
+                window_rect_screen->Normalized(), origin_x, origin_y);
+            state_.live_rect = Clip_selection_rect_to_bounds(
+                window_client_rect, state_.virtual_desktop_client_bounds);
         } else {
             state_.live_rect = {};
         }
@@ -565,15 +631,15 @@ OverlayAction OverlayController::On_primary_press(
     OverlayModifierState mods, PointPx cursor_client, PointPx /*cursor_screen*/,
     std::optional<HWND> window_under_cursor,
     std::optional<size_t> monitor_index_under_cursor,
-    std::optional<RectPx> /*window_rect_screen*/, RectPx virtual_desktop_bounds,
-    SnapEdges const &visible_snap_edges, int32_t origin_x, int32_t origin_y) {
+    std::optional<RectPx> window_rect_screen, RectPx virtual_desktop_bounds,
+    SnapEdges const &visible_snap_edges, int32_t origin_x, int32_t origin_y,
+    bool window_full_capture_available) {
     Update_virtual_desktop_client_bounds(virtual_desktop_bounds, origin_x, origin_y);
 
     // ---- Modifier-preview commit path ----
     if ((mods.shift || mods.ctrl) && state_.modifier_preview) {
         state_.final_selection = state_.live_rect;
-        state_.selection_window = std::nullopt;
-        state_.selection_monitor_index = std::nullopt;
+        Reset_window_selection_metadata(false);
         if (mods.shift && mods.ctrl) {
             state_.selection_source = SaveSelectionSource::Desktop;
         } else if (mods.shift) {
@@ -586,6 +652,19 @@ OverlayAction OverlayController::On_primary_press(
             if (window_under_cursor.has_value()) {
                 state_.selection_window = *window_under_cursor;
             }
+            if (!state_.final_selection.Is_empty() && window_full_capture_available &&
+                window_rect_screen.has_value()) {
+                RectPx const capture_rect_screen = window_rect_screen->Normalized();
+                RectPx const capture_rect_client =
+                    Screen_rect_to_client_rect(capture_rect_screen, origin_x, origin_y);
+                state_.selection_capture_rect_screen = capture_rect_screen;
+                state_.selection_capture_offset_px = {
+                    state_.final_selection.left - capture_rect_client.left,
+                    state_.final_selection.top - capture_rect_client.top};
+                state_.selection_uses_full_window_capture = true;
+                state_.selection_has_offscreen_capture =
+                    capture_rect_client != state_.final_selection;
+            }
         }
         state_.modifier_preview = false;
         state_.live_rect = {};
@@ -595,6 +674,8 @@ OverlayAction OverlayController::On_primary_press(
     // ---- When a committed selection exists, resolve resize / tool / move ----
     if (!state_.final_selection.Is_empty() && !state_.dragging &&
         !state_.handle_dragging && !state_.move_dragging) {
+        bool const restrict_annotation_edits =
+            Restricts_annotation_edits_to_visible_selection();
         std::optional<AnnotationToolId> const active_tool =
             annotation_controller_.Active_tool();
         if (active_tool.has_value() && *active_tool == AnnotationToolId::Text) {
@@ -611,7 +692,10 @@ OverlayAction OverlayController::On_primary_press(
                     } else {
                         annotation_controller_.Cancel_text_draft();
                     }
-                    annotation_controller_.Begin_text_draft(cursor_client);
+                    if (!restrict_annotation_edits ||
+                        state_.final_selection.Contains(cursor_client)) {
+                        annotation_controller_.Begin_text_draft(cursor_client);
+                    }
                     return has_text ? OverlayAction::InvalidateFrozenCache
                                     : OverlayAction::Repaint;
                 }
@@ -630,6 +714,10 @@ OverlayAction OverlayController::On_primary_press(
         }
 
         if (active_tool.has_value()) {
+            if (restrict_annotation_edits &&
+                !state_.final_selection.Contains(cursor_client)) {
+                return OverlayAction::None;
+            }
             if (*active_tool == AnnotationToolId::Text &&
                 annotation_controller_.Active_text_edit() == nullptr) {
                 annotation_controller_.Begin_text_draft(cursor_client);
@@ -686,9 +774,7 @@ OverlayAction OverlayController::On_primary_press(
     state_.start_px = snapped_start;
     state_.dragging = true;
     state_.final_selection = {};
-    state_.selection_source = SaveSelectionSource::Region;
-    state_.selection_window = std::nullopt;
-    state_.selection_monitor_index = std::nullopt;
+    Reset_window_selection_metadata(true);
     state_.live_rect = RectPx::From_points(state_.start_px, state_.start_px);
     return OverlayAction::Repaint;
 }
@@ -701,6 +787,8 @@ OverlayAction OverlayController::On_pointer_move(
     Update_virtual_desktop_client_bounds(virtual_desktop_bounds, origin_x, origin_y);
 
     bool const snap_enabled = !mods.alt;
+    PointPx const clamped_cursor =
+        Clamp_annotation_cursor_to_visible_selection(cursor_client);
 
     if (state_.annotation_selection_pending) {
         int32_t const dx =
@@ -732,6 +820,10 @@ OverlayAction OverlayController::On_pointer_move(
         }
         candidate = Clamp_moved_selection_to_bounds(
             candidate, state_.virtual_desktop_client_bounds);
+        if (state_.selection_uses_full_window_capture &&
+            candidate != state_.move_anchor_rect) {
+            Reset_window_selection_metadata(true);
+        }
         state_.live_rect = candidate;
     } else if (state_.handle_dragging && state_.resize_handle.has_value()) {
         RectPx candidate = Resize_rect_from_handle(
@@ -746,6 +838,10 @@ OverlayAction OverlayController::On_pointer_move(
                                                   state_.virtual_desktop_client_bounds);
         state_.live_rect =
             Allowed_selection_rect(candidate, anchor, state_.cached_monitors);
+        if (state_.selection_uses_full_window_capture &&
+            state_.live_rect != state_.resize_anchor_rect) {
+            Reset_window_selection_metadata(true);
+        }
     } else if (state_.dragging) {
         RectPx candidate =
             RectPx::From_points(state_.start_px, cursor_client).Normalized();
@@ -760,12 +856,12 @@ OverlayAction OverlayController::On_pointer_move(
         if (TextEditController *const text_edit =
                 annotation_controller_.Active_text_edit();
             text_edit != nullptr) {
-            text_edit->On_pointer_move(cursor_client, mods.primary_down);
+            text_edit->On_pointer_move(clamped_cursor, mods.primary_down);
         }
     } else if (annotation_controller_.Has_active_gesture()) {
         // Annotation gestures update their own draft/live state here; repaint cadence
         // is controlled by the shared throttle below.
-        (void)annotation_controller_.On_pointer_move(cursor_client, mods.primary_down);
+        (void)annotation_controller_.On_pointer_move(clamped_cursor, mods.primary_down);
     } else {
         Apply_modifier_preview(mods, cursor_screen, window_rect_screen,
                                virtual_desktop_bounds, monitor_index_under_cursor,
@@ -778,6 +874,8 @@ OverlayAction OverlayController::On_pointer_move(
 OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
                                                     PointPx cursor_client) {
     bool const snap_enabled = !mods.alt;
+    PointPx const clamped_cursor =
+        Clamp_annotation_cursor_to_visible_selection(cursor_client);
 
     if (state_.annotation_selection_pending) {
         bool const had_drag_rect = state_.annotation_selection_dragging;
@@ -802,6 +900,7 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
     }
 
     if (state_.move_dragging) {
+        RectPx const selection_before_move = state_.move_anchor_rect;
         RectPx to_commit = Clamp_moved_selection_to_bounds(
             state_.live_rect, state_.virtual_desktop_client_bounds);
         if (snap_enabled) {
@@ -815,12 +914,17 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
                                 to_commit.top + to_commit.Height() / 2};
         state_.final_selection =
             Allowed_selection_rect(to_commit, center, state_.cached_monitors);
+        if (state_.selection_uses_full_window_capture &&
+            state_.final_selection != selection_before_move) {
+            Reset_window_selection_metadata(true);
+        }
         state_.move_dragging = false;
         state_.live_rect = {};
         return OverlayAction::InvalidateFrozenCache;
     }
 
     if (state_.handle_dragging && state_.resize_handle.has_value()) {
+        RectPx const selection_before_resize = state_.resize_anchor_rect;
         RectPx to_commit = Clip_selection_rect_to_bounds(
             state_.live_rect, state_.virtual_desktop_client_bounds);
         if (snap_enabled) {
@@ -833,6 +937,10 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
                                                               *state_.resize_handle);
         state_.final_selection =
             Allowed_selection_rect(to_commit, anchor, state_.cached_monitors);
+        if (state_.selection_uses_full_window_capture &&
+            state_.final_selection != selection_before_resize) {
+            Reset_window_selection_metadata(true);
+        }
         state_.handle_dragging = false;
         state_.resize_handle = std::nullopt;
         state_.live_rect = {};
@@ -848,9 +956,7 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
         raw = Clip_selection_rect_to_bounds(raw, state_.virtual_desktop_client_bounds);
         state_.final_selection =
             Allowed_selection_rect(raw, state_.start_px, state_.cached_monitors);
-        state_.selection_source = SaveSelectionSource::Region;
-        state_.selection_window = std::nullopt;
-        state_.selection_monitor_index = std::nullopt;
+        Reset_window_selection_metadata(true);
         state_.dragging = false;
         return OverlayAction::InvalidateFrozenCache;
     }
@@ -859,13 +965,13 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
         if (TextEditController *const text_edit =
                 annotation_controller_.Active_text_edit();
             text_edit != nullptr) {
-            text_edit->On_pointer_release(cursor_client);
+            text_edit->On_pointer_release(clamped_cursor);
             return OverlayAction::Repaint;
         }
     }
 
     if (annotation_controller_.Has_active_gesture()) {
-        (void)annotation_controller_.On_pointer_move(cursor_client, mods.primary_down);
+        (void)annotation_controller_.On_pointer_move(clamped_cursor, mods.primary_down);
         return annotation_controller_.On_primary_release(undo_stack_)
                    ? OverlayAction::InvalidateFrozenCache
                    : OverlayAction::None;

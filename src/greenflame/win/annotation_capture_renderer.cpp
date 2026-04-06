@@ -1,6 +1,7 @@
 #include "greenflame/win/annotation_capture_renderer.h"
 
 #include "greenflame/win/d2d_annotation_draw.h"
+#include "greenflame/win/debug_log.h"
 #include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/obfuscate_raster.h"
 #include "greenflame_core/pixel_ops.h"
@@ -10,6 +11,8 @@ namespace greenflame {
 namespace {
 
 constexpr float kCaptureScratchDpi = 96.f;
+#define LOG_ANNOTATION_CAPTURE_MESSAGE(message_expression)                             \
+    GREENFLAME_LOG_WRITE(L"annotation_capture", (message_expression))
 
 struct CoInitGuard final {
     bool owned = false;
@@ -68,13 +71,28 @@ Extract_bitmap_from_pixels(std::span<const uint8_t> pixels, int width, int heigh
     int32_t const clipped_width = clipped_bounds->Width();
     int32_t const clipped_height = clipped_bounds->Height();
     int32_t const clipped_row_bytes = clipped_width * 4;
+    if (clipped_row_bytes <= 0) {
+        return std::nullopt;
+    }
+    size_t const clipped_row_bytes_size = static_cast<size_t>(clipped_row_bytes);
+    size_t const clipped_height_size = static_cast<size_t>(clipped_height);
+    if (clipped_height_size >
+        std::numeric_limits<size_t>::max() / clipped_row_bytes_size) {
+        return std::nullopt;
+    }
+    std::vector<uint8_t> premultiplied_bgra = {};
+    try {
+        premultiplied_bgra.resize(clipped_row_bytes_size * clipped_height_size);
+    } catch (std::bad_alloc const &) {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(
+            L"Extract_bitmap_from_pixels bad_alloc while allocating obfuscate source");
+        return std::nullopt;
+    }
     core::BgraBitmap bitmap{
         .width_px = clipped_width,
         .height_px = clipped_height,
         .row_bytes = clipped_row_bytes,
-        .premultiplied_bgra =
-            std::vector<uint8_t>(static_cast<size_t>(clipped_row_bytes) *
-                                 static_cast<size_t>(clipped_height)),
+        .premultiplied_bgra = std::move(premultiplied_bgra),
     };
     std::span<uint8_t> const destination_pixels(bitmap.premultiplied_bgra);
     for (int32_t row = 0; row < clipped_height; ++row) {
@@ -189,108 +207,135 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
     }
 
     int const row_bytes = Row_bytes32(capture.width);
-    size_t const buffer_size =
-        static_cast<size_t>(row_bytes) * static_cast<size_t>(capture.height);
-    std::vector<uint8_t> pixels(buffer_size);
-    if (!Read_capture_pixels(capture, pixels)) {
+    if (row_bytes <= 0 || capture.height <= 0) {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(
+            L"Render_annotations_into_capture invalid capture dimensions");
         return false;
     }
 
-    HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    bool owns_com = SUCCEEDED(hr);
-    if (hr == RPC_E_CHANGED_MODE) {
-        owns_com = false;
-    } else if (FAILED(hr)) {
+    size_t const row_bytes_size = static_cast<size_t>(row_bytes);
+    size_t const height_size = static_cast<size_t>(capture.height);
+    if (height_size > std::numeric_limits<size_t>::max() / row_bytes_size) {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(
+            L"Render_annotations_into_capture buffer size overflow");
         return false;
     }
-    CoInitGuard const coinit_guard(owns_com);
+    size_t const buffer_size = row_bytes_size * height_size;
 
-    Microsoft::WRL::ComPtr<ID2D1Factory1> d2d_factory;
-    hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
-                           d2d_factory.GetAddressOf());
-    if (FAILED(hr) || !d2d_factory) {
-        return false;
-    }
+    try {
+        std::vector<uint8_t> pixels(buffer_size);
+        if (!Read_capture_pixels(capture, pixels)) {
+            return false;
+        }
 
-    Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory;
-    hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                          IID_PPV_ARGS(wic_factory.GetAddressOf()));
-    if (FAILED(hr) || !wic_factory) {
-        return false;
-    }
+        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        bool owns_com = SUCCEEDED(hr);
+        if (hr == RPC_E_CHANGED_MODE) {
+            owns_com = false;
+        } else if (FAILED(hr)) {
+            return false;
+        }
+        CoInitGuard const coinit_guard(owns_com);
 
-    Microsoft::WRL::ComPtr<IWICBitmap> scratch_bitmap;
-    Microsoft::WRL::ComPtr<ID2D1RenderTarget> scratch_rt;
-    if (!Create_scratch_render_target(wic_factory.Get(), d2d_factory.Get(),
-                                      capture.width, capture.height, scratch_bitmap,
-                                      scratch_rt)) {
-        return false;
-    }
+        Microsoft::WRL::ComPtr<ID2D1Factory1> d2d_factory;
+        hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+                               d2d_factory.GetAddressOf());
+        if (FAILED(hr) || !d2d_factory) {
+            return false;
+        }
 
-    D2DAnnotationRenderResources annotation_resources{};
-    if (!annotation_resources.Initialize(d2d_factory.Get(), scratch_rt.Get())) {
-        return false;
-    }
-    D2DAnnotationDrawContext const annotation_context =
-        annotation_resources.Build_context(d2d_factory.Get());
+        Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory;
+        hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_PPV_ARGS(wic_factory.GetAddressOf()));
+        if (FAILED(hr) || !wic_factory) {
+            return false;
+        }
 
-    std::vector<uint8_t> layer_pixels(buffer_size);
-    WICRect const copy_rect = {0, 0, capture.width, capture.height};
-    D2D1_MATRIX_3X2_F const annotation_transform =
-        D2D1::Matrix3x2F::Translation(-static_cast<float>(target_bounds.left),
-                                      -static_cast<float>(target_bounds.top));
-    D2D1_MATRIX_3X2_F const identity_transform = D2D1::Matrix3x2F::Identity();
+        Microsoft::WRL::ComPtr<IWICBitmap> scratch_bitmap;
+        Microsoft::WRL::ComPtr<ID2D1RenderTarget> scratch_rt;
+        if (!Create_scratch_render_target(wic_factory.Get(), d2d_factory.Get(),
+                                          capture.width, capture.height, scratch_bitmap,
+                                          scratch_rt)) {
+            return false;
+        }
 
-    for (core::Annotation const &annotation : annotations) {
-        if (core::ObfuscateAnnotation const *const obfuscate =
-                std::get_if<core::ObfuscateAnnotation>(&annotation.data);
-            obfuscate != nullptr && obfuscate->premultiplied_bgra.empty()) {
-            std::optional<DynamicObfuscateLayer> const layer =
-                Build_dynamic_obfuscate_layer(pixels, capture.width, capture.height,
-                                              row_bytes, *obfuscate, target_bounds);
-            if (!layer.has_value()) {
+        D2DAnnotationRenderResources annotation_resources{};
+        if (!annotation_resources.Initialize(d2d_factory.Get(), scratch_rt.Get())) {
+            return false;
+        }
+        D2DAnnotationDrawContext const annotation_context =
+            annotation_resources.Build_context(d2d_factory.Get());
+
+        std::vector<uint8_t> layer_pixels(buffer_size);
+        WICRect const copy_rect = {0, 0, capture.width, capture.height};
+        D2D1_MATRIX_3X2_F const annotation_transform =
+            D2D1::Matrix3x2F::Translation(-static_cast<float>(target_bounds.left),
+                                          -static_cast<float>(target_bounds.top));
+        D2D1_MATRIX_3X2_F const identity_transform = D2D1::Matrix3x2F::Identity();
+
+        for (core::Annotation const &annotation : annotations) {
+            if (core::ObfuscateAnnotation const *const obfuscate =
+                    std::get_if<core::ObfuscateAnnotation>(&annotation.data);
+                obfuscate != nullptr && obfuscate->premultiplied_bgra.empty()) {
+                std::optional<DynamicObfuscateLayer> const layer =
+                    Build_dynamic_obfuscate_layer(pixels, capture.width, capture.height,
+                                                  row_bytes, *obfuscate, target_bounds);
+                if (!layer.has_value()) {
+                    continue;
+                }
+
+                core::Blend_premultiplied_bitmap_onto_opaque_pixels(
+                    pixels, capture.width, capture.height, row_bytes,
+                    layer->bitmap.premultiplied_bgra, layer->bitmap.width_px,
+                    layer->bitmap.height_px, layer->bitmap.row_bytes, layer->bounds);
                 continue;
             }
 
-            core::Blend_premultiplied_bitmap_onto_opaque_pixels(
-                pixels, capture.width, capture.height, row_bytes,
-                layer->bitmap.premultiplied_bgra, layer->bitmap.width_px,
-                layer->bitmap.height_px, layer->bitmap.row_bytes, layer->bounds);
-            continue;
+            scratch_rt->BeginDraw();
+            scratch_rt->SetTransform(identity_transform);
+            scratch_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+            scratch_rt->SetTransform(annotation_transform);
+            Draw_d2d_annotation(scratch_rt.Get(), annotation_context, annotation);
+            scratch_rt->SetTransform(identity_transform);
+            hr = scratch_rt->EndDraw();
+            if (FAILED(hr)) {
+                return false;
+            }
+
+            hr = scratch_bitmap->CopyPixels(&copy_rect, static_cast<UINT>(row_bytes),
+                                            static_cast<UINT>(layer_pixels.size()),
+                                            layer_pixels.data());
+            if (FAILED(hr)) {
+                return false;
+            }
+
+            core::RectPx const layer_bounds =
+                Annotation_local_bounds(annotation, target_bounds);
+            if (Is_highlighter_annotation(annotation)) {
+                core::Multiply_premultiplied_layer_onto_opaque_pixels(
+                    pixels, capture.width, capture.height, row_bytes, layer_pixels,
+                    row_bytes, layer_bounds);
+            } else {
+                core::Blend_premultiplied_layer_onto_opaque_pixels(
+                    pixels, capture.width, capture.height, row_bytes, layer_pixels,
+                    row_bytes, layer_bounds);
+            }
         }
 
-        scratch_rt->BeginDraw();
-        scratch_rt->SetTransform(identity_transform);
-        scratch_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
-        scratch_rt->SetTransform(annotation_transform);
-        Draw_d2d_annotation(scratch_rt.Get(), annotation_context, annotation);
-        scratch_rt->SetTransform(identity_transform);
-        hr = scratch_rt->EndDraw();
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        hr = scratch_bitmap->CopyPixels(&copy_rect, static_cast<UINT>(row_bytes),
-                                        static_cast<UINT>(layer_pixels.size()),
-                                        layer_pixels.data());
-        if (FAILED(hr)) {
-            return false;
-        }
-
-        core::RectPx const layer_bounds =
-            Annotation_local_bounds(annotation, target_bounds);
-        if (Is_highlighter_annotation(annotation)) {
-            core::Multiply_premultiplied_layer_onto_opaque_pixels(
-                pixels, capture.width, capture.height, row_bytes, layer_pixels,
-                row_bytes, layer_bounds);
-        } else {
-            core::Blend_premultiplied_layer_onto_opaque_pixels(
-                pixels, capture.width, capture.height, row_bytes, layer_pixels,
-                row_bytes, layer_bounds);
-        }
+        return Write_capture_pixels(capture, pixels);
+    } catch (std::bad_alloc const &) {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(L"Render_annotations_into_capture bad_alloc "
+                                       L"while allocating capture buffers");
+        return false;
+    } catch (std::exception const &) {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(
+            L"Render_annotations_into_capture std::exception");
+        return false;
+    } catch (...) {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(
+            L"Render_annotations_into_capture unexpected exception");
+        return false;
     }
-
-    return Write_capture_pixels(capture, pixels);
 }
 
 } // namespace greenflame

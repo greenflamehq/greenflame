@@ -33,6 +33,20 @@ enum class OverlayAction : uint8_t {
     PinToDesktop,          // Ctrl+P
 };
 
+struct OverlaySelectionState final {
+    RectPx final_selection = {};
+    SaveSelectionSource selection_source = SaveSelectionSource::Region;
+    std::optional<HWND> selection_window = std::nullopt;
+    std::optional<size_t> selection_monitor_index = std::nullopt;
+    RectPx selection_capture_rect_screen = {};
+    PointPx selection_capture_offset_px =
+        {}; // only meaningful when selection_uses_full_window_capture
+    bool selection_uses_full_window_capture = false;
+    bool selection_has_offscreen_capture = false;
+
+    constexpr bool operator==(OverlaySelectionState const &) const noexcept = default;
+};
+
 struct OverlaySessionData {
     RectPx resize_anchor_rect = {};
     PointPx move_grab_offset = {};
@@ -45,6 +59,8 @@ struct OverlaySessionData {
     std::vector<SnapEdgeSegmentPx> vertical_edges = {};
     std::vector<SnapEdgeSegmentPx> horizontal_edges = {};
     std::vector<MonitorWithBounds> cached_monitors = {};
+    RectPx selection_capture_rect_screen = {};
+    PointPx selection_capture_offset_px = {};
     std::optional<HWND> selection_window = std::nullopt;
     std::optional<size_t> selection_monitor_index = std::nullopt;
     std::optional<SelectionHandle> resize_handle = std::nullopt;
@@ -55,6 +71,8 @@ struct OverlaySessionData {
     bool handle_dragging = false;
     bool move_dragging = false;
     bool modifier_preview = false;
+    bool selection_uses_full_window_capture = false;
+    bool selection_has_offscreen_capture = false;
     PointPx annotation_selection_start_px = {};
     SaveSelectionSource selection_source = SaveSelectionSource::Region;
 
@@ -80,7 +98,8 @@ class OverlayController final {
                      std::optional<size_t> monitor_index_under_cursor,
                      std::optional<RectPx> window_rect_screen,
                      RectPx virtual_desktop_bounds, SnapEdges const &visible_snap_edges,
-                     int32_t origin_x, int32_t origin_y);
+                     int32_t origin_x, int32_t origin_y,
+                     bool window_full_capture_available = false);
 
     // WM_MOUSEMOVE
     [[nodiscard]] OverlayAction
@@ -117,8 +136,10 @@ class OverlayController final {
                         int32_t origin_x, int32_t origin_y);
 
     [[nodiscard]] OverlaySessionData const &State() const noexcept { return state_; }
+    [[nodiscard]] OverlaySelectionState Selection_state() const noexcept;
 
     void Set_final_selection(RectPx r);
+    void Restore_selection_state(OverlaySelectionState const &state);
 
     void Push_command(std::unique_ptr<ICommand> cmd);
     void Undo();
@@ -181,6 +202,10 @@ class OverlayController final {
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
 
   private:
+    void Reset_window_selection_metadata(bool reset_source) noexcept;
+    [[nodiscard]] bool Restricts_annotation_edits_to_visible_selection() const noexcept;
+    [[nodiscard]] PointPx
+    Clamp_annotation_cursor_to_visible_selection(PointPx cursor) const noexcept;
     void Rebuild_snap_edges(SnapEdges const &screen_edges, int32_t origin_x,
                             int32_t origin_y);
     void Update_virtual_desktop_client_bounds(RectPx virtual_desktop_bounds,

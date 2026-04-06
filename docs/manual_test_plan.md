@@ -239,6 +239,12 @@ unless a real end-to-end bug escapes into the Win32 shell:
   3. If available, also create a conflict for one modified `Prt Scrn` shortcut.
 - Expected:
   - Greenflame shows a warning dialog when registration fails.
+  - The modified-hotkey warning lists each conflicted modified `Prt Scrn`
+    shortcut explicitly.
+  - `%TEMP%\greenflame-debug.log` records one `hotkey` entry per failed
+    registration with the Windows error code/message.
+  - The warning does not identify the owning process because Windows does not
+    expose that information for failed `RegisterHotKey` calls.
   - Tray-menu capture actions still work.
   - Conflicted hotkeys fail gracefully without breaking unrelated actions.
 
@@ -291,6 +297,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Start again, hold `Ctrl + Shift` before clicking, then click anywhere.
 - Expected:
   - While the modifier is held before click, the pending window, monitor, or desktop target is shown as a clear undimmed preview region inside the gray overlay.
+  - For `Ctrl` window quick-select, the previewed window is visually lifted above overlapping windows instead of showing only the original visible desktop crop.
   - `Ctrl`-click selects the window under the cursor.
   - `Shift`-click selects the monitor under the cursor.
   - `Ctrl + Shift` selects the full virtual desktop.
@@ -322,6 +329,64 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Help closes before the overlay cancels.
   - Pressing `Esc` during an active annotation gesture cancels only the in-progress gesture and leaves the tool armed.
   - With no nested UI open, the overlay cancels or backs out cleanly.
+
+### GF-MAN-SEL-006 - Ctrl Window Lift, Off-Screen Badge, And Visible-Only Editing
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Partially obscure a target window so that only a narrow visible sliver remains, then start interactive capture.
+  2. Press and release `Ctrl` without moving the mouse and confirm the preview enters and exits immediately at the current pointer position.
+  3. Hold `Ctrl` over that visible sliver and move the cursor around the lifted preview before clicking.
+  4. Repeat with the same target moved 1 px outside the desktop edge and verify the size labels.
+  5. Repeat with the target substantially outside the desktop bounds.
+  6. Repeat with a target window larger than the full desktop if available.
+  7. Commit each selection with `Ctrl`-click, then try drawing, moving annotations, and placing text near the visible boundary.
+  8. Exercise partially off-screen window previews and confirm the center size label adds the off-screen note beneath the `width x height` text.
+  9. Commit a partially off-screen window selection, then start a move drag and a resize drag.
+  10. Commit a partially off-screen window selection and start editing annotations.
+- Expected:
+  - Pressing or releasing `Ctrl` alone updates the preview immediately; a mouse move is not required to enter or leave the lifted window mode.
+  - While `Ctrl` is held, the same candidate window keeps hit-test precedence while the pointer remains inside its lifted visible area.
+  - A partially obscured target can still be selected from a small visible sliver, and the lifted preview shows the target window's own pixels rather than the occluding window.
+  - Entering, updating, and committing the lifted `Ctrl` preview does not silently close or crash the overlay, including for partially off-screen and oversized windows.
+  - For windows extending off-screen, the committed editable region is limited to the visible desktop intersection.
+  - For partially off-screen windows, the side and center size labels show the full captured window width and height, not only the visible on-desktop intersection.
+  - The fixed note text `Includes off-screen pixels` appears beneath the center `width x height` label only when full off-screen pixels are included.
+  - The lifted `Ctrl` window path never introduces a second captured cursor from WGC itself; at most one captured cursor is visible, and `Ctrl + K` still fully hides or shows it.
+  - The center size label keeps the larger `width x height` text and uses the smaller dimension-label font for the off-screen note beneath it.
+  - As soon as a committed window-backed selection is actually moved or resized, it immediately drops full-window/window-source semantics and the interactive size labels switch to the real region size.
+  - Once the selection is committed and normal editing begins, the off-screen note disappears together with the rest of the interactive size label.
+  - Annotation creation, drag, resize, text placement, and cursor previews stay constrained to the visible portion; invisible off-screen pixels are never directly editable.
+
+### GF-MAN-SEL-007 - WGC Debug Log For Interactive Ctrl Window Preview
+
+- Priority: `P2`
+- Run on: `ENV-A`, `ENV-B`
+- Prerequisite: Build Greenflame with `GREENFLAME_LOG` enabled.
+- Steps:
+  1. Delete `%TEMP%\greenflame-debug.log` if it exists.
+  2. Start interactive capture and exercise `Ctrl` window preview on a normal window, a partially obscured window, and a partially off-screen window.
+  3. If a failure or silent close is observed, reopen `%TEMP%\greenflame-debug.log`.
+- Expected:
+  - `%TEMP%\greenflame-debug.log` is created.
+  - The log records interactive preview requests and WGC capture/session events for the tested windows.
+  - If a capture fails, the log includes a corresponding `failure:` line instead of leaving the path silent.
+
+### GF-MAN-SEL-008 - Reopen Ctrl Window Preview After Full Cancel
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Start interactive capture from the tray.
+  2. Hold `Ctrl` and `Ctrl`-click a normal capturable window.
+  3. Press `Esc`, then press `Esc` again so the overlay fully closes.
+  4. Start interactive capture from the tray again.
+  5. Hold `Ctrl` without clicking, then move across one or more capturable windows.
+- Expected:
+  - The overlay stays open after the second launch.
+  - Holding `Ctrl` after the reopen does not crash or silently close Greenflame.
+  - The lifted window preview still appears and updates normally after the full cancel/reopen cycle.
 
 ### GF-MAN-UI-001 - Overlay Help
 
@@ -548,6 +613,21 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Initial pin placement matches the original selection position on the correct monitor.
   - Moving and zooming the pin across monitor boundaries does not introduce DPI jumps, seams, or pointer offset.
   - Later captures do not include the pinned-image window itself.
+
+### GF-MAN-PIN-006 - Pinning Off-Screen And Oversized Ctrl-Selected Windows
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Use interactive `Ctrl` window selection on a target that extends 1 px outside the desktop, then pin it.
+  2. Repeat with a target substantially outside the desktop bounds.
+  3. Repeat with a target larger than the full desktop if available.
+  4. Repeat on a non-primary or negative-coordinate monitor if available.
+- Expected:
+  - The new pin uses the full captured window bitmap, not just the visible editable portion.
+  - Initial pin scale is still `100%`.
+  - Initial pin placement uses the full window capture rect, so partially off-screen and oversized source windows may produce pins that also begin partly off-screen.
+  - Negative-coordinate and mixed-DPI monitor placement stays correct with no jumps or offset between the original window location and the new pin.
 
 ## Annotations
 
@@ -1304,6 +1384,20 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Annotation pixels intersecting the selection are included.
   - Annotation pixels outside the selection are excluded.
   - Overlay UI chrome is never present in the output.
+
+### GF-MAN-OUT-006 - Ctrl Window Export Includes Off-Screen Pixels
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Use interactive `Ctrl` window selection on a target that extends slightly off-screen and add visible annotations near the visible edge.
+  2. Save once, copy once, and pin once.
+  3. Repeat with the same selection after manually moving it.
+  4. Repeat with the same selection after manually resizing it.
+- Expected:
+  - Before any manual move or resize, save/copy/pin include the full captured window pixels, including the off-screen portion.
+  - The visible annotations appear at the correct offset inside the full exported image.
+  - After a manual move or resize, the selection falls back to ordinary region semantics and subsequent save/copy/pin use only the reshaped visible region.
 
 ## Config And Persistence
 

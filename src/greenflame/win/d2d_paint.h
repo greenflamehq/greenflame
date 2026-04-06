@@ -27,6 +27,7 @@ struct AnnotationPreviewPatch {
 
 // Per-frame paint input for the Direct2D overlay renderer.
 struct D2DPaintInput {
+    ID2D1Bitmap *lifted_window_bitmap = nullptr;
     core::Annotation const *draft_annotation = nullptr;
     core::TextAnnotation const *draft_text_annotation = nullptr;
     core::Annotation const *selected_annotation = nullptr;
@@ -44,6 +45,7 @@ struct D2DPaintInput {
     std::span<const COLORREF> selection_wheel_colors = {};
     std::optional<size_t> selection_wheel_selected_segment = std::nullopt;
     std::optional<size_t> selection_wheel_hovered_segment = std::nullopt;
+    std::optional<core::SizePx> selection_size_override = std::nullopt;
     std::wstring_view text_wheel_hub_font_family = {};
     std::vector<core::RectPx> draft_text_selection_rects = {};
     std::optional<core::TextAnnotationBaseStyle> text_cursor_preview_style =
@@ -63,6 +65,8 @@ struct D2DPaintInput {
     core::RectPx live_rect = {};
     core::RectPx annotation_selection_live_rect = {};
     core::RectPx final_selection = {};
+    core::RectPx lifted_window_dest_rect = {};
+    core::RectPx lifted_window_source_rect = {};
     core::RectPx draft_text_caret_rect = {};
     std::optional<core::StrokeStyle> draft_freehand_style = std::nullopt;
     core::FreehandSmoothingMode draft_freehand_smoothing_mode =
@@ -86,6 +90,7 @@ struct D2DPaintInput {
     core::HighlighterWheelMode highlighter_wheel_active_mode =
         core::HighlighterWheelMode::Color;
     bool selection_wheel_clamp_nav = false;
+    bool show_offscreen_capture_note = false;
     std::optional<core::SelectionHandle> highlight_handle = std::nullopt;
     std::optional<core::TextWheelHubSide> text_wheel_hovered_hub = std::nullopt;
     std::optional<core::HighlighterWheelHubSide> highlighter_wheel_hovered_hub =

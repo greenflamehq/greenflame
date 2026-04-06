@@ -30,6 +30,7 @@ struct D2DOverlayResources final {
 
     // Per-session bitmaps
     Microsoft::WRL::ComPtr<ID2D1Bitmap> screenshot;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> lifted_window_capture;
     Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> annotations_rt;
     Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> frozen_rt;
     Microsoft::WRL::ComPtr<ID2D1BitmapRenderTarget> draft_stroke_rt;
@@ -99,6 +100,8 @@ struct D2DOverlayResources final {
 
     // Upload the GDI capture as a D2D bitmap.
     [[nodiscard]] bool Upload_screenshot(GdiCaptureResult const &cap);
+    [[nodiscard]] bool Upload_lifted_window_capture(GdiCaptureResult const &cap);
+    void Clear_lifted_window_capture() noexcept;
 
     // Create device-dependent shared resources (brushes, stroke styles, text formats).
     [[nodiscard]] bool Create_shared_resources();

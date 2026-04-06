@@ -29,6 +29,7 @@ constexpr float kSelectionWheelHubInactiveOpacitySwipeOpacity =
 constexpr float kSelectionWheelHubOpacitySwipeLeadingAlpha = 0.9f;
 constexpr float kSelectionWheelHubOpacitySwipeTrailingAlpha = 0.18f;
 constexpr size_t kSelectionWheelHubOpacitySwipeBandCount = 6u;
+constexpr std::wstring_view kOffscreenCaptureNoteText = L"Includes off-screen pixels";
 constexpr D2D1_COLOR_F kSelectionWheelHubInactiveFill = Make_d2d_color(244, 246, 241);
 constexpr D2D1_COLOR_F kSelectionWheelHubActiveFill = Make_d2d_color(220, 239, 216);
 constexpr D2D1_COLOR_F kSelectionWheelHubHoverFill = Make_d2d_color(206, 231, 199);
@@ -52,6 +53,40 @@ void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot
     D2D1_RECT_F const visible_f = Rect(*clipped);
     rt->DrawBitmap(screenshot, visible_f, 1.f,
                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, visible_f);
+}
+
+void Draw_bitmap_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *bitmap,
+                      core::RectPx dest_rect, core::RectPx source_rect) {
+    if (rt == nullptr || bitmap == nullptr || dest_rect.Is_empty() ||
+        source_rect.Is_empty()) {
+        return;
+    }
+
+    D2D1_SIZE_U const bitmap_size = bitmap->GetPixelSize();
+    if (bitmap_size.width == 0 || bitmap_size.height == 0) {
+        return;
+    }
+
+    core::RectPx const bitmap_bounds =
+        core::RectPx::From_ltrb(0, 0, static_cast<int32_t>(bitmap_size.width),
+                                static_cast<int32_t>(bitmap_size.height));
+    std::optional<core::RectPx> const clipped_source =
+        core::RectPx::Intersect(source_rect.Normalized(), bitmap_bounds);
+    if (!clipped_source.has_value()) {
+        return;
+    }
+
+    dest_rect.left += clipped_source->left - source_rect.left;
+    dest_rect.top += clipped_source->top - source_rect.top;
+    dest_rect.right -= source_rect.right - clipped_source->right;
+    dest_rect.bottom -= source_rect.bottom - clipped_source->bottom;
+    if (dest_rect.Is_empty()) {
+        return;
+    }
+    source_rect = *clipped_source;
+
+    rt->DrawBitmap(bitmap, Rect(dest_rect), 1.f,
+                   D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, Rect(source_rect));
 }
 
 [[nodiscard]] constexpr D2D1_COLOR_F With_alpha(D2D1_COLOR_F color,
@@ -735,8 +770,10 @@ void Clamp_box(float &left, float w, float lo, float hi) {
 }
 
 void Draw_dimension_labels(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                           core::RectPx sel, int vd_w, int vd_h, bool show_side,
-                           bool show_center) {
+                           core::RectPx sel,
+                           std::optional<core::SizePx> selection_size_override,
+                           int vd_w, int vd_h, bool show_side, bool show_center,
+                           bool show_offscreen_capture_note) {
     if (!rt || !res.text_dim || !res.text_center || sel.Is_empty()) {
         return;
     }
@@ -744,10 +781,14 @@ void Draw_dimension_labels(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         return;
     }
 
-    int const sel_w = sel.Width();
-    int const sel_h = sel.Height();
-    std::wstring const w_str = std::to_wstring(sel_w);
-    std::wstring const h_str = std::to_wstring(sel_h);
+    int const label_w =
+        selection_size_override.has_value() ? selection_size_override->w : sel.Width();
+    int const label_h =
+        selection_size_override.has_value() ? selection_size_override->h : sel.Height();
+    int const visible_w = sel.Width();
+    int const visible_h = sel.Height();
+    std::wstring const w_str = std::to_wstring(label_w);
+    std::wstring const h_str = std::to_wstring(label_h);
     std::wstring const c_str = w_str + L" x " + h_str;
 
     float const sel_l = static_cast<float>(sel.left);
@@ -801,19 +842,75 @@ void Draw_dimension_labels(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         if (!Measure_text(res, res.text_center.Get(), c_str, cw, ch_f)) {
             return;
         }
-        float cbox_w = cw + 2.f * kDimMarginF;
-        float cbox_h = ch_f + 2.f * kDimMarginF;
+        float note_w = 0.f;
+        float note_h = 0.f;
+        if (show_offscreen_capture_note &&
+            !Measure_text(res, res.text_dim.Get(), kOffscreenCaptureNoteText, note_w,
+                          note_h)) {
+            show_offscreen_capture_note = false;
+        }
+
+        float const cbox_w = std::max(cw, show_offscreen_capture_note ? note_w : 0.f) +
+                             2.f * kDimMarginF;
+        float const cbox_h =
+            ch_f + (show_offscreen_capture_note ? kDimMarginF + note_h : 0.f) +
+            2.f * kDimMarginF;
         // Only draw if selection is large enough.
-        if (static_cast<float>(sel_w) < cbox_w + 2.f * kCenterMinPad) {
+        if (static_cast<float>(visible_w) < cbox_w + 2.f * kCenterMinPad) {
             return;
         }
-        if (static_cast<float>(sel_h) < cbox_h + 2.f * kCenterMinPad) {
+        if (static_cast<float>(visible_h) < cbox_h + 2.f * kCenterMinPad) {
             return;
         }
         float cbox_l = cx - cbox_w / 2.f;
         float cbox_t = cy - cbox_h / 2.f;
-        Draw_text_box(rt, res, res.text_center.Get(), c_str, cbox_l, cbox_t, cbox_w,
-                      cbox_h, kDimMarginF);
+        if (!show_offscreen_capture_note) {
+            Draw_text_box(rt, res, res.text_center.Get(), c_str, cbox_l, cbox_t, cbox_w,
+                          cbox_h, kDimMarginF);
+            return;
+        }
+
+        D2D1_RECT_F const box_rect =
+            D2D1::RectF(cbox_l, cbox_t, cbox_l + cbox_w, cbox_t + cbox_h);
+        res.solid_brush->SetColor(With_alpha(kCoordTooltipBg, kCoordTooltipAlpha));
+        rt->FillRectangle(box_rect, res.solid_brush.Get());
+
+        res.solid_brush->SetColor(kCoordTooltipText);
+        rt->DrawRectangle(D2D1::RectF(cbox_l + kHalfPixel, cbox_t + kHalfPixel,
+                                      cbox_l + cbox_w - kHalfPixel,
+                                      cbox_t + cbox_h - kHalfPixel),
+                          res.solid_brush.Get(), 1.f, res.flat_cap_style.Get());
+
+        float const inner_w = cbox_w - 2.f * kDimMarginF;
+        float const size_text_top = cbox_t + kDimMarginF;
+        float const note_text_top = size_text_top + ch_f + kDimMarginF;
+
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> size_layout;
+        HRESULT const size_hr = res.dwrite_factory->CreateTextLayout(
+            c_str.data(), static_cast<UINT32>(c_str.size()), res.text_center.Get(),
+            inner_w, ch_f, size_layout.GetAddressOf());
+        if (FAILED(size_hr) || !size_layout) {
+            return;
+        }
+        size_layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        size_layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+
+        Microsoft::WRL::ComPtr<IDWriteTextLayout> note_layout;
+        HRESULT const note_hr = res.dwrite_factory->CreateTextLayout(
+            kOffscreenCaptureNoteText.data(),
+            static_cast<UINT32>(kOffscreenCaptureNoteText.size()), res.text_dim.Get(),
+            inner_w, note_h, note_layout.GetAddressOf());
+        if (FAILED(note_hr) || !note_layout) {
+            return;
+        }
+        note_layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        note_layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+
+        res.solid_brush->SetColor(kCoordTooltipText);
+        rt->DrawTextLayout(D2D1::Point2F(cbox_l + kDimMarginF, size_text_top),
+                           size_layout.Get(), res.solid_brush.Get());
+        rt->DrawTextLayout(D2D1::Point2F(cbox_l + kDimMarginF, note_text_top),
+                           note_layout.Get(), res.solid_brush.Get());
     }
 }
 
@@ -2293,10 +2390,11 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     // Dimension labels (only while interacting).
     if (interacting && !disp_sel.Is_empty()) {
-        Draw_dimension_labels(rt, res, disp_sel, vd_width, vd_height,
-                              input.show_selection_size_side_labels,
-                              input.show_selection_size_center_label &&
-                                  !input.move_dragging);
+        Draw_dimension_labels(
+            rt, res, disp_sel, input.selection_size_override, vd_width, vd_height,
+            input.show_selection_size_side_labels,
+            input.show_selection_size_center_label && !input.move_dragging,
+            input.show_offscreen_capture_note);
     }
 
     // Transient center label (e.g. brush size overlay).
@@ -2548,10 +2646,10 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     // the dim sits on top outside the selection. Force the dynamic path whenever one
     // is present.
     bool const has_live_annotation_draft = Has_live_annotation_draft(input);
-    bool const is_steady_state = res.frozen_valid && !input.dragging &&
-                                 !input.handle_dragging && !input.move_dragging &&
-                                 !input.annotation_editing && !input.modifier_preview &&
-                                 !has_live_annotation_draft;
+    bool const is_steady_state =
+        res.frozen_valid && !input.dragging && !input.handle_dragging &&
+        !input.move_dragging && !input.annotation_editing && !input.modifier_preview &&
+        !has_live_annotation_draft && input.lifted_window_bitmap == nullptr;
 
     res.hwnd_rt->BeginDraw();
 
@@ -2589,9 +2687,17 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         // when an annotation tool gesture is active (live_rect is empty then).
         core::RectPx const restore_rect =
             !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
-        if (!restore_rect.Is_empty() && res.screenshot) {
-            Draw_clipped_screenshot_rect(res.hwnd_rt.Get(), res.screenshot.Get(),
-                                         restore_rect, vd_width, vd_height);
+        if (!restore_rect.Is_empty()) {
+            if (input.lifted_window_bitmap != nullptr &&
+                !input.lifted_window_dest_rect.Is_empty() &&
+                !input.lifted_window_source_rect.Is_empty()) {
+                Draw_bitmap_rect(res.hwnd_rt.Get(), input.lifted_window_bitmap,
+                                 input.lifted_window_dest_rect,
+                                 input.lifted_window_source_rect);
+            } else if (res.screenshot) {
+                Draw_clipped_screenshot_rect(res.hwnd_rt.Get(), res.screenshot.Get(),
+                                             restore_rect, vd_width, vd_height);
+            }
         }
         if (!restore_rect.Is_empty()) {
             res.hwnd_rt->PushAxisAlignedClip(Rect(restore_rect),

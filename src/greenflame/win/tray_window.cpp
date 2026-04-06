@@ -3,6 +3,7 @@
 #include "win/tray_window.h"
 #include "app_config_store.h"
 #include "win/about_dialog.h"
+#include "win/debug_log.h"
 #include "win/ui_palette.h"
 
 namespace {
@@ -42,6 +43,37 @@ enum HotkeyId : int {
     HotkeyTestingError = 90,
     HotkeyTestingWarning = 91,
 };
+
+struct HotkeyRegistrationSpec {
+    int id = 0;
+    UINT modifiers = 0;
+    UINT virtual_key = 0;
+    std::wstring_view display_name = {};
+};
+
+struct HotkeyRegistrationFailure {
+    std::wstring_view display_name = {};
+    DWORD error = 0;
+    std::wstring error_message = {};
+};
+
+constexpr size_t kModifiedPrintScreenHotkeyCount = 5;
+constexpr HotkeyRegistrationSpec kStartCaptureHotkey = {
+    HotkeyStartCapture, kModNoRepeat, VK_SNAPSHOT, L"Print Screen"};
+
+constexpr std::array<HotkeyRegistrationSpec, kModifiedPrintScreenHotkeyCount>
+    kModifiedPrintScreenHotkeys = {{
+        {HotkeyCopyWindow, static_cast<UINT>(MOD_CONTROL | kModNoRepeat), VK_SNAPSHOT,
+         L"Ctrl + Prt Scrn"},
+        {HotkeyCopyMonitor, static_cast<UINT>(MOD_SHIFT | kModNoRepeat), VK_SNAPSHOT,
+         L"Shift + Prt Scrn"},
+        {HotkeyCopyDesktop, static_cast<UINT>(MOD_CONTROL | MOD_SHIFT | kModNoRepeat),
+         VK_SNAPSHOT, L"Ctrl + Shift + Prt Scrn"},
+        {HotkeyCopyLastRegion, static_cast<UINT>(MOD_ALT | kModNoRepeat), VK_SNAPSHOT,
+         L"Alt + Prt Scrn"},
+        {HotkeyCopyLastWindow, static_cast<UINT>(MOD_CONTROL | MOD_ALT | kModNoRepeat),
+         VK_SNAPSHOT, L"Ctrl + Alt + Prt Scrn"},
+    }};
 
 constexpr wchar_t kCaptureRegionMenuText[] = L"Capture region\tPrt Scrn";
 constexpr wchar_t kCaptureMonitorMenuText[] =
@@ -273,6 +305,87 @@ void Reveal_file_in_explorer(std::wstring_view path) {
               flags | DT_CALCRECT);
     SelectObject(hdc, old_font);
     return std::max(0, static_cast<int>(measure.bottom - measure.top));
+}
+
+[[nodiscard]] std::wstring Trim_trailing_wspace(std::wstring text) {
+    while (!text.empty() && std::iswspace(text.back()) != 0) {
+        text.pop_back();
+    }
+    return text;
+}
+
+[[nodiscard]] std::wstring Format_windows_error_message(DWORD error) {
+    if (error == 0) {
+        return L"Windows did not provide an error code.";
+    }
+
+    LPWSTR buffer = nullptr;
+    DWORD const flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                        FORMAT_MESSAGE_IGNORE_INSERTS;
+    DWORD const length =
+        FormatMessageW(flags, nullptr, error, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                       reinterpret_cast<LPWSTR>(&buffer), 0, nullptr);
+    if (length == 0 || buffer == nullptr) {
+        return L"Windows error " + std::to_wstring(error);
+    }
+
+    std::wstring message(buffer, static_cast<size_t>(length));
+    LocalFree(buffer);
+    return Trim_trailing_wspace(std::move(message));
+}
+
+void Log_hotkey_registration_failure(
+    HotkeyRegistrationSpec const &hotkey,
+    HotkeyRegistrationFailure const &failure) noexcept {
+    std::wstring message = L"RegisterHotKey failed for ";
+    message += hotkey.display_name;
+    message += L" error=";
+    message += std::to_wstring(failure.error);
+    message += L" message=\"";
+    message += failure.error_message;
+    message += L"\" owner_process=unavailable";
+    GREENFLAME_LOG_WRITE(L"hotkey", message);
+}
+
+[[nodiscard]] bool Try_register_hotkey(HWND hwnd, HotkeyRegistrationSpec const &hotkey,
+                                       HotkeyRegistrationFailure &failure) {
+    if (RegisterHotKey(hwnd, hotkey.id, hotkey.modifiers, hotkey.virtual_key) != 0) {
+        return true;
+    }
+
+    failure.display_name = hotkey.display_name;
+    failure.error = GetLastError();
+    failure.error_message = Format_windows_error_message(failure.error);
+    Log_hotkey_registration_failure(hotkey, failure);
+    return false;
+}
+
+[[nodiscard]] std::wstring
+Build_hotkey_registration_failure_message(std::wstring_view display_name,
+                                          std::wstring_view error_message,
+                                          std::wstring_view fallback_message) {
+    std::wstring message(display_name);
+    message += L" could not be registered.\nReason: ";
+    message += error_message;
+    message += L"\nWindows did not identify the owning process.\n";
+    message += fallback_message;
+    return message;
+}
+
+[[nodiscard]] std::wstring Build_modified_hotkey_registration_failure_message(
+    std::span<HotkeyRegistrationFailure const> failures) {
+    std::wstring message =
+        L"The following modified Print Screen hotkeys could not be registered:";
+    for (HotkeyRegistrationFailure const &failure : failures) {
+        message += L"\n- ";
+        message += failure.display_name;
+        message += L" (";
+        message += failure.error_message;
+        message += L')';
+    }
+    message += L"\n\nWindows did not identify the owning process.\n"
+               L"You can still use these commands from the tray menu.";
+    return message;
 }
 
 } // namespace
@@ -1001,46 +1114,33 @@ bool TrayWindow::Create(HINSTANCE hinstance, bool enable_testing_hotkeys,
     toast_popup_ = std::make_unique<ToastPopup>(hinstance_);
 
     for (;;) {
-        if (RegisterHotKey(hwnd, HotkeyStartCapture, kModNoRepeat, VK_SNAPSHOT)) {
+        HotkeyRegistrationFailure failure = {};
+        if (Try_register_hotkey(hwnd, kStartCaptureHotkey, failure)) {
             break;
         }
-        int const user_choice =
-            MessageBoxW(hwnd,
-                        L"Print Screen could not be registered. It may be in "
-                        L"use by another program.\n"
-                        L"You can still start capture from the tray menu.",
-                        L"Greenflame", MB_ABORTRETRYIGNORE | MB_ICONWARNING);
+        std::wstring const message = Build_hotkey_registration_failure_message(
+            kStartCaptureHotkey.display_name, failure.error_message,
+            L"You can still start capture from the tray menu.");
+        int const user_choice = MessageBoxW(hwnd, message.c_str(), L"Greenflame",
+                                            MB_ABORTRETRYIGNORE | MB_ICONWARNING);
         if (user_choice == IDRETRY) {
             continue;
         }
         break;
     }
 
-    bool const copy_window_registered =
-        RegisterHotKey(hwnd, HotkeyCopyWindow,
-                       static_cast<UINT>(MOD_CONTROL | kModNoRepeat), VK_SNAPSHOT) != 0;
-    bool const copy_monitor_registered =
-        RegisterHotKey(hwnd, HotkeyCopyMonitor,
-                       static_cast<UINT>(MOD_SHIFT | kModNoRepeat), VK_SNAPSHOT) != 0;
-    bool const copy_desktop_registered =
-        RegisterHotKey(hwnd, HotkeyCopyDesktop,
-                       static_cast<UINT>(MOD_CONTROL | MOD_SHIFT | kModNoRepeat),
-                       VK_SNAPSHOT) != 0;
-    bool const copy_last_region_registered =
-        RegisterHotKey(hwnd, HotkeyCopyLastRegion,
-                       static_cast<UINT>(MOD_ALT | kModNoRepeat), VK_SNAPSHOT) != 0;
-    bool const copy_last_window_registered =
-        RegisterHotKey(hwnd, HotkeyCopyLastWindow,
-                       static_cast<UINT>(MOD_CONTROL | MOD_ALT | kModNoRepeat),
-                       VK_SNAPSHOT) != 0;
-    if (!copy_window_registered || !copy_monitor_registered ||
-        !copy_desktop_registered || !copy_last_region_registered ||
-        !copy_last_window_registered) {
-        MessageBoxW(hwnd,
-                    L"One or more modified Print Screen hotkeys could not be "
-                    L"registered.\n"
-                    L"You can still use these commands from the tray menu.",
-                    L"Greenflame", MB_OK | MB_ICONWARNING);
+    std::vector<HotkeyRegistrationFailure> modified_hotkey_failures = {};
+    modified_hotkey_failures.reserve(kModifiedPrintScreenHotkeys.size());
+    for (HotkeyRegistrationSpec const &hotkey : kModifiedPrintScreenHotkeys) {
+        HotkeyRegistrationFailure failure = {};
+        if (!Try_register_hotkey(hwnd, hotkey, failure)) {
+            modified_hotkey_failures.push_back(std::move(failure));
+        }
+    }
+    if (!modified_hotkey_failures.empty()) {
+        std::wstring const message = Build_modified_hotkey_registration_failure_message(
+            std::span<HotkeyRegistrationFailure const>(modified_hotkey_failures));
+        MessageBoxW(hwnd, message.c_str(), L"Greenflame", MB_OK | MB_ICONWARNING);
     }
 
     if (testing_hotkeys_enabled_) {
