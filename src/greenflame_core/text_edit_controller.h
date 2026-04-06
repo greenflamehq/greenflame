@@ -50,6 +50,10 @@ class TextEditController final {
   public:
     TextEditController(PointPx origin, TextAnnotationBaseStyle const &base_style,
                        ITextLayoutEngine *layout_engine);
+    // Re-edit constructor: pre-populates the buffer with existing runs.
+    TextEditController(PointPx origin, TextAnnotationBaseStyle const &base_style,
+                       std::vector<TextRun> initial_runs,
+                       ITextLayoutEngine *layout_engine);
     TextEditController(TextEditController const &) = delete;
     TextEditController &operator=(TextEditController const &) = delete;
     TextEditController(TextEditController &&) = default;
@@ -89,6 +93,7 @@ class TextEditController final {
     void Delete_selected_range();
     [[nodiscard]] int32_t Current_text_length() const;
     [[nodiscard]] int32_t Hit_test_offset(PointPx cursor) const;
+    void Sync_typing_style_to_cursor();
     [[nodiscard]] int32_t Move_vertical(int32_t offset, int delta_lines) const;
 
     TextDraftBuffer buffer_ = {};

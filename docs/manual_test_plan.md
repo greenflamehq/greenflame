@@ -1061,14 +1061,35 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Steps:
   1. Create and commit a text annotation.
   2. Return to default mode, select the committed text, move it, and delete it.
-  3. Create and commit another text annotation, then attempt to re-enter text-editing on it.
-  4. With a live draft still visible, save or copy the selection.
+  3. With a live draft still visible, save or copy the selection.
 - Expected:
   - Committed text annotations can be selected, moved, and deleted, and selection shows a clockwise animated marquee around the text visual bounds.
   - Once selected, dragging from transparent pixels inside the text marquee still moves the whole annotation.
-  - Committed text annotations are not re-editable as text.
   - Saved or copied output includes committed text annotations.
   - Saved or copied output excludes live draft caret, selection highlight, and other draft chrome.
+
+### GF-MAN-ANN-014A - Committed Text Re-editing Via Double-Click
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Create and commit a text annotation with multi-word text (e.g. "hello world").
+  2. With no annotation tool active, single-click the annotation to select it.
+  3. Hover the cursor over the selected annotation and verify the cursor changes to an I-beam.
+  4. Double-click somewhere in the middle of the text (e.g. between "hello" and "world").
+  5. Verify the text editing mode is entered with the caret placed near the click position.
+  6. Edit the text (add, delete, or replace characters) and commit by clicking outside.
+  7. Verify the annotation now shows the updated text and undo restores the previous text.
+  8. Undo again to verify the original create is also undone.
+  9. Create a text annotation, then multi-select it together with another annotation.
+  10. Double-click the text annotation while in multi-select.
+- Expected:
+  - The I-beam cursor appears when hovering over the body of a single-selected text annotation (no active tool).
+  - Double-clicking a text annotation (selected or unselected) enters text editing mode directly.
+  - The text caret appears near the click position; clicking past end-of-line places the caret at the end of that line.
+  - Committing the re-edit creates a new undo entry; undoing restores the previous text, and undoing again removes the annotation.
+  - Double-clicking a text annotation that is part of a multi-selection does not enter text editing mode.
+  - Double-clicking a non-text annotation (line, arrow, rectangle, etc.) does not enter text editing mode.
 
 ### GF-MAN-ANN-016 - Selection Wheel Keyboard Navigation (Up/Down arrows)
 

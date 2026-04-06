@@ -72,6 +72,7 @@ void AnnotationController::Reset_for_session() {
     text_layout_engine_ = nullptr;
     obfuscate_source_provider_ = nullptr;
     text_edit_ctrl_.reset();
+    editing_annotation_id_.reset();
     text_current_font_ = TextFontChoice::Sans;
     bubble_counter_ = 1;
     bubble_current_font_ = TextFontChoice::Sans;
@@ -481,7 +482,71 @@ void AnnotationController::Commit_text_annotation(UndoStack &undo_stack,
     Commit_new_annotation(undo_stack, std::move(committed));
 }
 
-void AnnotationController::Cancel_text_draft() { text_edit_ctrl_.reset(); }
+void AnnotationController::Cancel_text_draft() {
+    text_edit_ctrl_.reset();
+    editing_annotation_id_.reset();
+}
+
+std::optional<uint64_t> AnnotationController::Editing_annotation_id() const noexcept {
+    return editing_annotation_id_;
+}
+
+bool AnnotationController::Begin_text_edit_on_annotation(uint64_t annotation_id,
+                                                         PointPx cursor) {
+    if (Has_active_tool_gesture() || Has_active_edit_interaction() ||
+        text_edit_ctrl_.has_value() || text_layout_engine_ == nullptr) {
+        return false;
+    }
+
+    std::optional<size_t> const index =
+        Index_of_annotation_id(document_.annotations, annotation_id);
+    if (!index.has_value()) {
+        return false;
+    }
+    TextAnnotation const *const text_ann =
+        std::get_if<TextAnnotation>(&document_.annotations[*index].data);
+    if (text_ann == nullptr) {
+        return false;
+    }
+
+    editing_annotation_id_ = annotation_id;
+    text_edit_ctrl_.emplace(text_ann->origin, text_ann->base_style, text_ann->runs,
+                            text_layout_engine_);
+    text_edit_ctrl_->On_pointer_press(cursor);
+    return true;
+}
+
+void AnnotationController::Commit_text_edit_annotation(UndoStack &undo_stack,
+                                                       TextAnnotation annotation) {
+    if (!editing_annotation_id_.has_value()) {
+        return;
+    }
+    uint64_t const editing_id = *editing_annotation_id_;
+    editing_annotation_id_.reset();
+    text_edit_ctrl_.reset();
+
+    if (!Text_annotation_has_text(annotation) || text_layout_engine_ == nullptr) {
+        return;
+    }
+
+    text_layout_engine_->Rasterize(annotation);
+
+    std::optional<size_t> const index =
+        Index_of_annotation_id(document_.annotations, editing_id);
+    if (!index.has_value()) {
+        return;
+    }
+
+    Annotation annotation_before = document_.annotations[*index];
+    Annotation annotation_after = document_.annotations[*index];
+    annotation_after.data = std::move(annotation);
+
+    AnnotationSelection const selection = {editing_id};
+    auto cmd = std::make_unique<UpdateAnnotationCommand>(
+        this, *index, std::move(annotation_before), std::move(annotation_after),
+        selection, selection, "Edit text annotation");
+    Push_annotation_command(undo_stack, std::move(cmd), {});
+}
 
 int32_t AnnotationController::Text_point_size() const noexcept {
     return Text_point_size_from_step(text_size_step_);
@@ -610,6 +675,7 @@ bool AnnotationController::On_cancel() {
     if (text_edit_ctrl_.has_value()) {
         text_edit_ctrl_->Cancel();
         text_edit_ctrl_.reset();
+        editing_annotation_id_.reset();
         return true;
     }
     if (active_edit_interaction_ != nullptr) {
@@ -671,6 +737,7 @@ void AnnotationController::Clear_annotations() noexcept {
     document_.selected_annotation_ids.clear();
     active_edit_interaction_.reset();
     text_edit_ctrl_.reset();
+    editing_annotation_id_.reset();
     registry_.Reset_all();
 }
 

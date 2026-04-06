@@ -88,6 +88,7 @@ class OverlayWindow final {
     LRESULT On_key_up(WPARAM wparam, LPARAM lparam);
     LRESULT On_char(WPARAM wparam);
     LRESULT On_l_button_down();
+    LRESULT On_l_button_dbl_clk();
     LRESULT On_mouse_move();
     LRESULT On_mouse_wheel(WPARAM wparam);
     LRESULT On_l_button_up();

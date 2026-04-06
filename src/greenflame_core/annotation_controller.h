@@ -113,8 +113,12 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] TextEditController *Active_text_edit() noexcept;
     [[nodiscard]] TextEditController const *Active_text_edit() const noexcept;
     void Begin_text_draft(PointPx origin);
+    [[nodiscard]] bool Begin_text_edit_on_annotation(uint64_t annotation_id,
+                                                     PointPx cursor);
     void Commit_text_annotation(UndoStack &undo_stack, TextAnnotation annotation);
+    void Commit_text_edit_annotation(UndoStack &undo_stack, TextAnnotation annotation);
     void Cancel_text_draft();
+    [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
     [[nodiscard]] int32_t Text_point_size() const noexcept;
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
     void Set_text_current_font(TextFontChoice choice) noexcept;
@@ -241,6 +245,7 @@ class AnnotationController final : public IAnnotationToolHost,
     ITextLayoutEngine *text_layout_engine_ = nullptr;
     IObfuscateSourceProvider *obfuscate_source_provider_ = nullptr;
     std::optional<TextEditController> text_edit_ctrl_ = std::nullopt;
+    std::optional<uint64_t> editing_annotation_id_ = std::nullopt;
     TextFontChoice text_current_font_ = TextFontChoice::Sans;
     int32_t bubble_counter_ = 1;
     TextFontChoice bubble_current_font_ = TextFontChoice::Sans;

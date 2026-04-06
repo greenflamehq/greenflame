@@ -340,8 +340,37 @@ bool OverlayController::Commit_active_text_edit() {
         return false;
     }
 
-    annotation_controller_.Commit_text_annotation(undo_stack_, edit->Commit());
+    TextAnnotation committed = edit->Commit();
+    if (annotation_controller_.Editing_annotation_id().has_value()) {
+        annotation_controller_.Commit_text_edit_annotation(undo_stack_,
+                                                           std::move(committed));
+    } else {
+        annotation_controller_.Commit_text_annotation(undo_stack_,
+                                                      std::move(committed));
+    }
     return true;
+}
+
+OverlayAction OverlayController::On_primary_double_press(PointPx cursor_client) {
+    if (state_.final_selection.Is_empty() ||
+        annotation_controller_.Has_active_text_edit() ||
+        annotation_controller_.Active_tool().has_value()) {
+        return OverlayAction::None;
+    }
+    if (annotation_controller_.Selected_annotation_count() != 1) {
+        return OverlayAction::None;
+    }
+    Annotation const *const ann = annotation_controller_.Selected_annotation();
+    if (ann == nullptr || !std::holds_alternative<TextAnnotation>(ann->data)) {
+        return OverlayAction::None;
+    }
+    return annotation_controller_.Begin_text_edit_on_annotation(ann->id, cursor_client)
+               ? OverlayAction::InvalidateFrozenCache
+               : OverlayAction::None;
+}
+
+std::optional<uint64_t> OverlayController::Editing_annotation_id() const noexcept {
+    return annotation_controller_.Editing_annotation_id();
 }
 
 void OverlayController::Cancel_text_draft() {
@@ -678,6 +707,22 @@ OverlayAction OverlayController::On_primary_press(
             Restricts_annotation_edits_to_visible_selection();
         std::optional<AnnotationToolId> const active_tool =
             annotation_controller_.Active_tool();
+        // Re-edit mode: text edit is active but no Text tool is selected.
+        // Handle click-outside (commit) and click-inside (cursor reposition).
+        if (annotation_controller_.Has_active_text_edit() &&
+            (!active_tool.has_value() || *active_tool != AnnotationToolId::Text)) {
+            TextEditController *const edit = annotation_controller_.Active_text_edit();
+            TextDraftView const view = edit->Build_view();
+            if (!view.Hit_bounds().Contains(cursor_client)) {
+                bool const has_text = view.annotation != nullptr &&
+                                      Text_annotation_has_text(*view.annotation);
+                Commit_active_text_edit();
+                return has_text ? OverlayAction::InvalidateFrozenCache
+                                : OverlayAction::Repaint;
+            }
+            edit->On_pointer_press(cursor_client);
+            return OverlayAction::Repaint;
+        }
         if (active_tool.has_value() && *active_tool == AnnotationToolId::Text) {
             if (TextEditController *const edit =
                     annotation_controller_.Active_text_edit();

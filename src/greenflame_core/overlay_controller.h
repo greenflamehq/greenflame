@@ -91,6 +91,9 @@ class OverlayController final {
     void Refresh_snap_edges(SnapEdges const &visible_snap_edges, int32_t origin_x,
                             int32_t origin_y);
 
+    // WM_LBUTTONDBLCLK
+    [[nodiscard]] OverlayAction On_primary_double_press(PointPx cursor_client);
+
     // WM_LBUTTONDOWN: all Win32 queries are pre-resolved by caller.
     [[nodiscard]] OverlayAction
     On_primary_press(OverlayModifierState mods, PointPx cursor_client,
@@ -174,6 +177,7 @@ class OverlayController final {
     void Set_bubble_current_font(TextFontChoice choice) noexcept;
     bool Commit_active_text_edit();
     void Cancel_text_draft();
+    [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
     [[nodiscard]] bool Has_active_annotation_edit() const noexcept;
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_annotation_edit_handle() const noexcept;

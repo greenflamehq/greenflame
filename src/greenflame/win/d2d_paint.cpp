@@ -2485,7 +2485,8 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 // can be used as a scratch surface.
 void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                             std::span<const core::Annotation> annotations,
-                            std::span<const AnnotationPreviewPatch> patches) {
+                            std::span<const AnnotationPreviewPatch> patches,
+                            std::optional<uint64_t> skip_id) {
     auto const is_highlighter = [](core::Annotation const &ann) -> bool {
         auto const *fh = std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
         return fh && fh->freehand_tip_shape == core::FreehandTipShape::Square;
@@ -2506,6 +2507,9 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     };
 
     for (size_t i = 0; i < annotations.size(); ++i) {
+        if (skip_id.has_value() && annotations[i].id == *skip_id) {
+            continue;
+        }
         auto const *const patch = find_patch(i);
         core::Annotation const &ann = patch != nullptr ? *patch : annotations[i];
         if (can_multiply && is_highlighter(ann)) {
@@ -2570,14 +2574,16 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
 void Rebuild_annotations_bitmap(D2DOverlayResources &res,
                                 std::span<const core::Annotation> annotations,
-                                std::span<const AnnotationPreviewPatch> patches) {
+                                std::span<const AnnotationPreviewPatch> patches,
+                                std::optional<uint64_t> skip_id) {
     if (!res.annotations_rt) {
         return;
     }
 
     res.annotations_rt->BeginDraw();
     res.annotations_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
-    Draw_annotations_to_rt(res.annotations_rt.Get(), res, annotations, patches);
+    Draw_annotations_to_rt(res.annotations_rt.Get(), res, annotations, patches,
+                           skip_id);
 
     HRESULT const hr = res.annotations_rt->EndDraw();
     if (SUCCEEDED(hr)) {

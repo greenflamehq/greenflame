@@ -102,7 +102,8 @@ struct D2DPaintInput {
 // patches: optional per-index overrides for the obfuscate preview path.
 void Rebuild_annotations_bitmap(D2DOverlayResources &res,
                                 std::span<const core::Annotation> annotations,
-                                std::span<const AnnotationPreviewPatch> patches = {});
+                                std::span<const AnnotationPreviewPatch> patches = {},
+                                std::optional<uint64_t> skip_id = std::nullopt);
 
 // Rebuild the frozen off-screen bitmap: screenshot + dim + selection restore +
 // annotations. Sets res.frozen_valid = true on success.

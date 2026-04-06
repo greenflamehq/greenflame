@@ -1387,7 +1387,7 @@ void OverlayWindow::Rebuild_toolbar_buttons() {
 bool OverlayWindow::Register_window_class(HINSTANCE hinstance) {
     WNDCLASSEXW window_class{};
     window_class.cbSize = sizeof(window_class);
-    window_class.style = 0; // CS_HREDRAW/CS_VREDRAW cause DWM flicker with D2D
+    window_class.style = CS_DBLCLKS; // CS_HREDRAW/CS_VREDRAW cause DWM flicker with D2D
     window_class.lpfnWndProc = &OverlayWindow::Static_wnd_proc;
     window_class.hInstance = hinstance;
     window_class.hCursor = LoadCursorW(nullptr, IDC_CROSS);
@@ -3147,6 +3147,16 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
     return 0;
 }
 
+LRESULT OverlayWindow::On_l_button_dbl_clk() {
+    core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
+    Apply_action(controller_.On_primary_double_press(cursor_client));
+    if (controller_.Has_active_text_edit()) {
+        Reset_caret_blink();
+    }
+    Refresh_cursor();
+    return 0;
+}
+
 LRESULT OverlayWindow::On_l_button_up() {
     if (suppress_next_lbutton_up_) {
         suppress_next_lbutton_up_ = false;
@@ -3358,6 +3368,8 @@ LRESULT OverlayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
         return On_char(wparam);
     case WM_LBUTTONDOWN:
         return On_l_button_down();
+    case WM_LBUTTONDBLCLK:
+        return On_l_button_dbl_clk();
     case WM_MOUSEMOVE:
         return On_mouse_move();
     case WM_MOUSEWHEEL:
@@ -3810,7 +3822,8 @@ LRESULT OverlayWindow::On_paint() {
     // --- D2D render path ---
     if (d2d_resources_) {
         if (!d2d_resources_->annotations_valid) {
-            Rebuild_annotations_bitmap(*d2d_resources_, controller_.Annotations());
+            Rebuild_annotations_bitmap(*d2d_resources_, controller_.Annotations(), {},
+                                       controller_.Editing_annotation_id());
         }
         if (!d2d_resources_->frozen_valid) {
             Rebuild_frozen_bitmap(*d2d_resources_, s.final_selection,
@@ -3979,11 +3992,21 @@ LRESULT OverlayWindow::On_paint() {
                                               : draft_text_view->overwrite_caret_rect;
             input.draft_text_insert_mode = draft_text_view->insert_mode;
             input.draft_text_blink_visible = caret_blink_visible_;
+            // During re-edit, the stored annotation's visual_bounds are stale;
+            // track the live draft bounds so the marquee grows with the text.
+            if (controller_.Editing_annotation_id().has_value() &&
+                draft_text_view->annotation != nullptr) {
+                input.selected_annotation_bounds =
+                    draft_text_view->annotation->visual_bounds;
+            }
         } else if (!input.draft_freehand_style.has_value() ||
                    input.draft_freehand_points.size() == 1) {
             input.draft_annotation = paint_draft_annotation;
         }
-        if (controller_.Should_show_selected_annotation_handles()) {
+        // Suppress selection handles while a text edit is active (consistent with
+        // new text annotation creation where no annotation is selected yet).
+        if (controller_.Should_show_selected_annotation_handles() &&
+            !draft_text_view.has_value()) {
             input.selected_annotation = controller_.Selected_annotation();
         }
         input.transient_center_label_text = transient_center_label_text_;
@@ -4251,6 +4274,15 @@ void OverlayWindow::Refresh_cursor() {
                 edit_target->kind == core::AnnotationEditTargetKind::LineEndHandle) {
                 SetCursor(Load_annotation_tool_cursor(hinstance_));
                 return;
+            }
+            if (edit_target->kind == core::AnnotationEditTargetKind::Body &&
+                controller_.Selected_annotation_count() == 1) {
+                core::Annotation const *const ann = controller_.Selected_annotation();
+                if (ann != nullptr &&
+                    std::holds_alternative<core::TextAnnotation>(ann->data)) {
+                    SetCursor(LoadCursorW(nullptr, IDC_IBEAM));
+                    return;
+                }
             }
         }
         std::optional<core::AnnotationToolId> const active_tool =

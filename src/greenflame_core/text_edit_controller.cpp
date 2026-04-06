@@ -176,6 +176,20 @@ TextEditController::TextEditController(PointPx origin,
     history_.push_back(TextDraftSnapshot{buffer_});
 }
 
+TextEditController::TextEditController(PointPx origin,
+                                       TextAnnotationBaseStyle const &base_style,
+                                       std::vector<TextRun> initial_runs,
+                                       ITextLayoutEngine *layout_engine)
+    : origin_(origin), layout_engine_(layout_engine) {
+    buffer_.base_style = base_style;
+    buffer_.runs = std::move(initial_runs);
+    draft_annotation_.origin = origin_;
+    draft_annotation_.base_style = base_style;
+    Rebuild_layout();
+    Refresh_preferred_x_from_layout();
+    history_.push_back(TextDraftSnapshot{buffer_});
+}
+
 TextDraftView TextEditController::Build_view() const {
     return TextDraftView{&draft_annotation_,           layout_.visual_bounds,
                          layout_.selection_rects,      layout_.caret_rect,
@@ -269,6 +283,9 @@ void TextEditController::On_navigation(TextNavigationAction action,
         return;
     }
 
+    if (!Has_selection(buffer_.selection)) {
+        Sync_typing_style_to_cursor();
+    }
     int32_t const preserved_x = buffer_.preferred_x_px;
     Rebuild_layout();
     if (preserve_preferred_x) {
@@ -293,6 +310,7 @@ void TextEditController::On_backspace(bool by_word) {
 
     Delete_selected_range();
     buffer_.selection = TextSelection{delete_start, delete_start};
+    Sync_typing_style_to_cursor();
     Rebuild_layout();
     Refresh_preferred_x_from_layout();
     Push_snapshot_if_changed();
@@ -315,6 +333,7 @@ void TextEditController::On_delete(bool by_word) {
 
     Delete_selected_range();
     buffer_.selection = TextSelection{delete_start, delete_start};
+    Sync_typing_style_to_cursor();
     Rebuild_layout();
     Refresh_preferred_x_from_layout();
     Push_snapshot_if_changed();
@@ -380,6 +399,7 @@ std::wstring TextEditController::Cut_selected_text() {
     int32_t const start = Selection_start(buffer_.selection);
     Delete_selected_range();
     buffer_.selection = TextSelection{start, start};
+    Sync_typing_style_to_cursor();
     Rebuild_layout();
     Refresh_preferred_x_from_layout();
     Push_snapshot_if_changed();
@@ -477,6 +497,7 @@ void TextEditController::On_pointer_press(PointPx cursor) {
     }
 
     buffer_.selection = TextSelection{hit_offset, hit_offset};
+    Sync_typing_style_to_cursor();
     Rebuild_layout();
     Refresh_preferred_x_from_layout();
 }
@@ -508,6 +529,9 @@ void TextEditController::On_pointer_release(PointPx cursor) {
     }
 
     buffer_.selection.active_utf16 = hit_offset;
+    if (!Has_selection(buffer_.selection)) {
+        Sync_typing_style_to_cursor();
+    }
     Rebuild_layout();
     Refresh_preferred_x_from_layout();
 }
@@ -619,6 +643,23 @@ int32_t TextEditController::Hit_test_offset(PointPx cursor) const {
     }
     return std::clamp(layout_engine_->Hit_test_point(buffer_, origin_, cursor), 0,
                       Current_text_length());
+}
+
+void TextEditController::Sync_typing_style_to_cursor() {
+    if (buffer_.runs.empty()) {
+        return;
+    }
+    // Use the character to the left of the cursor; fall back to the first
+    // character when the cursor is at position 0.
+    int32_t const target = std::max(0, buffer_.selection.active_utf16 - 1);
+    int32_t pos = 0;
+    for (TextRun const &run : buffer_.runs) {
+        pos += static_cast<int32_t>(run.text.size());
+        if (target < pos || &run == &buffer_.runs.back()) {
+            buffer_.typing_style.flags = run.flags;
+            return;
+        }
+    }
 }
 
 int32_t TextEditController::Move_vertical(int32_t offset, int delta_lines) const {
