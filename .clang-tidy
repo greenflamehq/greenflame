@@ -4,30 +4,30 @@
 #
 # This allowlist avoids full "kitchen sink" churn while still catching real defects.
 Checks: >
-  -*,
-  clang-analyzer-*,
-  bugprone-branch-clone,
-  bugprone-infinite-loop,
-  bugprone-macro-parentheses,
-  bugprone-misplaced-widening-cast,
-  bugprone-sizeof-expression,
-  bugprone-suspicious-memory-comparison,
-  bugprone-use-after-move,
-  performance-for-range-copy,
-  performance-inefficient-vector-operation,
-  performance-move-const-arg,
-  performance-no-automatic-move,
-  performance-unnecessary-copy-initialization,
-  performance-unnecessary-value-param,
-  readability-identifier-naming,
-  readability-magic-numbers,
-  cppcoreguidelines-avoid-magic-numbers,
-  google-readability-braces-around-statements,
-  -bugprone-easily-swappable-parameters,
-  -performance-no-int-to-ptr,
-  -modernize-use-trailing-return-type,
-  -clang-analyzer-optin.core.EnumCastOutOfRange,
-  -clang-analyzer-core.CallAndMessage
+    -*,
+    clang-analyzer-*,
+    bugprone-branch-clone,
+    bugprone-infinite-loop,
+    bugprone-macro-parentheses,
+    bugprone-misplaced-widening-cast,
+    bugprone-sizeof-expression,
+    bugprone-suspicious-memory-comparison,
+    bugprone-use-after-move,
+    performance-for-range-copy,
+    performance-inefficient-vector-operation,
+    performance-move-const-arg,
+    performance-no-automatic-move,
+    performance-unnecessary-copy-initialization,
+    performance-unnecessary-value-param,
+    readability-identifier-naming,
+    readability-magic-numbers,
+    cppcoreguidelines-avoid-magic-numbers,
+    google-readability-braces-around-statements,
+    -bugprone-easily-swappable-parameters,
+    -performance-no-int-to-ptr,
+    -modernize-use-trailing-return-type,
+    -clang-analyzer-optin.core.EnumCastOutOfRange,
+    -clang-analyzer-core.CallAndMessage
 WarningsAsErrors: "*"
 HeaderFilterRegex: '^.*greenflame[/\\](src|tests)[/\\].*'
 SystemHeaders: false
@@ -71,9 +71,9 @@ CheckOptions:
     - key: cppcoreguidelines-avoid-magic-numbers.IgnoredIntegerValues
       value: "0;1;2;3;10;100;255"
     - key: readability-magic-numbers.IgnoredFloatingPointValues
-      value: "1.0;2.0;100.0"
+      value: "0.5;1.0;2.0;100.0"
     - key: cppcoreguidelines-avoid-magic-numbers.IgnoredFloatingPointValues
-      value: "1.0;2.0;100.0"
+      value: "0.5;1.0;2.0;100.0"
     - key: readability-magic-numbers.IgnorePowersOf2IntegerValues
       value: "true"
     - key: cppcoreguidelines-avoid-magic-numbers.IgnorePowersOf2IntegerValues

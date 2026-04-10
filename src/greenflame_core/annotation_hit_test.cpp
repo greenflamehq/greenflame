@@ -12,7 +12,6 @@ struct PointF final {
 };
 
 constexpr int kLineRasterSamplesPerAxis = 4;
-constexpr float kHalf = 0.5F;
 constexpr float kFloatEpsilon = 1e-6F;
 constexpr float kArrowHeadBaseWidthPx = 10.0F;
 constexpr float kArrowHeadBaseLengthPx = 18.0F;
@@ -166,9 +165,9 @@ struct TriangleShape final {
     float const line_length = std::sqrt(dx * dx + dy * dy);
 
     LineRasterFrame frame{};
-    frame.center = {(start.x + end.x) * kHalf, (start.y + end.y) * kHalf};
-    frame.half_width = std::max(1.0F, static_cast<float>(style.width_px)) * kHalf;
-    frame.half_length = (line_length * kHalf) + frame.half_width;
+    frame.center = {(start.x + end.x) * 0.5f, (start.y + end.y) * 0.5f};
+    frame.half_width = std::max(1.0F, static_cast<float>(style.width_px)) * 0.5f;
+    frame.half_length = (line_length * 0.5f) + frame.half_width;
 
     if (line_length > 0.0F) {
         frame.axis_u = {dx / line_length, dy / line_length};
@@ -209,7 +208,7 @@ Pixel_covered_by_square_capped_polyline(float center_x, float center_y,
         return false;
     }
 
-    float const half_extent = std::max(1.0F, static_cast<float>(width_px)) * kHalf;
+    float const half_extent = std::max(1.0F, static_cast<float>(width_px)) * 0.5f;
     if (points.size() == 1) {
         return Point_inside_axis_aligned_square(center_x, center_y, points.front(),
                                                 half_extent);
@@ -279,10 +278,10 @@ struct ArrowGeometry final {
 
     PointF const axis_u{dx / line_length, dy / line_length};
     PointF const axis_v{-axis_u.y, axis_u.x};
-    PointF const head_tip{end.x + axis_u.x * kHalf, end.y + axis_u.y * kHalf};
+    PointF const head_tip{end.x + axis_u.x * 0.5f, end.y + axis_u.y * 0.5f};
     geom.head_base_center = {end.x - axis_u.x * geom.head_length,
                              end.y - axis_u.y * geom.head_length};
-    float const half_head_base_width = head_base_width * kHalf;
+    float const half_head_base_width = head_base_width * 0.5f;
     geom.head = TriangleShape{std::array<PointF, 3>{
         head_tip,
         PointF{geom.head_base_center.x + axis_v.x * half_head_base_width,
@@ -328,7 +327,7 @@ struct ArrowGeometry final {
     float const dx = end.x - start.x;
     float const dy = end.y - start.y;
     float const len = std::sqrt(dx * dx + dy * dy);
-    float const half_w = std::max(1.0F, static_cast<float>(style.width_px)) * kHalf;
+    float const half_w = std::max(1.0F, static_cast<float>(style.width_px)) * 0.5f;
     if (len <= 0.0F) {
         return Tight_float_aabb_px(start.x - half_w, start.y - half_w, start.x + half_w,
                                    start.y + half_w);
@@ -416,8 +415,8 @@ struct ArrowGeometry final {
         return false;
     }
 
-    float const rx = width * kHalf;
-    float const ry = height * kHalf;
+    float const rx = width * 0.5f;
+    float const ry = height * 0.5f;
     if (rx <= 0.0F || ry <= 0.0F) {
         return false;
     }
@@ -524,7 +523,7 @@ RectPx Annotation_bounds(Annotation const &annotation) noexcept {
                     max_y = std::max(max_y, p.y);
                 }
                 float const half_extent =
-                    std::max(1.0F, static_cast<float>(fh.style.width_px)) * kHalf;
+                    std::max(1.0F, static_cast<float>(fh.style.width_px)) * 0.5f;
                 int32_t const outset = static_cast<int32_t>(std::ceil(half_extent));
                 return RectPx::From_ltrb(min_x - outset, min_y - outset,
                                          max_x + outset + 1, max_y + outset + 1);
@@ -686,14 +685,14 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                 if (fh.points.empty()) {
                     return false;
                 }
-                float const cx = static_cast<float>(point.x) + kHalf;
-                float const cy = static_cast<float>(point.y) + kHalf;
+                float const cx = static_cast<float>(point.x) + 0.5f;
+                float const cy = static_cast<float>(point.y) + 0.5f;
                 if (fh.freehand_tip_shape == FreehandTipShape::Square) {
                     return Pixel_covered_by_square_capped_polyline(cx, cy, fh.points,
                                                                    fh.style.width_px);
                 }
                 float const radius =
-                    std::max(1.0F, static_cast<float>(fh.style.width_px)) * kHalf;
+                    std::max(1.0F, static_cast<float>(fh.style.width_px)) * 0.5f;
                 return Pixel_covered_by_polyline(cx, cy, fh.points, radius * radius);
             },
             [&](LineAnnotation const &line) -> bool {
@@ -707,11 +706,11 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                         Build_arrow_geometry(start_f, end_f, line.style);
                     for (int sy = 0; sy < samples; ++sy) {
                         float const sample_y = static_cast<float>(point.y) +
-                                               (static_cast<float>(sy) + kHalf) * step;
+                                               (static_cast<float>(sy) + 0.5f) * step;
                         for (int sx = 0; sx < samples; ++sx) {
                             float const sample_x =
                                 static_cast<float>(point.x) +
-                                (static_cast<float>(sx) + kHalf) * step;
+                                (static_cast<float>(sx) + 0.5f) * step;
                             if (Sample_covered_by_arrow(sample_x, sample_y, geom)) {
                                 return true;
                             }
@@ -723,10 +722,10 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                     Build_line_raster_frame(start_f, end_f, line.style);
                 for (int sy = 0; sy < samples; ++sy) {
                     float const sample_y = static_cast<float>(point.y) +
-                                           (static_cast<float>(sy) + kHalf) * step;
+                                           (static_cast<float>(sy) + 0.5f) * step;
                     for (int sx = 0; sx < samples; ++sx) {
                         float const sample_x = static_cast<float>(point.x) +
-                                               (static_cast<float>(sx) + kHalf) * step;
+                                               (static_cast<float>(sx) + 0.5f) * step;
                         if (Point_inside_line_shape(sample_x, sample_y, frame)) {
                             return true;
                         }
@@ -749,8 +748,8 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                 return inner.Is_empty() || !inner.Contains(point);
             },
             [&](EllipseAnnotation const &ellipse) -> bool {
-                return Point_inside_ellipse_outline(static_cast<float>(point.x) + kHalf,
-                                                    static_cast<float>(point.y) + kHalf,
+                return Point_inside_ellipse_outline(static_cast<float>(point.x) + 0.5f,
+                                                    static_cast<float>(point.y) + 0.5f,
                                                     ellipse);
             },
             [&](ObfuscateAnnotation const &obfuscate) -> bool {
@@ -767,9 +766,9 @@ bool Annotation_hits_point(Annotation const &annotation, PointPx point) noexcept
                 }
                 float const cx = static_cast<float>(bubble.center.x);
                 float const cy = static_cast<float>(bubble.center.y);
-                float const px = static_cast<float>(point.x) + kHalf;
-                float const py = static_cast<float>(point.y) + kHalf;
-                float const r = static_cast<float>(bubble.diameter_px) * kHalf;
+                float const px = static_cast<float>(point.x) + 0.5f;
+                float const py = static_cast<float>(point.y) + 0.5f;
+                float const r = static_cast<float>(bubble.diameter_px) * 0.5f;
                 float const dx = px - cx;
                 float const dy = py - cy;
                 return (dx * dx + dy * dy) <= (r * r);

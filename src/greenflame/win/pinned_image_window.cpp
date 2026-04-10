@@ -32,7 +32,6 @@ constexpr int kInnerHaloWidthPx = 2;
 constexpr int kInnerStrokeWidthPx = 1;
 constexpr float kArcQuarterSweepDeg = 90.f;
 constexpr int kDegreesPerQuarterTurn = 90;
-constexpr float kHalf = 0.5f;
 constexpr float kMinScaleDelta = 0.001f;
 constexpr wchar_t kCopyPinnedImageFailedMessage[] =
     L"Failed to copy the pinned image to the clipboard.";
@@ -223,12 +222,12 @@ void Draw_halo(Gdiplus::Graphics &graphics, Gdiplus::RectF image_rect, bool acti
     image_attributes.SetColorMatrix(&color_matrix, Gdiplus::ColorMatrixFlagsDefault,
                                     Gdiplus::ColorAdjustTypeBitmap);
 
-    float const center_x = image_rect.X + (image_rect.Width * kHalf);
-    float const center_y = image_rect.Y + (image_rect.Height * kHalf);
+    float const center_x = image_rect.X + (image_rect.Width * 0.5f);
+    float const center_y = image_rect.Y + (image_rect.Height * 0.5f);
     graphics.TranslateTransform(center_x, center_y);
     graphics.RotateTransform(
         static_cast<Gdiplus::REAL>(quarter_turns * kDegreesPerQuarterTurn));
-    Gdiplus::RectF draw_rect(-(draw_width * kHalf), -(draw_height * kHalf), draw_width,
+    Gdiplus::RectF draw_rect(-(draw_width * 0.5f), -(draw_height * 0.5f), draw_width,
                              draw_height);
     graphics.DrawImage(&source_bitmap, draw_rect, 0.f, 0.f,
                        static_cast<Gdiplus::REAL>(capture.width),
