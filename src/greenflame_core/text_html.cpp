@@ -8,7 +8,7 @@ namespace {
 // Constants
 // ============================================================
 
-constexpr size_t kMaxHtmlSize = 4 * 1024 * 1024;
+constexpr size_t kMaxHtmlSize = static_cast<size_t>(4u) * 1024u * 1024u;
 constexpr size_t kMaxEntityLength = 16;
 constexpr size_t kMaxStyleDepth = 200;
 

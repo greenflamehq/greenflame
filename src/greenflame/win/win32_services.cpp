@@ -391,8 +391,9 @@ Save_bitmap_to_file(greenflame::GdiCaptureResult const &capture, std::wstring_vi
 
     UINT32 family_index = 0;
     BOOL exists = FALSE;
+    std::wstring const family_name(family);
     if (FAILED(
-            font_collection->FindFamilyName(family.data(), &family_index, &exists))) {
+            font_collection->FindFamilyName(family_name.c_str(), &family_index, &exists))) {
         return false;
     }
     return exists != FALSE;

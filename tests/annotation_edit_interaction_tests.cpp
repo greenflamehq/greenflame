@@ -146,11 +146,15 @@ TEST(annotation_edit_interaction, MoveInteraction_ProducesUndoableCommandData) {
 
     std::optional<AnnotationEditCommandData> const command = interaction->Commit();
     ASSERT_TRUE(command.has_value());
-    EXPECT_EQ(command->description, "Move annotation");
-    EXPECT_EQ(command->selection_before, (AnnotationSelection{7}));
-    EXPECT_EQ(command->selection_after, (AnnotationSelection{7}));
+    if (!command.has_value()) {
+        return;
+    }
+    AnnotationEditCommandData const &command_value = *command;
+    EXPECT_EQ(command_value.description, "Move annotation");
+    EXPECT_EQ(command_value.selection_before, (AnnotationSelection{7}));
+    EXPECT_EQ(command_value.selection_after, (AnnotationSelection{7}));
     EXPECT_EQ(
-        std::get<FreehandStrokeAnnotation>(command->annotation_after.data).points[0],
+        std::get<FreehandStrokeAnnotation>(command_value.annotation_after.data).points[0],
         (PointPx{60, 60}));
 }
 
@@ -299,7 +303,10 @@ TEST(annotation_edit_interaction,
 
     std::optional<AnnotationEditCommandData> const command = interaction->Commit();
     ASSERT_TRUE(command.has_value());
-    EXPECT_EQ(command->description, "Resize ellipse annotation");
+    if (!command.has_value()) {
+        return;
+    }
+    EXPECT_EQ(command.value().description, "Resize ellipse annotation");
 }
 
 TEST(annotation_edit_interaction,
@@ -338,7 +345,10 @@ TEST(annotation_edit_interaction,
 
     std::optional<AnnotationEditCommandData> const command = interaction->Commit();
     ASSERT_TRUE(command.has_value());
-    EXPECT_EQ(command->description, "Resize obfuscate annotation");
+    if (!command.has_value()) {
+        return;
+    }
+    EXPECT_EQ(command.value().description, "Resize obfuscate annotation");
 }
 
 TEST(annotation_edit_interaction,
@@ -479,14 +489,18 @@ TEST(annotation_edit_interaction,
 
     std::optional<AnnotationEditCommandData> const command = interaction->Commit();
     ASSERT_TRUE(command.has_value());
-    EXPECT_EQ(command->description, "Edit highlighter annotation");
-    EXPECT_EQ(command->selection_before, (AnnotationSelection{13}));
-    EXPECT_EQ(command->selection_after, (AnnotationSelection{13}));
+    if (!command.has_value()) {
+        return;
+    }
+    AnnotationEditCommandData const &command_value = *command;
+    EXPECT_EQ(command_value.description, "Edit highlighter annotation");
+    EXPECT_EQ(command_value.selection_before, (AnnotationSelection{13}));
+    EXPECT_EQ(command_value.selection_after, (AnnotationSelection{13}));
     EXPECT_EQ(
-        std::get<FreehandStrokeAnnotation>(command->annotation_before.data).points[0],
+        std::get<FreehandStrokeAnnotation>(command_value.annotation_before.data).points[0],
         (PointPx{40, 40}));
     EXPECT_EQ(
-        std::get<FreehandStrokeAnnotation>(command->annotation_after.data).points[0],
+        std::get<FreehandStrokeAnnotation>(command_value.annotation_after.data).points[0],
         (PointPx{20, 20}));
 }
 

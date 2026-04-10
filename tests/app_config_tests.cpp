@@ -192,9 +192,13 @@ TEST(app_config_json, Parse_AcceptsSparseEmptyRoot) {
     std::optional<AppConfig> const config = Parse_app_config_json("{}");
 
     ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->brush_size, AppConfig::kDefaultBrushSize);
-    EXPECT_EQ(config->default_save_format, L"");
-    EXPECT_EQ(config->highlighter_opacity_percent, kDefaultHighlighterOpacityPercent);
+    if (!config.has_value()) {
+        return;
+    }
+    AppConfig const &config_value = config.value();
+    EXPECT_EQ(config_value.brush_size, AppConfig::kDefaultBrushSize);
+    EXPECT_EQ(config_value.default_save_format, L"");
+    EXPECT_EQ(config_value.highlighter_opacity_percent, kDefaultHighlighterOpacityPercent);
 }
 
 TEST(app_config_json, Parse_AcceptsSchemaPropertyAndValidValues) {
@@ -222,19 +226,23 @@ TEST(app_config_json, Parse_AcceptsSchemaPropertyAndValidValues) {
 )json");
 
     ASSERT_TRUE(config.has_value());
-    EXPECT_TRUE(config->include_cursor);
-    EXPECT_EQ(config->brush_size, 5);
-    EXPECT_EQ(config->brush_smoothing_mode, FreehandSmoothingMode::Off);
-    EXPECT_EQ(config->annotation_colors[4], Make_colorref(0xFF, 0x00, 0xFF));
-    EXPECT_EQ(config->text_font_sans, L"Arial");
-    EXPECT_EQ(config->current_highlighter_color_index, 5);
-    EXPECT_EQ(config->highlighter_opacity_percent, 90);
-    EXPECT_EQ(config->highlighter_smoothing_mode, FreehandSmoothingMode::Smooth);
-    EXPECT_EQ(config->obfuscate_block_size, 13);
-    EXPECT_TRUE(config->obfuscate_risk_acknowledged);
-    EXPECT_EQ(config->text_current_font, TextFontChoice::Mono);
-    EXPECT_EQ(config->default_save_format, L"jpg");
-    EXPECT_EQ(config->padding_color, Make_colorref(0x11, 0x22, 0x33));
+    if (!config.has_value()) {
+        return;
+    }
+    AppConfig const &config_value = config.value();
+    EXPECT_TRUE(config_value.include_cursor);
+    EXPECT_EQ(config_value.brush_size, 5);
+    EXPECT_EQ(config_value.brush_smoothing_mode, FreehandSmoothingMode::Off);
+    EXPECT_EQ(config_value.annotation_colors[4], Make_colorref(0xFF, 0x00, 0xFF));
+    EXPECT_EQ(config_value.text_font_sans, L"Arial");
+    EXPECT_EQ(config_value.current_highlighter_color_index, 5);
+    EXPECT_EQ(config_value.highlighter_opacity_percent, 90);
+    EXPECT_EQ(config_value.highlighter_smoothing_mode, FreehandSmoothingMode::Smooth);
+    EXPECT_EQ(config_value.obfuscate_block_size, 13);
+    EXPECT_TRUE(config_value.obfuscate_risk_acknowledged);
+    EXPECT_EQ(config_value.text_current_font, TextFontChoice::Mono);
+    EXPECT_EQ(config_value.default_save_format, L"jpg");
+    EXPECT_EQ(config_value.padding_color, Make_colorref(0x11, 0x22, 0x33));
 }
 
 TEST(app_config_json, Parse_DecodesEscapedBackslashesInJsonStrings) {
@@ -247,7 +255,10 @@ TEST(app_config_json, Parse_DecodesEscapedBackslashesInJsonStrings) {
 )json");
 
     ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->default_save_dir, L"C:\\captures\\greenflame");
+    if (!config.has_value()) {
+        return;
+    }
+    EXPECT_EQ(config.value().default_save_dir, L"C:\\captures\\greenflame");
 }
 
 TEST(app_config_json, Parse_UnicodeEscapesInStringsArePassedThroughVerbatim) {
@@ -266,7 +277,10 @@ TEST(app_config_json, Parse_UnicodeEscapesInStringsArePassedThroughVerbatim) {
 )json");
 
     ASSERT_TRUE(config.has_value());
-    EXPECT_EQ(config->text_font_sans, L"Arial\\u0020Bold");
+    if (!config.has_value()) {
+        return;
+    }
+    EXPECT_EQ(config.value().text_font_sans, L"Arial\\u0020Bold");
 }
 
 TEST(app_config_json, Serialize_RoundTripsCanonicalSaveDirectoryStably) {
@@ -313,7 +327,10 @@ TEST(app_config_json, Serialize_WritesObfuscateBlockSizeWhenNonDefault) {
     EXPECT_NE(serialized.find(R"json("obfuscate")json"), std::string::npos);
     EXPECT_NE(serialized.find(R"json("block_size")json"), std::string::npos);
     ASSERT_TRUE(round_tripped.has_value());
-    EXPECT_EQ(round_tripped->obfuscate_block_size, 17);
+    if (!round_tripped.has_value()) {
+        return;
+    }
+    EXPECT_EQ(round_tripped.value().obfuscate_block_size, 17);
 }
 
 TEST(app_config_json, Serialize_WritesFreehandSmoothingModesWhenNonDefault) {
@@ -326,8 +343,12 @@ TEST(app_config_json, Serialize_WritesFreehandSmoothingModesWhenNonDefault) {
 
     EXPECT_NE(serialized.find(R"json("smoothing_mode")json"), std::string::npos);
     ASSERT_TRUE(round_tripped.has_value());
-    EXPECT_EQ(round_tripped->brush_smoothing_mode, FreehandSmoothingMode::Off);
-    EXPECT_EQ(round_tripped->highlighter_smoothing_mode, FreehandSmoothingMode::Off);
+    if (!round_tripped.has_value()) {
+        return;
+    }
+    AppConfig const &round_tripped_value = round_tripped.value();
+    EXPECT_EQ(round_tripped_value.brush_smoothing_mode, FreehandSmoothingMode::Off);
+    EXPECT_EQ(round_tripped_value.highlighter_smoothing_mode, FreehandSmoothingMode::Off);
 }
 
 TEST(app_config_json, Serialize_WritesObfuscateRiskAcknowledgedWhenTrue) {
@@ -340,7 +361,10 @@ TEST(app_config_json, Serialize_WritesObfuscateRiskAcknowledgedWhenTrue) {
     EXPECT_NE(serialized.find(R"json("obfuscate")json"), std::string::npos);
     EXPECT_NE(serialized.find(R"json("risk_acknowledged")json"), std::string::npos);
     ASSERT_TRUE(round_tripped.has_value());
-    EXPECT_TRUE(round_tripped->obfuscate_risk_acknowledged);
+    if (!round_tripped.has_value()) {
+        return;
+    }
+    EXPECT_TRUE(round_tripped.value().obfuscate_risk_acknowledged);
 }
 
 TEST(app_config_json, Serialize_WritesIncludeCursorWhenTrue) {
@@ -353,7 +377,10 @@ TEST(app_config_json, Serialize_WritesIncludeCursorWhenTrue) {
     EXPECT_NE(serialized.find(R"json("capture")json"), std::string::npos);
     EXPECT_NE(serialized.find(R"json("include_cursor")json"), std::string::npos);
     ASSERT_TRUE(round_tripped.has_value());
-    EXPECT_TRUE(round_tripped->include_cursor);
+    if (!round_tripped.has_value()) {
+        return;
+    }
+    EXPECT_TRUE(round_tripped.value().include_cursor);
 }
 
 TEST(app_config_json, Serialize_OmitsIncludeCursorWhenFalse) {
@@ -427,10 +454,14 @@ TEST(app_config_json, ParseWithDiagnostics_ParseErrorReportsLocationAndKeepsPref
 
     ASSERT_TRUE(result.Has_error());
     ASSERT_TRUE(result.diagnostic.has_value());
-    EXPECT_EQ(result.diagnostic->kind, AppConfigDiagnosticKind::Parse);
-    EXPECT_TRUE(result.diagnostic->line.has_value());
-    EXPECT_TRUE(result.diagnostic->column.has_value());
-    EXPECT_THAT(result.diagnostic->message,
+    if (!result.diagnostic.has_value()) {
+        return;
+    }
+    AppConfigDiagnostic const &diagnostic = result.diagnostic.value();
+    EXPECT_EQ(diagnostic.kind, AppConfigDiagnosticKind::Parse);
+    EXPECT_TRUE(diagnostic.line.has_value());
+    EXPECT_TRUE(diagnostic.column.has_value());
+    EXPECT_THAT(diagnostic.message,
                 testing::HasSubstr(L"Expected ',' or '}' after an object member."));
     EXPECT_FALSE(result.config.show_balloons);
     EXPECT_EQ(result.config.brush_size, AppConfig::kDefaultBrushSize);
@@ -442,8 +473,12 @@ TEST(app_config_json, ParseWithDiagnostics_SchemaErrorLoadsOtherValidValues) {
 
     ASSERT_TRUE(result.Has_error());
     ASSERT_TRUE(result.diagnostic.has_value());
-    EXPECT_EQ(result.diagnostic->kind, AppConfigDiagnosticKind::Schema);
-    EXPECT_THAT(result.diagnostic->message, testing::HasSubstr(L"tools.brush.size"));
+    if (!result.diagnostic.has_value()) {
+        return;
+    }
+    AppConfigDiagnostic const &diagnostic = result.diagnostic.value();
+    EXPECT_EQ(diagnostic.kind, AppConfigDiagnosticKind::Schema);
+    EXPECT_THAT(diagnostic.message, testing::HasSubstr(L"tools.brush.size"));
     EXPECT_FALSE(result.config.show_balloons);
     EXPECT_EQ(result.config.brush_size, AppConfig::kDefaultBrushSize);
     EXPECT_EQ(result.config.default_save_format, L"png");
@@ -454,8 +489,12 @@ TEST(app_config_json, Parse_SpellCheckLanguages_SingleLanguage) {
         R"json({"tools":{"text":{"spell_check_languages":["en-US"]}}})json");
 
     ASSERT_TRUE(config.has_value());
-    ASSERT_EQ(config->spell_check_languages.size(), 1u);
-    EXPECT_EQ(config->spell_check_languages[0], L"en-US");
+    if (!config.has_value()) {
+        return;
+    }
+    AppConfig const &config_value = config.value();
+    ASSERT_EQ(config_value.spell_check_languages.size(), 1u);
+    EXPECT_EQ(config_value.spell_check_languages[0], L"en-US");
 }
 
 TEST(app_config_json, Parse_SpellCheckLanguages_MultipleLanguages) {
@@ -463,9 +502,13 @@ TEST(app_config_json, Parse_SpellCheckLanguages_MultipleLanguages) {
         R"json({"tools":{"text":{"spell_check_languages":["en-US","fr-CA"]}}})json");
 
     ASSERT_TRUE(config.has_value());
-    ASSERT_EQ(config->spell_check_languages.size(), 2u);
-    EXPECT_EQ(config->spell_check_languages[0], L"en-US");
-    EXPECT_EQ(config->spell_check_languages[1], L"fr-CA");
+    if (!config.has_value()) {
+        return;
+    }
+    AppConfig const &config_value = config.value();
+    ASSERT_EQ(config_value.spell_check_languages.size(), 2u);
+    EXPECT_EQ(config_value.spell_check_languages[0], L"en-US");
+    EXPECT_EQ(config_value.spell_check_languages[1], L"fr-CA");
 }
 
 TEST(app_config_json, Parse_SpellCheckLanguages_EmptyArray_YieldsEmptyVector) {
@@ -473,7 +516,10 @@ TEST(app_config_json, Parse_SpellCheckLanguages_EmptyArray_YieldsEmptyVector) {
         R"json({"tools":{"text":{"spell_check_languages":[]}}})json");
 
     ASSERT_TRUE(config.has_value());
-    EXPECT_TRUE(config->spell_check_languages.empty());
+    if (!config.has_value()) {
+        return;
+    }
+    EXPECT_TRUE(config.value().spell_check_languages.empty());
 }
 
 TEST(app_config_json, Parse_SpellCheckLanguages_NonArray_ReportsSchemaError) {
@@ -482,7 +528,10 @@ TEST(app_config_json, Parse_SpellCheckLanguages_NonArray_ReportsSchemaError) {
 
     EXPECT_TRUE(result.Has_error());
     ASSERT_TRUE(result.diagnostic.has_value());
-    EXPECT_THAT(result.diagnostic->message,
+    if (!result.diagnostic.has_value()) {
+        return;
+    }
+    EXPECT_THAT(result.diagnostic.value().message,
                 testing::HasSubstr(L"spell_check_languages"));
 }
 
@@ -492,7 +541,10 @@ TEST(app_config_json, Parse_SpellCheckLanguages_NonStringElement_ReportsSchemaEr
 
     EXPECT_TRUE(result.Has_error());
     ASSERT_TRUE(result.diagnostic.has_value());
-    EXPECT_THAT(result.diagnostic->message,
+    if (!result.diagnostic.has_value()) {
+        return;
+    }
+    EXPECT_THAT(result.diagnostic.value().message,
                 testing::HasSubstr(L"spell_check_languages"));
 }
 
@@ -503,7 +555,10 @@ TEST(app_config_json, Parse_SpellCheckLanguages_TooManyEntries_ReportsSchemaErro
 
     EXPECT_TRUE(result.Has_error());
     ASSERT_TRUE(result.diagnostic.has_value());
-    EXPECT_THAT(result.diagnostic->message,
+    if (!result.diagnostic.has_value()) {
+        return;
+    }
+    EXPECT_THAT(result.diagnostic.value().message,
                 testing::HasSubstr(L"spell_check_languages"));
 }
 
@@ -514,9 +569,13 @@ TEST(app_config_json, Serialize_SpellCheckLanguages_RoundTrip) {
     std::optional<AppConfig> const parsed = Parse_app_config_json(json);
 
     ASSERT_TRUE(parsed.has_value());
-    ASSERT_EQ(parsed->spell_check_languages.size(), 2u);
-    EXPECT_EQ(parsed->spell_check_languages[0], L"en-US");
-    EXPECT_EQ(parsed->spell_check_languages[1], L"fr-CA");
+    if (!parsed.has_value()) {
+        return;
+    }
+    AppConfig const &parsed_value = parsed.value();
+    ASSERT_EQ(parsed_value.spell_check_languages.size(), 2u);
+    EXPECT_EQ(parsed_value.spell_check_languages[0], L"en-US");
+    EXPECT_EQ(parsed_value.spell_check_languages[1], L"fr-CA");
 }
 
 TEST(app_config_json, Serialize_SpellCheckLanguages_EmptyVector_NotWritten) {

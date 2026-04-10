@@ -806,7 +806,7 @@ class TrayWindow::ToastPopup final {
                     summary_rect.top = body_cursor_top;
                     summary_rect.bottom = summary_rect.top + layout.summary_height;
                     DrawTextW(hdc, message_.c_str(), -1, &summary_rect,
-                              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                              DT_WORDBREAK | DT_NOPREFIX);
                     body_cursor_top = summary_rect.bottom;
                 }
 
@@ -818,7 +818,7 @@ class TrayWindow::ToastPopup final {
                     detail_rect.top = body_cursor_top;
                     detail_rect.bottom = detail_rect.top + layout.detail_height;
                     DrawTextW(hdc, detail_message_.c_str(), -1, &detail_rect,
-                              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                              DT_WORDBREAK | DT_NOPREFIX);
                 }
 
                 // Bottom of body content (text or icon, whichever is taller).
@@ -830,8 +830,7 @@ class TrayWindow::ToastPopup final {
 
                     SetTextColor(hdc, kToastLinkText);
                     DrawTextW(hdc, file_path_.c_str(), -1, &link_draw_rect,
-                              DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX |
-                                  DT_END_ELLIPSIS);
+                              DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS);
 
                     if (mouse_over_link_) {
                         SIZE text_sz{};
@@ -862,7 +861,7 @@ class TrayWindow::ToastPopup final {
                     footer_rect.bottom = footer_rect.top + layout.footer_height;
                     SetTextColor(hdc, text_color);
                     DrawTextW(hdc, footer_message_.c_str(), -1, &footer_rect,
-                              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX);
+                              DT_WORDBREAK | DT_NOPREFIX);
                     anchor_bottom = footer_rect.bottom;
                 }
 
@@ -977,8 +976,7 @@ TrayWindow::ToastPopup::Compute_layout(UINT dpi, HDC hdc) const {
     RECT title_measure{};
     title_measure.right = l.title_right - l.title_text_left;
     DrawTextW(hdc, kTitleText, -1, &title_measure,
-              DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS |
-                  DT_CALCRECT);
+              DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS | DT_CALCRECT);
     int const measured_title = title_measure.bottom - title_measure.top;
     if (measured_title > title_height) {
         title_height = measured_title;
@@ -986,9 +984,8 @@ TrayWindow::ToastPopup::Compute_layout(UINT dpi, HDC hdc) const {
 
     SelectObject(hdc, old_font);
 
-    DWORD const wrapped_flags = DT_LEFT | DT_TOP | DT_WORDBREAK | DT_NOPREFIX;
-    DWORD const single_line_flags =
-        DT_LEFT | DT_TOP | DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
+    DWORD const wrapped_flags = DT_WORDBREAK | DT_NOPREFIX;
+    DWORD const single_line_flags = DT_SINGLELINE | DT_NOPREFIX | DT_END_ELLIPSIS;
     l.summary_height =
         Measure_text_height(hdc, body_font_, message_, l.text_width, wrapped_flags);
     l.detail_height = Measure_text_height(hdc, body_font_, detail_message_,

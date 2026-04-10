@@ -116,7 +116,8 @@ std::string Encode_rtf(std::span<const TextRun> runs) {
 // ============================================================
 
 std::vector<TextRun> Decode_rtf(std::string_view rtf) {
-    constexpr size_t max_input_size = 4 * 1024 * 1024; // 4 MB safety guard
+    constexpr size_t max_input_size =
+        static_cast<size_t>(4u) * 1024u * 1024u; // 4 MB safety guard
     constexpr int max_group_depth = 200;
 
     if (rtf.size() > max_input_size) {

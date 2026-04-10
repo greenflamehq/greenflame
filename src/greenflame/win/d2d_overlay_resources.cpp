@@ -341,7 +341,8 @@ bool D2DOverlayResources::Create_shared_resources() {
     {
         constexpr UINT32 dark_color = 0xFF666666u;  // 0xAARRGGBB: opaque mid-dark grey
         constexpr UINT32 light_color = 0xFF999999u; // 0xAARRGGBB: opaque mid-light grey
-        std::array<UINT32, kCheckerBitmapPx * kCheckerBitmapPx> pixels{};
+        std::array<UINT32, static_cast<size_t>(kCheckerBitmapPx) * kCheckerBitmapPx>
+            pixels{};
         for (UINT32 y = 0; y < kCheckerBitmapPx; ++y) {
             for (UINT32 x = 0; x < kCheckerBitmapPx; ++x) {
                 bool const left_half = x < kCheckerCellPx;

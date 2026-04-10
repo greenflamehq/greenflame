@@ -30,11 +30,14 @@ TEST(cli_options, CLI_parser_AcceptsRegionEquals) {
     CliParseResult const result = Parse_cli_arguments(args, false);
     EXPECT_TRUE(result.ok);
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::Region);
-    EXPECT_TRUE(result.options.region_px.has_value());
-    EXPECT_EQ(result.options.region_px->left, 10);
-    EXPECT_EQ(result.options.region_px->top, 20);
-    EXPECT_EQ(result.options.region_px->right, 40);
-    EXPECT_EQ(result.options.region_px->bottom, 60);
+    ASSERT_TRUE(result.options.region_px.has_value());
+    if (!result.options.region_px.has_value()) {
+        return;
+    }
+    EXPECT_EQ(result.options.region_px.value().left, 10);
+    EXPECT_EQ(result.options.region_px.value().top, 20);
+    EXPECT_EQ(result.options.region_px.value().right, 40);
+    EXPECT_EQ(result.options.region_px.value().bottom, 60);
 }
 
 TEST(cli_options, CLI_parser_RejectsRegionNegativeX) {

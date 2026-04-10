@@ -146,10 +146,11 @@ Create_text_format(IDWriteFactory *factory,
 
     std::wstring_view const family =
         Resolve_text_font_family(base_style, font_families);
+    std::wstring const family_name(family);
     HRESULT const hr = factory->CreateTextFormat(
-        family.data(), nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, static_cast<float>(base_style.point_size), L"",
-        format.GetAddressOf());
+        family_name.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        static_cast<float>(base_style.point_size), L"", format.GetAddressOf());
     if (FAILED(hr) || !format) {
         format.Reset();
         return format;
@@ -719,10 +720,11 @@ void D2DTextLayoutEngine::Rasterize_bubble(core::BubbleAnnotation &annotation) {
 
     std::wstring_view const family =
         Resolve_text_font_family(annotation, font_families_);
+    std::wstring const family_name(family);
 
     Microsoft::WRL::ComPtr<IDWriteTextFormat> format;
     hr = dwrite_factory_->CreateTextFormat(
-        family.data(), nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
+        family_name.c_str(), nullptr, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL,
         DWRITE_FONT_STRETCH_NORMAL, font_size_dip, L"", format.GetAddressOf());
     if (FAILED(hr) || !format) {
         return;

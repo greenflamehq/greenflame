@@ -31,11 +31,14 @@ TEST_F(RectPxFixture, NormalizeInvertedRect) {
 TEST_F(RectPxFixture, IntersectNormalizedWithOverlapping) {
     auto an = inverted.Normalized();
     auto i = RectPx::Intersect(an, overlapping);
-    EXPECT_TRUE(i.has_value());
-    EXPECT_EQ(i->left, 5);
-    EXPECT_EQ(i->top, 5);
-    EXPECT_EQ(i->right, 10);
-    EXPECT_EQ(i->bottom, 10);
+    ASSERT_TRUE(i.has_value());
+    if (!i.has_value()) {
+        return;
+    }
+    EXPECT_EQ(i.value().left, 5);
+    EXPECT_EQ(i.value().top, 5);
+    EXPECT_EQ(i.value().right, 10);
+    EXPECT_EQ(i.value().bottom, 10);
 }
 
 TEST_F(RectPxFixture, IntersectWithDisjointYieldsEmpty) {

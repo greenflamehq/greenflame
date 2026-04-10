@@ -185,9 +185,12 @@ Build_obfuscate_with_provider(RecordingObfuscateSourceProvider &source_provider,
     std::optional<BgraBitmap> const source =
         source_provider.Build_composited_source(bounds, lower_annotations);
     EXPECT_TRUE(source.has_value());
-    EXPECT_TRUE(source->Is_valid());
+    if (!source.has_value()) {
+        return {};
+    }
+    EXPECT_TRUE(source.value().Is_valid());
 
-    BgraBitmap const raster = Rasterize_obfuscate(*source, block_size);
+    BgraBitmap const raster = Rasterize_obfuscate(source.value(), block_size);
     EXPECT_TRUE(raster.Is_valid());
 
     Annotation annotation{};
@@ -1093,8 +1096,12 @@ TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedFreehandStyle) {
     EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Freehand, 12));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
-    ASSERT_TRUE(controller.Draft_freehand_style().has_value());
-    EXPECT_EQ(controller.Draft_freehand_style()->width_px, 12);
+    std::optional<StrokeStyle> const draft_style = controller.Draft_freehand_style();
+    ASSERT_TRUE(draft_style.has_value());
+    if (!draft_style.has_value()) {
+        return;
+    }
+    EXPECT_EQ(draft_style.value().width_px, 12);
 
     EXPECT_TRUE(controller.On_pointer_move({20, 10}));
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
@@ -1159,9 +1166,13 @@ TEST(annotation_controller, ToolSize_AffectsDraftAndCommittedHighlighterStyle) {
     EXPECT_TRUE(controller.Set_tool_size_step(AnnotationToolId::Highlighter, 2));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Highlighter));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
-    ASSERT_TRUE(controller.Draft_freehand_style().has_value());
-    EXPECT_EQ(controller.Draft_freehand_style()->width_px, 12);
-    EXPECT_EQ(controller.Draft_freehand_style()->opacity_percent,
+    std::optional<StrokeStyle> const draft_style = controller.Draft_freehand_style();
+    ASSERT_TRUE(draft_style.has_value());
+    if (!draft_style.has_value()) {
+        return;
+    }
+    EXPECT_EQ(draft_style.value().width_px, 12);
+    EXPECT_EQ(draft_style.value().opacity_percent,
               controller.Highlighter_opacity_percent());
 
     EXPECT_TRUE(controller.On_pointer_move({20, 10}));
@@ -1351,8 +1362,12 @@ TEST(annotation_controller, AnnotationColor_AffectsDraftAndCommittedStrokeStyle)
     EXPECT_TRUE(controller.Set_annotation_color(green));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
-    ASSERT_TRUE(controller.Draft_freehand_style().has_value());
-    EXPECT_EQ(controller.Draft_freehand_style()->color, green);
+    std::optional<StrokeStyle> const draft_style = controller.Draft_freehand_style();
+    ASSERT_TRUE(draft_style.has_value());
+    if (!draft_style.has_value()) {
+        return;
+    }
+    EXPECT_EQ(draft_style.value().color, green);
 
     EXPECT_TRUE(controller.On_pointer_move({20, 10}));
     EXPECT_TRUE(controller.On_primary_release(undo_stack));
@@ -1371,8 +1386,12 @@ TEST(annotation_controller, HighlighterColor_AffectsDraftAndCommittedStrokeStyle
     EXPECT_TRUE(controller.Set_highlighter_color(green));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Highlighter));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
-    ASSERT_TRUE(controller.Draft_freehand_style().has_value());
-    EXPECT_EQ(controller.Draft_freehand_style()->color, green);
+    std::optional<StrokeStyle> const draft_style = controller.Draft_freehand_style();
+    ASSERT_TRUE(draft_style.has_value());
+    if (!draft_style.has_value()) {
+        return;
+    }
+    EXPECT_EQ(draft_style.value().color, green);
     EXPECT_EQ(controller.Annotation_color(), green);
 
     EXPECT_TRUE(controller.On_pointer_move({20, 10}));

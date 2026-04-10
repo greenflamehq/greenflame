@@ -336,9 +336,11 @@ Create_text_format(IDWriteFactory *factory, std::wstring_view family,
         return format;
     }
 
+    std::wstring const family_name(family);
     HRESULT const hr = factory->CreateTextFormat(
-        family.data(), nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL, point_size, L"", format.GetAddressOf());
+        family_name.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, point_size, L"",
+        format.GetAddressOf());
     if (FAILED(hr) || !format) {
         return {};
     }
@@ -2312,11 +2314,11 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
         return false;
     }
 
-    constexpr size_t kSquareDraftBodyOverlapRawPointCount = 8;
+    constexpr size_t square_draft_body_overlap_raw_point_count = 8;
     size_t const draw_start_index =
-        res.draft_stroke_body_raw_point_count > kSquareDraftBodyOverlapRawPointCount
+        res.draft_stroke_body_raw_point_count > square_draft_body_overlap_raw_point_count
             ? res.draft_stroke_body_raw_point_count -
-                  kSquareDraftBodyOverlapRawPointCount
+                  square_draft_body_overlap_raw_point_count
             : 0;
     std::vector<core::PointPx> const smoothed_points = core::Smooth_freehand_points(
         points.subspan(draw_start_index,

@@ -1890,8 +1890,9 @@ bool OverlayWindow::Read_clipboard_bytes(UINT fmt, std::string &out) const {
         size_t const byte_count = GlobalSize(clipboard_data);
         std::string_view const view(static_cast<char const *>(raw), byte_count);
         size_t const nul_pos = view.find('\0');
-        out.assign(view.data(),
-                   (nul_pos != std::string_view::npos) ? nul_pos : byte_count);
+        size_t const copy_length =
+            (nul_pos != std::string_view::npos) ? nul_pos : byte_count;
+        out.assign(view.substr(0, copy_length));
         GlobalUnlock(clipboard_data);
         read_ok = !out.empty();
     } while (false);
@@ -3612,7 +3613,7 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
     {
         std::wstring_view const sv(default_name);
         size_t const n = std::min(sv.size(), path_span.size() - 1);
-        std::copy_n(sv.data(), n, path_span.begin());
+        std::copy_n(sv.begin(), n, path_span.begin());
         path_span[n] = L'\0';
     }
     ofn.lStructSize = sizeof(ofn);
