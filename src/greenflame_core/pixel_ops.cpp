@@ -220,9 +220,8 @@ void Blend_rect_onto_pixels(std::span<uint8_t> pixels, int width, int height,
             size_t const off = static_cast<size_t>(x) * 4;
             if (off + 2 < static_cast<size_t>(row_bytes)) {
                 size_t const base = row_offset + off;
-                int const blend_b =
-                    static_cast<int>(ia * static_cast<float>(pixels[base]) +
-                                     a * static_cast<float>(b));
+                int const blend_b = static_cast<int>(
+                    ia * static_cast<float>(pixels[base]) + a * static_cast<float>(b));
                 int const blend_g =
                     static_cast<int>(ia * static_cast<float>(pixels[base + 1]) +
                                      a * static_cast<float>(g));

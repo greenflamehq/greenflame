@@ -198,7 +198,8 @@ TEST(app_config_json, Parse_AcceptsSparseEmptyRoot) {
     AppConfig const &config_value = config.value();
     EXPECT_EQ(config_value.brush_size, AppConfig::kDefaultBrushSize);
     EXPECT_EQ(config_value.default_save_format, L"");
-    EXPECT_EQ(config_value.highlighter_opacity_percent, kDefaultHighlighterOpacityPercent);
+    EXPECT_EQ(config_value.highlighter_opacity_percent,
+              kDefaultHighlighterOpacityPercent);
 }
 
 TEST(app_config_json, Parse_AcceptsSchemaPropertyAndValidValues) {
@@ -348,7 +349,8 @@ TEST(app_config_json, Serialize_WritesFreehandSmoothingModesWhenNonDefault) {
     }
     AppConfig const &round_tripped_value = round_tripped.value();
     EXPECT_EQ(round_tripped_value.brush_smoothing_mode, FreehandSmoothingMode::Off);
-    EXPECT_EQ(round_tripped_value.highlighter_smoothing_mode, FreehandSmoothingMode::Off);
+    EXPECT_EQ(round_tripped_value.highlighter_smoothing_mode,
+              FreehandSmoothingMode::Off);
 }
 
 TEST(app_config_json, Serialize_WritesObfuscateRiskAcknowledgedWhenTrue) {
@@ -809,22 +811,21 @@ TEST(app_config_json, ParseWithDiagnostics_RejectsMalformedSectionObjectTypes) {
     ASSERT_TRUE(result.diagnostic.has_value());
 }
 
-TEST(app_config_json, ParseWithDiagnostics_RejectsColorSlotValueTypesAndSpellCheckUtf8Issues) {
+TEST(app_config_json,
+     ParseWithDiagnostics_RejectsColorSlotValueTypesAndSpellCheckUtf8Issues) {
     {
         AppConfigParseResult const result = Parse_app_config_json_with_diagnostics(
             R"json({"tools":{"colors":{"0":7},"highlighter":{"colors":{"0":"#12zz34"}}}})json");
 
         EXPECT_TRUE(result.Has_error());
         ASSERT_TRUE(result.diagnostic.has_value());
-        EXPECT_THAT(result.diagnostic->message,
-                    testing::HasSubstr(L"tools.colors.0"));
+        EXPECT_THAT(result.diagnostic->message, testing::HasSubstr(L"tools.colors.0"));
     }
 
     {
         std::string const long_tag(65u, 'a');
         std::string const json =
-            "{\"tools\":{\"text\":{\"spell_check_languages\":[\"" + long_tag +
-            "\"]}}}";
+            "{\"tools\":{\"text\":{\"spell_check_languages\":[\"" + long_tag + "\"]}}}";
 
         AppConfigParseResult const result =
             Parse_app_config_json_with_diagnostics(json);
@@ -856,8 +857,7 @@ TEST(app_config_json, ParseWithDiagnostics_RejectsNonStringSaveFields) {
 
     EXPECT_TRUE(result.Has_error());
     ASSERT_TRUE(result.diagnostic.has_value());
-    EXPECT_THAT(result.diagnostic->message,
-                testing::HasSubstr(L"default_save_format"));
+    EXPECT_THAT(result.diagnostic->message, testing::HasSubstr(L"default_save_format"));
 }
 
 TEST(app_config_json, Serialize_WritesUiAndToolSizeOverridesWhenNonDefault) {

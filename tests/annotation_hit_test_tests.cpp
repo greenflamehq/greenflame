@@ -405,8 +405,7 @@ TEST(annotation_hit_test, AnnotationVisualBounds_VerticalLineExcludesCapExtensio
 }
 
 TEST(annotation_hit_test, AnnotationHitsPoint_RoundFreehandSinglePointUsesCircularTip) {
-    Annotation const stroke =
-        Make_freehand(11, {{10, 10}}, StrokeStyle{.width_px = 4});
+    Annotation const stroke = Make_freehand(11, {{10, 10}}, StrokeStyle{.width_px = 4});
 
     EXPECT_TRUE(Annotation_hits_point(stroke, {10, 10}));
     EXPECT_FALSE(Annotation_hits_point(stroke, {12, 12}));
@@ -434,8 +433,8 @@ TEST(annotation_hit_test, AnnotationBoundsAndVisualBounds_ArrowIncludeHeadGeomet
 
 TEST(annotation_hit_test, AnnotationHitsPoint_TextWithInvalidBitmapLayoutMisses) {
     {
-        Annotation text =
-            Make_text(14, {40, 50}, RectPx::From_ltrb(40, 50, 42, 52), std::vector<uint8_t>(16u, 0xFF));
+        Annotation text = Make_text(14, {40, 50}, RectPx::From_ltrb(40, 50, 42, 52),
+                                    std::vector<uint8_t>(16u, 0xFF));
         auto &text_data = std::get<TextAnnotation>(text.data);
         text_data.bitmap_row_bytes = 7;
 
@@ -443,8 +442,8 @@ TEST(annotation_hit_test, AnnotationHitsPoint_TextWithInvalidBitmapLayoutMisses)
     }
 
     {
-        Annotation text =
-            Make_text(15, {40, 50}, RectPx::From_ltrb(40, 50, 42, 52), std::vector<uint8_t>(16u, 0xFF));
+        Annotation text = Make_text(15, {40, 50}, RectPx::From_ltrb(40, 50, 42, 52),
+                                    std::vector<uint8_t>(16u, 0xFF));
         auto &text_data = std::get<TextAnnotation>(text.data);
         text_data.premultiplied_bgra.resize(8u);
 
@@ -452,14 +451,15 @@ TEST(annotation_hit_test, AnnotationHitsPoint_TextWithInvalidBitmapLayoutMisses)
     }
 
     {
-        Annotation text =
-            Make_text(16, {40, 50}, RectPx::From_ltrb(40, 50, 42, 52), std::vector<uint8_t>(16u, 0xFF));
+        Annotation text = Make_text(16, {40, 50}, RectPx::From_ltrb(40, 50, 42, 52),
+                                    std::vector<uint8_t>(16u, 0xFF));
         EXPECT_FALSE(Annotation_hits_point(text, {42, 51}));
     }
 }
 
 TEST(annotation_hit_test, SelectionHelpers_NormalizeBoundsIntersectAndIndex) {
-    Annotation const rect0 = Make_rectangle(1, RectPx::From_ltrb(0, 0, 11, 11), 2, true);
+    Annotation const rect0 =
+        Make_rectangle(1, RectPx::From_ltrb(0, 0, 11, 11), 2, true);
     Annotation const rect1 =
         Make_rectangle(2, RectPx::From_ltrb(5, 5, 16, 16), 2, true);
     std::vector<Annotation> const annotations = {rect0, rect1};
@@ -489,15 +489,15 @@ TEST(annotation_hit_test, SelectionHelpers_NormalizeBoundsIntersectAndIndex) {
 }
 
 TEST(annotation_hit_test, HitTestRectangleResizeHandles_HiddenSideHandleDoesNotHit) {
-    EXPECT_EQ(Hit_test_rectangle_resize_handles(RectPx::From_ltrb(10, 10, 31, 31),
-                                                {20, 10}),
-              std::nullopt);
+    EXPECT_EQ(
+        Hit_test_rectangle_resize_handles(RectPx::From_ltrb(10, 10, 31, 31), {20, 10}),
+        std::nullopt);
 }
 
 TEST(annotation_hit_test, ResizeRectangleFromHandle_EmptyBoundsStayEmpty) {
-    EXPECT_EQ(Resize_rectangle_from_handle(RectPx{}, SelectionHandle::TopLeft,
-                                           {10, 10}),
-              RectPx{});
+    EXPECT_EQ(
+        Resize_rectangle_from_handle(RectPx{}, SelectionHandle::TopLeft, {10, 10}),
+        RectPx{});
 }
 
 TEST(annotation_hit_test, ResizeRectangleFromHandle_ClampsMinimumSizeForCrossedEdges) {

@@ -375,8 +375,7 @@ TEST(text_rtf, Decode_HexEscapesAcceptLowerAndUppercaseDigits) {
 }
 
 TEST(text_rtf, Decode_StrikedVariantAndUnknownSingleCharEscape) {
-    std::string const rtf =
-        "{\\rtf1\\pard \\striked1 struck\\striked0 \\:plain}";
+    std::string const rtf = "{\\rtf1\\pard \\striked1 struck\\striked0 \\:plain}";
 
     std::vector<TextRun> const runs = Decode_rtf(rtf);
     ASSERT_GE(runs.size(), 2u);

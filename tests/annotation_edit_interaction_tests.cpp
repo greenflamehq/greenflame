@@ -153,9 +153,9 @@ TEST(annotation_edit_interaction, MoveInteraction_ProducesUndoableCommandData) {
     EXPECT_EQ(command_value.description, "Move annotation");
     EXPECT_EQ(command_value.selection_before, (AnnotationSelection{7}));
     EXPECT_EQ(command_value.selection_after, (AnnotationSelection{7}));
-    EXPECT_EQ(
-        std::get<FreehandStrokeAnnotation>(command_value.annotation_after.data).points[0],
-        (PointPx{60, 60}));
+    EXPECT_EQ(std::get<FreehandStrokeAnnotation>(command_value.annotation_after.data)
+                  .points[0],
+              (PointPx{60, 60}));
 }
 
 TEST(annotation_edit_interaction,
@@ -496,12 +496,12 @@ TEST(annotation_edit_interaction,
     EXPECT_EQ(command_value.description, "Edit highlighter annotation");
     EXPECT_EQ(command_value.selection_before, (AnnotationSelection{13}));
     EXPECT_EQ(command_value.selection_after, (AnnotationSelection{13}));
-    EXPECT_EQ(
-        std::get<FreehandStrokeAnnotation>(command_value.annotation_before.data).points[0],
-        (PointPx{40, 40}));
-    EXPECT_EQ(
-        std::get<FreehandStrokeAnnotation>(command_value.annotation_after.data).points[0],
-        (PointPx{20, 20}));
+    EXPECT_EQ(std::get<FreehandStrokeAnnotation>(command_value.annotation_before.data)
+                  .points[0],
+              (PointPx{40, 40}));
+    EXPECT_EQ(std::get<FreehandStrokeAnnotation>(command_value.annotation_after.data)
+                  .points[0],
+              (PointPx{20, 20}));
 }
 
 TEST(annotation_edit_interaction, HitTest_MultiSelectionBodyUsesSelectionBounds) {
@@ -512,16 +512,16 @@ TEST(annotation_edit_interaction, HitTest_MultiSelectionBodyUsesSelectionBounds)
     AnnotationSelection const selected_ids = {1, 2};
     RectPx const selection_bounds = RectPx::From_ltrb(40, 40, 161, 81);
 
-    EXPECT_EQ(
-        Hit_test_annotation_edit_target(selected_ids, annotations, selection_bounds,
-                                        {100, 60}),
-        (std::optional<AnnotationEditTarget>{AnnotationEditTarget{
-            0, AnnotationEditTargetKind::SelectionBody}}));
+    EXPECT_EQ(Hit_test_annotation_edit_target(selected_ids, annotations,
+                                              selection_bounds, {100, 60}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{0, AnnotationEditTargetKind::SelectionBody}}));
 }
 
 TEST(annotation_edit_interaction,
      RectangleHandleTargets_CreateMatchingHandleInteractions) {
-    Annotation const rectangle = Make_rectangle(21, RectPx::From_ltrb(40, 40, 81, 81), 4);
+    Annotation const rectangle =
+        Make_rectangle(21, RectPx::From_ltrb(40, 40, 81, 81), 4);
     std::vector<Annotation> const annotations = {rectangle};
 
     struct Case final {
@@ -531,21 +531,29 @@ TEST(annotation_edit_interaction,
     };
 
     std::array<Case, 8> const cases = {{
-        {{40, 40}, AnnotationEditTargetKind::RectangleTopLeftHandle,
+        {{40, 40},
+         AnnotationEditTargetKind::RectangleTopLeftHandle,
          AnnotationEditHandleKind::RectangleTopLeft},
-        {{60, 40}, AnnotationEditTargetKind::RectangleTopHandle,
+        {{60, 40},
+         AnnotationEditTargetKind::RectangleTopHandle,
          AnnotationEditHandleKind::RectangleTop},
-        {{80, 40}, AnnotationEditTargetKind::RectangleTopRightHandle,
+        {{80, 40},
+         AnnotationEditTargetKind::RectangleTopRightHandle,
          AnnotationEditHandleKind::RectangleTopRight},
-        {{80, 60}, AnnotationEditTargetKind::RectangleRightHandle,
+        {{80, 60},
+         AnnotationEditTargetKind::RectangleRightHandle,
          AnnotationEditHandleKind::RectangleRight},
-        {{80, 80}, AnnotationEditTargetKind::RectangleBottomRightHandle,
+        {{80, 80},
+         AnnotationEditTargetKind::RectangleBottomRightHandle,
          AnnotationEditHandleKind::RectangleBottomRight},
-        {{60, 80}, AnnotationEditTargetKind::RectangleBottomHandle,
+        {{60, 80},
+         AnnotationEditTargetKind::RectangleBottomHandle,
          AnnotationEditHandleKind::RectangleBottom},
-        {{40, 80}, AnnotationEditTargetKind::RectangleBottomLeftHandle,
+        {{40, 80},
+         AnnotationEditTargetKind::RectangleBottomLeftHandle,
          AnnotationEditHandleKind::RectangleBottomLeft},
-        {{40, 60}, AnnotationEditTargetKind::RectangleLeftHandle,
+        {{40, 60},
+         AnnotationEditTargetKind::RectangleLeftHandle,
          AnnotationEditHandleKind::RectangleLeft},
     }};
 
@@ -558,8 +566,7 @@ TEST(annotation_edit_interaction,
         EXPECT_EQ(target->kind, test_case.target_kind);
 
         std::unique_ptr<IAnnotationEditInteraction> interaction =
-            Create_annotation_edit_interaction(*target, 0, rectangle,
-                                               test_case.cursor);
+            Create_annotation_edit_interaction(*target, 0, rectangle, test_case.cursor);
         ASSERT_NE(interaction, nullptr);
         EXPECT_EQ(interaction->Active_handle(),
                   std::optional<AnnotationEditHandleKind>{test_case.handle_kind});

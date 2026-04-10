@@ -34,9 +34,9 @@ void Write_console_text(std::wstring_view text, bool to_stderr) {
         if (!text.empty() && text.size() <= static_cast<size_t>(INT_MAX)) {
             int const source_chars = static_cast<int>(text.size());
             std::wstring const text_copy(text);
-            int const utf8_bytes = WideCharToMultiByte(
-                CP_UTF8, 0, text_copy.c_str(), source_chars, nullptr, 0, nullptr,
-                nullptr);
+            int const utf8_bytes =
+                WideCharToMultiByte(CP_UTF8, 0, text_copy.c_str(), source_chars,
+                                    nullptr, 0, nullptr, nullptr);
             if (utf8_bytes > 0) {
                 std::string utf8(static_cast<size_t>(utf8_bytes), '\0');
                 int const converted =

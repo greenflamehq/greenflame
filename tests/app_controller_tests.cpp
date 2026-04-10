@@ -313,7 +313,8 @@ TEST(app_controller, copy_last_region_without_state_returns_warning) {
 TEST(app_controller, copy_last_region_returns_warning_when_clipboard_copy_fails) {
     ControllerFixture fixture;
     RectPx const rect = RectPx::From_ltrb(0, 0, 100, 100);
-    std::ignore = fixture.controller.On_selection_copied_to_clipboard(rect, std::nullopt);
+    std::ignore =
+        fixture.controller.On_selection_copied_to_clipboard(rect, std::nullopt);
 
     EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(rect, false))
         .WillOnce(Return(false));
@@ -384,8 +385,7 @@ TEST(app_controller, copy_last_window_clears_saved_handle_when_rect_lookup_fails
 
     EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
     EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
-    EXPECT_CALL(fixture.windows, Get_window_rect(hwnd))
-        .WillOnce(Return(std::nullopt));
+    EXPECT_CALL(fixture.windows, Get_window_rect(hwnd)).WillOnce(Return(std::nullopt));
 
     ClipboardCopyResult const first =
         fixture.controller.On_copy_last_window_to_clipboard_requested();

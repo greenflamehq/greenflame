@@ -318,8 +318,8 @@ TEST(cli_annotation_import, parse_rejects_highlighter_geometry_mix) {
 
 TEST(cli_annotation_import, parse_rejects_trailing_characters_after_root_value) {
     AppConfig const config = Make_config();
-    CliAnnotationParseResult const result =
-        Parse_cli_annotations_json(R"({"annotations":[]}) trailing", Make_context(config));
+    CliAnnotationParseResult const result = Parse_cli_annotations_json(
+        R"({"annotations":[]}) trailing", Make_context(config));
 
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error_message.find(L"Unexpected trailing characters"),
@@ -342,8 +342,7 @@ TEST(cli_annotation_import, parse_rejects_invalid_json_number_exponent) {
         Parse_cli_annotations_json(R"({"annotations":[1e]})", Make_context(config));
 
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"Invalid JSON number."),
-              std::wstring::npos);
+    EXPECT_NE(result.error_message.find(L"Invalid JSON number."), std::wstring::npos);
 }
 
 TEST(cli_annotation_import, parse_rejects_root_highlighter_opacity_out_of_range) {
@@ -463,8 +462,7 @@ TEST(cli_annotation_import, parse_rejects_missing_required_point_coordinate) {
         Make_context(config));
 
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"start.y is required."),
-              std::wstring::npos);
+    EXPECT_NE(result.error_message.find(L"start.y is required."), std::wstring::npos);
 }
 
 TEST(cli_annotation_import, parse_rejects_empty_input) {
@@ -501,31 +499,34 @@ TEST(cli_annotation_import, parse_rejects_object_and_array_syntax_errors) {
     AppConfig const config = Make_config();
 
     {
-        CliAnnotationParseResult const result = Parse_cli_annotations_json(
-            R"({"annotations" []})", Make_context(config));
+        CliAnnotationParseResult const result =
+            Parse_cli_annotations_json(R"({"annotations" []})", Make_context(config));
         EXPECT_FALSE(result.ok);
-        EXPECT_NE(result.error_message.find(L"Expected ':' after an object property name."),
-                  std::wstring::npos);
+        EXPECT_NE(
+            result.error_message.find(L"Expected ':' after an object property name."),
+            std::wstring::npos);
     }
 
     {
         CliAnnotationParseResult const result = Parse_cli_annotations_json(
             R"({"annotations":[{} {}]})", Make_context(config));
         EXPECT_FALSE(result.ok);
-        EXPECT_NE(result.error_message.find(L"Expected ',' or ']' after an array element."),
-                  std::wstring::npos);
+        EXPECT_NE(
+            result.error_message.find(L"Expected ',' or ']' after an array element."),
+            std::wstring::npos);
     }
 
     {
-        CliAnnotationParseResult const result = Parse_cli_annotations_json(
-            R"({annotations:[]})", Make_context(config));
+        CliAnnotationParseResult const result =
+            Parse_cli_annotations_json(R"({annotations:[]})", Make_context(config));
         EXPECT_FALSE(result.ok);
         EXPECT_NE(result.error_message.find(L"Expected a quoted object property name."),
                   std::wstring::npos);
     }
 }
 
-TEST(cli_annotation_import, parse_arrow_uses_config_size_and_accepts_uppercase_hex_color) {
+TEST(cli_annotation_import,
+     parse_arrow_uses_config_size_and_accepts_uppercase_hex_color) {
     AppConfig config = Make_config();
     config.arrow_size = 9;
 
@@ -593,8 +594,8 @@ TEST(cli_annotation_import,
 
 TEST(cli_annotation_import, parse_rejects_invalid_utf8_text_string) {
     AppConfig const config = Make_config();
-    std::string json =
-        "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},\"size\":10,\"text\":\"";
+    std::string json = "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":"
+                       "0},\"size\":10,\"text\":\"";
     json.push_back(static_cast<char>(0x80));
     json += "\"}]}";
 
@@ -602,8 +603,7 @@ TEST(cli_annotation_import, parse_rejects_invalid_utf8_text_string) {
         Parse_cli_annotations_json(json, Make_context(config));
 
     EXPECT_FALSE(result.ok);
-    EXPECT_NE(result.error_message.find(L"must be valid UTF-8."),
-              std::wstring::npos);
+    EXPECT_NE(result.error_message.find(L"must be valid UTF-8."), std::wstring::npos);
 }
 
 TEST(cli_annotation_import, parse_rejects_additional_json_syntax_errors) {
@@ -629,18 +629,20 @@ TEST(cli_annotation_import, parse_rejects_additional_json_syntax_errors) {
         context, L"Invalid \\u escape sequence in JSON string.");
 
     std::string control_char_json =
-        "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},\"text\":\"alpha\nbeta\",\"size\":10}]}";
+        "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},\"text\":"
+        "\"alpha\nbeta\",\"size\":10}]}";
     Expect_parse_error_contains(control_char_json, context,
                                 L"Control characters are not allowed in JSON strings.");
 
-    std::string incomplete_escape_json =
-        "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},\"text\":\"abc";
+    std::string incomplete_escape_json = "{\"annotations\":[{\"type\":\"text\","
+                                         "\"origin\":{\"x\":0,\"y\":0},\"text\":\"abc";
     incomplete_escape_json.push_back('\\');
     Expect_parse_error_contains(incomplete_escape_json, context,
                                 L"Incomplete escape sequence in JSON string.");
 
     std::string unterminated_string_json =
-        "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},\"text\":\"abc";
+        "{\"annotations\":[{\"type\":\"text\",\"origin\":{\"x\":0,\"y\":0},\"text\":"
+        "\"abc";
     Expect_parse_error_contains(unterminated_string_json, context,
                                 L"Unterminated JSON string.");
 }
@@ -650,8 +652,9 @@ TEST(cli_annotation_import, parse_rejects_missing_parse_context_config) {
     CliAnnotationParseContext context = Make_context(config);
     context.config = nullptr;
 
-    Expect_parse_error_contains(R"({"annotations":[]})", context,
-                                L"internal annotation parse context is missing config.");
+    Expect_parse_error_contains(
+        R"({"annotations":[]})", context,
+        L"internal annotation parse context is missing config.");
 }
 
 TEST(cli_annotation_import,
@@ -663,9 +666,9 @@ TEST(cli_annotation_import,
                                 L"$.$schema must be a string.");
     Expect_parse_error_contains(R"({"coordinate_space":1,"annotations":[]})", context,
                                 L"$.coordinate_space must be \"local\" or \"global\".");
-    Expect_parse_error_contains(
-        R"({"coordinate_space":"desktop","annotations":[]})", context,
-        L"$.coordinate_space must be \"local\" or \"global\".");
+    Expect_parse_error_contains(R"({"coordinate_space":"desktop","annotations":[]})",
+                                context,
+                                L"$.coordinate_space must be \"local\" or \"global\".");
     Expect_parse_error_contains("{}", context, L"$.annotations is required.");
     Expect_parse_error_contains(R"({"annotations":{}})", context,
                                 L"$.annotations must be an array.");
@@ -708,8 +711,9 @@ TEST(cli_annotation_import, parse_rejects_additional_invalid_font_specs) {
     std::string const long_family(kMaxTextFontFamilyChars + 1, 'a');
     std::string const long_family_json =
         "{\"font\":{\"family\":\"" + long_family + "\"},\"annotations\":[]}";
-    Expect_parse_error_contains(long_family_json, context,
-                                L"$.font.family must be at most 128 UTF-16 code units.");
+    Expect_parse_error_contains(
+        long_family_json, context,
+        L"$.font.family must be at most 128 UTF-16 code units.");
 }
 
 TEST(cli_annotation_import,
@@ -787,8 +791,8 @@ TEST(cli_annotation_import, parse_rejects_invalid_geometry_requirements) {
     Expect_parse_error_contains(R"({"annotations":[{"type":"brush","size":4}]})",
                                 context, L"$.annotations[0].points is required.");
     Expect_parse_error_contains(
-        R"({"annotations":[{"type":"highlighter","points":"bad","size":4}]})",
-        context, L"$.annotations[0].points must be an array.");
+        R"({"annotations":[{"type":"highlighter","points":"bad","size":4}]})", context,
+        L"$.annotations[0].points must be an array.");
     Expect_parse_error_contains(
         R"({"annotations":[{"type":"rectangle","left":1,"top":2,"width":0,"height":3}]})",
         context, L"requires positive width and height.");
@@ -810,8 +814,8 @@ TEST(cli_annotation_import, parse_rejects_invalid_text_shapes) {
         R"({"annotations":[{"type":"text","origin":{"x":0,"y":0},"text":"abc","spans":[{"text":"def"}],"size":10}]})",
         context, L"must contain exactly one of \"text\" or \"spans\".");
     Expect_parse_error_contains(
-        R"({"annotations":[{"type":"text","origin":{"x":0,"y":0},"size":10}]})", context,
-        L"must contain exactly one of \"text\" or \"spans\".");
+        R"({"annotations":[{"type":"text","origin":{"x":0,"y":0},"size":10}]})",
+        context, L"must contain exactly one of \"text\" or \"spans\".");
     Expect_parse_error_contains(
         R"({"annotations":[{"type":"text","origin":{"x":0,"y":0},"text":"","size":10}]})",
         context, L"$.annotations[0].text must not be empty.");

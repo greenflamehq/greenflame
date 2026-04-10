@@ -41,9 +41,8 @@ std::vector<MonitorWithBounds> Triple_with_left_monitor() {
 }
 
 struct FakeObfuscateSourceProvider final : public IObfuscateSourceProvider {
-    [[nodiscard]] std::optional<BgraBitmap>
-    Build_composited_source(RectPx bounds,
-                            std::span<const Annotation> /*lower_annotations*/) override {
+    [[nodiscard]] std::optional<BgraBitmap> Build_composited_source(
+        RectPx bounds, std::span<const Annotation> /*lower_annotations*/) override {
         RectPx const normalized_bounds = bounds.Normalized();
         if (normalized_bounds.Is_empty()) {
             return std::nullopt;
@@ -2177,13 +2176,11 @@ TEST(overlay_controller,
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
 }
 
-TEST(overlay_controller,
-     DirectToolSelectionAndToolbarViews_RequireCaptureSelection) {
+TEST(overlay_controller, DirectToolSelectionAndToolbarViews_RequireCaptureSelection) {
     auto c = Make_controller();
 
     EXPECT_TRUE(c.Build_annotation_toolbar_button_views().empty());
-    EXPECT_EQ(c.On_select_annotation_tool(AnnotationToolId::Text),
-              OverlayAction::None);
+    EXPECT_EQ(c.On_select_annotation_tool(AnnotationToolId::Text), OverlayAction::None);
 
     Press(c, {100, 100});
     Release(c, {300, 300});
@@ -2200,11 +2197,10 @@ TEST(overlay_controller,
 
     std::vector<AnnotationToolbarButtonView> const active_views =
         c.Build_annotation_toolbar_button_views();
-    auto const it = std::find_if(
-        active_views.begin(), active_views.end(),
-        [](AnnotationToolbarButtonView const &view) {
-            return view.id == AnnotationToolId::Text;
-        });
+    auto const it = std::find_if(active_views.begin(), active_views.end(),
+                                 [](AnnotationToolbarButtonView const &view) {
+                                     return view.id == AnnotationToolId::Text;
+                                 });
     ASSERT_NE(it, active_views.end());
     EXPECT_TRUE(it->active);
 
@@ -2213,8 +2209,7 @@ TEST(overlay_controller,
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
-TEST(overlay_controller,
-     SetterWrappers_UpdateFontsColorsAndHighlighterOpacity) {
+TEST(overlay_controller, SetterWrappers_UpdateFontsColorsAndHighlighterOpacity) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
@@ -2287,8 +2282,7 @@ TEST(overlay_controller,
     ASSERT_EQ(Release(c, {140, 140}), OverlayAction::None);
     EXPECT_EQ(c.Selected_annotation_count(), 1u);
 
-    EXPECT_EQ(c.On_delete_selected_annotation(),
-              OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(c.On_delete_selected_annotation(), OverlayAction::InvalidateFrozenCache);
     EXPECT_TRUE(c.Annotations().empty());
 
     c.Undo();
@@ -2299,8 +2293,7 @@ TEST(overlay_controller,
     EXPECT_TRUE(c.Annotations().empty());
 }
 
-TEST(overlay_controller,
-     PrimaryDoublePress_BeginsTextEditForSelectedTextAnnotation) {
+TEST(overlay_controller, PrimaryDoublePress_BeginsTextEditForSelectedTextAnnotation) {
     auto c = Make_controller();
     OpaqueTextLayoutEngine engine;
     c.Set_text_layout_engine(&engine);
@@ -2314,7 +2307,8 @@ TEST(overlay_controller,
     c.Active_text_edit()->On_text_input(L"abc");
     ASSERT_TRUE(c.Commit_active_text_edit());
     ASSERT_EQ(c.Annotations().size(), 1u);
-    TextAnnotation const &annotation = std::get<TextAnnotation>(c.Annotations()[0].data);
+    TextAnnotation const &annotation =
+        std::get<TextAnnotation>(c.Annotations()[0].data);
     PointPx const click_point{annotation.visual_bounds.left + 1,
                               annotation.visual_bounds.top + 1};
 
@@ -2331,8 +2325,7 @@ TEST(overlay_controller,
     EXPECT_TRUE(c.Editing_annotation_id().has_value());
 }
 
-TEST(overlay_controller,
-     HighlighterDraftWrappers_ExposeSmoothingStyleAndStraighten) {
+TEST(overlay_controller, HighlighterDraftWrappers_ExposeSmoothingStyleAndStraighten) {
     auto c = Make_controller();
     Press(c, {100, 100});
     Release(c, {300, 300});
@@ -2346,8 +2339,7 @@ TEST(overlay_controller,
     std::optional<StrokeStyle> const style = c.Draft_freehand_style();
     ASSERT_TRUE(style.has_value());
     EXPECT_EQ(style->opacity_percent, c.Highlighter_opacity_percent());
-    EXPECT_EQ(c.Draft_freehand_smoothing_mode(),
-              FreehandSmoothingMode::Smooth);
+    EXPECT_EQ(c.Draft_freehand_smoothing_mode(), FreehandSmoothingMode::Smooth);
     ASSERT_GT(c.Draft_freehand_points().size(), 2u);
 
     EXPECT_TRUE(c.Straighten_highlighter_stroke());
@@ -2377,10 +2369,9 @@ TEST(overlay_controller,
     ASSERT_EQ(Release(c, {180, 160}), OverlayAction::None);
     EXPECT_TRUE(c.Has_annotation_at({180, 160}));
     EXPECT_TRUE(c.Selected_annotation_bounds().has_value());
-    EXPECT_EQ(
-        c.Annotation_edit_target_at({140, 140}),
-        (std::optional<AnnotationEditTarget>{AnnotationEditTarget{
-            1, AnnotationEditTargetKind::LineStartHandle}}));
+    EXPECT_EQ(c.Annotation_edit_target_at({140, 140}),
+              (std::optional<AnnotationEditTarget>{
+                  AnnotationEditTarget{1, AnnotationEditTargetKind::LineStartHandle}}));
 
     ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
               OverlayAction::Repaint);

@@ -2315,11 +2315,11 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     }
 
     constexpr size_t square_draft_body_overlap_raw_point_count = 8;
-    size_t const draw_start_index =
-        res.draft_stroke_body_raw_point_count > square_draft_body_overlap_raw_point_count
-            ? res.draft_stroke_body_raw_point_count -
-                  square_draft_body_overlap_raw_point_count
-            : 0;
+    size_t const draw_start_index = res.draft_stroke_body_raw_point_count >
+                                            square_draft_body_overlap_raw_point_count
+                                        ? res.draft_stroke_body_raw_point_count -
+                                              square_draft_body_overlap_raw_point_count
+                                        : 0;
     std::vector<core::PointPx> const smoothed_points = core::Smooth_freehand_points(
         points.subspan(draw_start_index,
                        plan.stable_raw_point_count - draw_start_index),

@@ -602,8 +602,8 @@ TEST(text_html, Decode_SelfClosingInlineTagRestoresPriorFlags) {
 }
 
 TEST(text_html, Decode_CssNormalResetsInheritedBoldWithTrimmedWhitespace) {
-    auto const runs =
-        Decode_html_clipboard("<b><span style=\"\tfont-weight:\tnormal\t\">x</span>y</b>");
+    auto const runs = Decode_html_clipboard(
+        "<b><span style=\"\tfont-weight:\tnormal\t\">x</span>y</b>");
     ASSERT_EQ(runs.size(), 2u);
     EXPECT_EQ(runs[0].text, L"x");
     EXPECT_FALSE(runs[0].flags.bold);

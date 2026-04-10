@@ -304,23 +304,22 @@ TEST(annotation_controller, SetHighlighterOpacityPercent_ClampsAndNoopsAtLimits)
         StrokeStyle::kMaxOpacityPercent + 10));
     EXPECT_EQ(controller.Highlighter_opacity_percent(),
               StrokeStyle::kMaxOpacityPercent);
-    EXPECT_FALSE(controller.Set_highlighter_opacity_percent(
-        StrokeStyle::kMaxOpacityPercent));
+    EXPECT_FALSE(
+        controller.Set_highlighter_opacity_percent(StrokeStyle::kMaxOpacityPercent));
 
     EXPECT_TRUE(controller.Set_highlighter_opacity_percent(
         StrokeStyle::kMinOpacityPercent - 10));
     EXPECT_EQ(controller.Highlighter_opacity_percent(),
               StrokeStyle::kMinOpacityPercent);
-    EXPECT_FALSE(controller.Set_highlighter_opacity_percent(
-        StrokeStyle::kMinOpacityPercent));
+    EXPECT_FALSE(
+        controller.Set_highlighter_opacity_percent(StrokeStyle::kMinOpacityPercent));
 }
 
 TEST(annotation_controller,
      DraftFreehandSmoothingMode_ReflectsBrushAndHighlighterGestures) {
     AnnotationController controller;
 
-    EXPECT_EQ(controller.Draft_freehand_smoothing_mode(),
-              FreehandSmoothingMode::Off);
+    EXPECT_EQ(controller.Draft_freehand_smoothing_mode(), FreehandSmoothingMode::Off);
 
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Freehand));
     EXPECT_TRUE(controller.On_primary_press({10, 10}));
@@ -332,17 +331,14 @@ TEST(annotation_controller,
     EXPECT_TRUE(controller.Set_brush_smoothing_mode(FreehandSmoothingMode::Off));
     EXPECT_TRUE(controller.On_primary_press({20, 20}));
     EXPECT_TRUE(controller.On_pointer_move({22, 22}));
-    EXPECT_EQ(controller.Draft_freehand_smoothing_mode(),
-              FreehandSmoothingMode::Off);
+    EXPECT_EQ(controller.Draft_freehand_smoothing_mode(), FreehandSmoothingMode::Off);
     EXPECT_TRUE(controller.On_cancel());
 
-    EXPECT_TRUE(controller.Set_highlighter_smoothing_mode(
-        FreehandSmoothingMode::Off));
+    EXPECT_TRUE(controller.Set_highlighter_smoothing_mode(FreehandSmoothingMode::Off));
     EXPECT_TRUE(controller.Toggle_tool(AnnotationToolId::Highlighter));
     EXPECT_TRUE(controller.On_primary_press({30, 30}));
     EXPECT_TRUE(controller.On_pointer_move({40, 40}));
-    EXPECT_EQ(controller.Draft_freehand_smoothing_mode(),
-              FreehandSmoothingMode::Off);
+    EXPECT_EQ(controller.Draft_freehand_smoothing_mode(), FreehandSmoothingMode::Off);
 }
 
 TEST(annotation_controller, SetSpellCheckService_PropagatesIntoTextDraft) {
@@ -1925,12 +1921,10 @@ TEST(annotation_controller,
 TEST(annotation_controller,
      ActiveAnnotationEditPreviews_ReturnMultipleEntriesForSelectionMove) {
     AnnotationController controller;
-    controller.Insert_annotation_at(0, Make_rectangle(1, RectPx::From_ltrb(40, 40, 81, 81),
-                                                      4),
-                                    std::nullopt);
-    controller.Insert_annotation_at(1, Make_ellipse(2, RectPx::From_ltrb(120, 50, 171, 101),
-                                                    6),
-                                    std::nullopt);
+    controller.Insert_annotation_at(
+        0, Make_rectangle(1, RectPx::From_ltrb(40, 40, 81, 81), 4), std::nullopt);
+    controller.Insert_annotation_at(
+        1, Make_ellipse(2, RectPx::From_ltrb(120, 50, 171, 101), 6), std::nullopt);
     std::array<uint64_t, 2> const selection_ids = {1, 2};
     ASSERT_TRUE(controller.Set_selected_annotations(selection_ids));
 
@@ -1943,19 +1937,21 @@ TEST(annotation_controller,
         controller.Active_annotation_edit_previews();
     ASSERT_EQ(previews.size(), 2u);
     EXPECT_EQ(previews[0].index, 0u);
-    EXPECT_EQ(std::get<RectangleAnnotation>(previews[0].annotation_after.data).outer_bounds,
-              (RectPx::From_ltrb(70, 80, 111, 121)));
+    EXPECT_EQ(
+        std::get<RectangleAnnotation>(previews[0].annotation_after.data).outer_bounds,
+        (RectPx::From_ltrb(70, 80, 111, 121)));
     EXPECT_EQ(previews[1].index, 1u);
-    EXPECT_EQ(std::get<EllipseAnnotation>(previews[1].annotation_after.data).outer_bounds,
-              (RectPx::From_ltrb(150, 90, 201, 141)));
+    EXPECT_EQ(
+        std::get<EllipseAnnotation>(previews[1].annotation_after.data).outer_bounds,
+        (RectPx::From_ltrb(150, 90, 201, 141)));
 }
 
 TEST(annotation_controller, UpdateAnnotationAt_OptionalSelectionIdUpdatesSelection) {
     AnnotationController controller;
     controller.Insert_annotation_at(0, Make_line(1, {10, 10}, {30, 30}), std::nullopt);
 
-    controller.Update_annotation_at(
-        0, Make_line(1, {20, 20}, {40, 50}), std::optional<uint64_t>{1});
+    controller.Update_annotation_at(0, Make_line(1, {20, 20}, {40, 50}),
+                                    std::optional<uint64_t>{1});
 
     ASSERT_EQ(controller.Annotations().size(), 1u);
     EXPECT_EQ(std::get<LineAnnotation>(controller.Annotations()[0].data).start,
