@@ -1,0 +1,36 @@
+{
+  "coordinate_space": "local",
+  "annotations": [
+    {
+      "type": "obfuscate",
+      "left": 64,
+      "top": 28,
+      "width": 140,
+      "height": 36,
+      "size": 8
+    },
+    {
+      "type": "arrow",
+      "start": {
+        "x": 236,
+        "y": 36
+      },
+      "end": {
+        "x": 206,
+        "y": 46
+      },
+      "size": 3,
+      "color": "#ff9500"
+    },
+    {
+      "type": "text",
+      "origin": {
+        "x": 244,
+        "y": 28
+      },
+      "size": 12,
+      "color": "#ffffff",
+      "text": "Sensitive value"
+    }
+  ]
+}

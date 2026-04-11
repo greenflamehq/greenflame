@@ -1,0 +1,80 @@
+{
+  "coordinate_space": "local",
+  "color": "#ff3b30",
+  "highlighter_opacity_percent": 35,
+  "font": {
+    "preset": "mono"
+  },
+  "annotations": [
+    {
+      "type": "rectangle",
+      "left": 18,
+      "top": 16,
+      "width": 170,
+      "height": 90,
+      "size": 3
+    },
+    {
+      "type": "highlighter",
+      "points": [
+        {
+          "x": 12,
+          "y": 128
+        },
+        {
+          "x": 72,
+          "y": 132
+        },
+        {
+          "x": 146,
+          "y": 130
+        },
+        {
+          "x": 204,
+          "y": 136
+        }
+      ],
+      "size": 11,
+      "color": "#ffe66d"
+    },
+    {
+      "type": "arrow",
+      "start": {
+        "x": 210,
+        "y": 70
+      },
+      "end": {
+        "x": 180,
+        "y": 62
+      },
+      "size": 5,
+      "color": "#00c2ff"
+    },
+    {
+      "type": "text",
+      "origin": {
+        "x": 20,
+        "y": 154
+      },
+      "size": 16,
+      "spans": [
+        {
+          "text": "Step 1",
+          "bold": true
+        },
+        {
+          "text": "\nCollect logs",
+          "underline": true
+        }
+      ]
+    },
+    {
+      "type": "bubble",
+      "center": {
+        "x": 10,
+        "y": 10
+      },
+      "size": 12
+    }
+  ]
+}

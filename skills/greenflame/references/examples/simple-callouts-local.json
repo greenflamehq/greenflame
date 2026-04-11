@@ -1,0 +1,36 @@
+{
+  "coordinate_space": "local",
+  "annotations": [
+    {
+      "type": "rectangle",
+      "left": 32,
+      "top": 24,
+      "width": 188,
+      "height": 96,
+      "size": 4,
+      "color": "#ff3b30"
+    },
+    {
+      "type": "arrow",
+      "start": {
+        "x": 258,
+        "y": 42
+      },
+      "end": {
+        "x": 220,
+        "y": 58
+      },
+      "size": 4,
+      "color": "#ff3b30"
+    },
+    {
+      "type": "bubble",
+      "center": {
+        "x": 280,
+        "y": 36
+      },
+      "size": 12,
+      "color": "#ffd60a"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Greenflame"
+  short_description: "CLI screenshot capture and annotation"
+  default_prompt: "Use $greenflame to capture or annotate a screenshot with the Greenflame CLI."
