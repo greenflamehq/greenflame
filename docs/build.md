@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-13
+last_updated: 2026-04-10
 tags:
   - build
   - cmake
@@ -52,6 +52,18 @@ build\x64-debug\greenflame.exe
 cmake --preset x64-release
 cmake --build --preset x64-release
 ```
+
+## Release build with PDB (MSVC)
+
+Use this preset when you need an optimized MSVC build and a fresh `greenflame.pdb` next
+to the executable:
+
+```bat
+cmake --preset x64-release-pdb
+cmake --build --preset x64-release-pdb
+```
+
+Output: `build\x64-release-pdb\greenflame.exe` and `build\x64-release-pdb\greenflame.pdb`.
 
 ## Clang build
 

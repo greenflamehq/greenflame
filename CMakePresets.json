@@ -14,6 +14,16 @@
       "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
     },
     {
+      "name": "x64-release-pdb",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/x64-release-pdb",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_MSVC_DEBUG_INFORMATION_FORMAT": "ProgramDatabase",
+        "CMAKE_EXE_LINKER_FLAGS_RELEASE": "/DEBUG /INCREMENTAL:NO /OPT:REF /OPT:ICF"
+      }
+    },
+    {
       "name": "x64-debug-clang",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/x64-debug-clang",
@@ -48,6 +58,7 @@
   "buildPresets": [
     { "name": "x64-debug", "configurePreset": "x64-debug" },
     { "name": "x64-release", "configurePreset": "x64-release" },
+    { "name": "x64-release-pdb", "configurePreset": "x64-release-pdb" },
     { "name": "x64-debug-clang", "configurePreset": "x64-debug-clang" },
     { "name": "x64-release-clang", "configurePreset": "x64-release-clang" },
     { "name": "x64-coverage-clang", "configurePreset": "x64-coverage-clang" }
