@@ -1605,6 +1605,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - During a long live highlighter preview, the older body stays visually uniform
     instead of growing darker or seamier as the stroke extends, and responsiveness
     does not visibly degrade just because the stroke is longer.
+  - Releasing that long highlighter stroke returns control promptly; the overlay does
+    not sit unresponsive for multiple seconds while the committed annotation redraws.
   - A straightened highlighter stroke still commits as the same explicit straight bar
     shape rather than being reinterpreted as a smoothed freehand path.
 

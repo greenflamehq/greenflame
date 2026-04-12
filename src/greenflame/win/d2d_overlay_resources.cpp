@@ -442,6 +442,7 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
     frozen_valid = false;
     draft_stroke_point_count = 0;
     draft_stroke_body_raw_point_count = 0;
+    draft_stroke_body_point_count = 0;
     draft_stroke_stable_tail_start_index = 0;
     draft_stroke_style.reset();
     draft_stroke_tip_shape = core::FreehandTipShape::Round;
@@ -499,6 +500,7 @@ void D2DOverlayResources::Release_device_resources() {
     draft_stroke_body_bitmap.Reset();
     draft_stroke_point_count = 0;
     draft_stroke_body_raw_point_count = 0;
+    draft_stroke_body_point_count = 0;
     draft_stroke_stable_tail_start_index = 0;
     draft_stroke_style.reset();
     draft_stroke_tip_shape = core::FreehandTipShape::Round;

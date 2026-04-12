@@ -2183,6 +2183,7 @@ void Reset_draft_stroke_metadata(D2DOverlayResources &res) {
     res.draft_stroke_point_count = 0;
     res.draft_stroke_last_point = {};
     res.draft_stroke_body_raw_point_count = 0;
+    res.draft_stroke_body_point_count = 0;
     res.draft_stroke_stable_tail_start_index = 0;
     res.draft_stroke_style.reset();
     res.draft_stroke_tip_shape = core::FreehandTipShape::Round;
@@ -2218,6 +2219,43 @@ void Draw_preview_segments(ID2D1RenderTarget *render_target, D2DOverlayResources
         style.opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
     }
     return style;
+}
+
+[[nodiscard]] bool Can_reuse_cached_square_commit(
+    D2DOverlayResources const &res, core::FreehandStrokeAnnotation const &stroke,
+    size_t annotation_index, size_t annotation_count) noexcept {
+    return annotation_index + 1 == annotation_count &&
+           res.draft_stroke_point_count != 0 &&
+           res.draft_stroke_style == std::optional<core::StrokeStyle>(stroke.style) &&
+           res.draft_stroke_tip_shape == core::FreehandTipShape::Square &&
+           res.draft_stroke_smoothing_mode != core::FreehandSmoothingMode::Off &&
+           res.draft_stroke_body_bitmap != nullptr &&
+           res.draft_stroke_body_point_count != 0 &&
+           !stroke.points.empty() &&
+           res.draft_stroke_last_point == stroke.points.back() &&
+           res.draft_stroke_body_point_count <= stroke.points.size();
+}
+
+void Set_committed_square_mask_input(ID2D1Effect *multiply_effect,
+                                     D2DOverlayResources &res,
+                                     ID2D1Bitmap *tail_bitmap,
+                                     bool use_cached_body) noexcept {
+    if (multiply_effect == nullptr) {
+        return;
+    }
+    if (use_cached_body && res.draft_stroke_body_bitmap &&
+        res.draft_stroke_composite_effect && tail_bitmap != nullptr) {
+        res.draft_stroke_composite_effect->SetInput(0,
+                                                    res.draft_stroke_body_bitmap.Get());
+        res.draft_stroke_composite_effect->SetInput(1, tail_bitmap);
+        multiply_effect->SetInputEffect(1, res.draft_stroke_composite_effect.Get());
+        return;
+    }
+    if (use_cached_body && res.draft_stroke_body_bitmap) {
+        multiply_effect->SetInput(1, res.draft_stroke_body_bitmap.Get());
+        return;
+    }
+    multiply_effect->SetInput(1, tail_bitmap);
 }
 
 [[nodiscard]] bool Has_matching_cached_draft_input(
@@ -2273,6 +2311,7 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     if (FAILED(hr)) {
         res.draft_stroke_body_bitmap.Reset();
         res.draft_stroke_body_raw_point_count = 0;
+        res.draft_stroke_body_point_count = 0;
         res.draft_stroke_stable_tail_start_index = 0;
         return false;
     }
@@ -2280,6 +2319,7 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     (void)res.draft_stroke_body_rt->GetBitmap(
         res.draft_stroke_body_bitmap.ReleaseAndGetAddressOf());
     res.draft_stroke_body_raw_point_count = raw_point_count;
+    res.draft_stroke_body_point_count = stable_points.size();
     res.draft_stroke_stable_tail_start_index = tail_start_index;
     res.draft_stroke_style = style;
     res.draft_stroke_tip_shape = tip_shape;
@@ -2332,6 +2372,7 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     if (FAILED(hr)) {
         res.draft_stroke_body_bitmap.Reset();
         res.draft_stroke_body_raw_point_count = 0;
+        res.draft_stroke_body_point_count = 0;
         res.draft_stroke_stable_tail_start_index = 0;
         return false;
     }
@@ -2339,6 +2380,10 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     (void)res.draft_stroke_body_rt->GetBitmap(
         res.draft_stroke_body_bitmap.ReleaseAndGetAddressOf());
     res.draft_stroke_body_raw_point_count = plan.stable_raw_point_count;
+    res.draft_stroke_body_point_count = core::Smooth_freehand_points(
+                                            points.first(plan.stable_raw_point_count),
+                                            smoothing_mode, style.width_px)
+                                            .size();
     res.draft_stroke_stable_tail_start_index = plan.tail_start_index;
     return res.draft_stroke_body_bitmap != nullptr;
 }
@@ -2465,11 +2510,13 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
         if (preview_plan->stable_raw_point_count == 0) {
             res.draft_stroke_body_bitmap.Reset();
             res.draft_stroke_body_raw_point_count = 0;
+            res.draft_stroke_body_point_count = 0;
             res.draft_stroke_stable_tail_start_index = 0;
         }
     } else {
         res.draft_stroke_body_bitmap.Reset();
         res.draft_stroke_body_raw_point_count = 0;
+        res.draft_stroke_body_point_count = 0;
         res.draft_stroke_stable_tail_start_index = 0;
     }
 
@@ -2682,6 +2729,7 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                             std::span<const core::Annotation> annotations,
                             std::span<const AnnotationPreviewPatch> patches,
                             std::optional<uint64_t> skip_id) {
+
     auto const is_highlighter = [](core::Annotation const &ann) -> bool {
         auto const *fh = std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
         return fh && fh->freehand_tip_shape == core::FreehandTipShape::Square;
@@ -2709,41 +2757,90 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         core::Annotation const &ann = patch != nullptr ? *patch : annotations[i];
         if (can_multiply && is_highlighter(ann)) {
             auto const &fh = *std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
-
-            // Suspend rt so draft_stroke_rt can be used as scratch.
-            if (FAILED(rt->EndDraw())) {
-                rt->BeginDraw();
+            bool const use_cached_body =
+                Can_reuse_cached_square_commit(res, fh, i, annotations.size());
+            bool const cached_body_covers_annotation =
+                use_cached_body &&
+                res.draft_stroke_body_point_count >= fh.points.size();
+            size_t const tail_start_index =
+                use_cached_body && res.draft_stroke_body_point_count > 1
+                    ? res.draft_stroke_body_point_count - 1
+                    : 0;
+            std::span<const core::PointPx> const annotation_points = fh.points;
+            std::span<const core::PointPx> scratch_points =
+                cached_body_covers_annotation
+                    ? std::span<const core::PointPx>{}
+                    : (use_cached_body ? annotation_points.subspan(tail_start_index)
+                                       : annotation_points);
+            core::StrokeStyle const scratch_style =
+                use_cached_body ? Preview_draw_style(fh.style, fh.freehand_tip_shape)
+                                : fh.style;
+            float const multiply_alpha =
+                use_cached_body ? Alpha_from_opacity_percent(fh.style.opacity_percent)
+                                : 1.0f;
+            core::RectPx const highlighter_bounds =
+                core::Annotation_visual_bounds(ann).Normalized();
+            if (highlighter_bounds.Is_empty()) {
                 continue;
             }
+            D2D1_RECT_F const highlighter_rect = Rect(highlighter_bounds);
+            D2D1_POINT_2F const highlighter_target_offset =
+                D2D1::Point2F(highlighter_rect.left, highlighter_rect.top);
 
-            // Render the stroke at desired opacity into the scratch surface.
-            res.draft_stroke_rt->BeginDraw();
-            res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
-            Draw_freehand_points(res.draft_stroke_rt.Get(), res, fh.points, fh.style,
-                                 fh.freehand_tip_shape);
             bool drew_multiply = false;
-            if (SUCCEEDED(res.draft_stroke_rt->EndDraw())) {
-                Microsoft::WRL::ComPtr<ID2D1Bitmap> stroke_bmp;
-                if (SUCCEEDED(res.draft_stroke_rt->GetBitmap(
-                        stroke_bmp.ReleaseAndGetAddressOf()))) {
-                    // k1 = 1: opacity is already baked into the stroke by
-                    // Draw_freehand_points (single-pass FillGeometry, no accumulation).
-                    D2D1_VECTOR_4F const coeffs = {1.0f, 0.0f, 0.0f, 0.0f};
-                    (void)res.multiply_effect->SetValue(
-                        D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
-                    res.multiply_effect->SetInput(0, res.screenshot.Get());
-                    res.multiply_effect->SetInput(1, stroke_bmp.Get());
+            bool rt_needs_begin = false;
+            Microsoft::WRL::ComPtr<ID2D1Bitmap> stroke_bmp;
+            bool const needs_scratch = !cached_body_covers_annotation;
+            if (needs_scratch) {
+                // Suspend rt so draft_stroke_rt can be used as scratch.
+                if (FAILED(rt->EndDraw())) {
                     rt->BeginDraw();
-                    Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
-                    if (SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
-                        dc->DrawImage(res.multiply_effect.Get());
-                        drew_multiply = true;
-                    }
+                    continue;
+                }
+                rt_needs_begin = true;
+
+                {
+                    res.draft_stroke_rt->BeginDraw();
+                    res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
+                    Draw_freehand_points(res.draft_stroke_rt.Get(), res, scratch_points,
+                                         scratch_style, fh.freehand_tip_shape);
+                }
+                if (FAILED(res.draft_stroke_rt->EndDraw()) ||
+                    FAILED(res.draft_stroke_rt->GetBitmap(
+                        stroke_bmp.ReleaseAndGetAddressOf()))) {
+                    rt->BeginDraw();
+                    rt_needs_begin = false;
+                }
+            }
+
+            if (!rt_needs_begin || stroke_bmp != nullptr || cached_body_covers_annotation) {
+                if (rt_needs_begin) {
+                    rt->BeginDraw();
+                    rt_needs_begin = false;
+                }
+
+                // k1 carries user opacity when reusing the preview's opaque mask cache.
+                D2D1_VECTOR_4F const coeffs = {multiply_alpha, 0.0f, 0.0f, 0.0f};
+                (void)res.multiply_effect->SetValue(
+                    D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
+                res.multiply_effect->SetInput(0, res.screenshot.Get());
+                Set_committed_square_mask_input(res.multiply_effect.Get(), res,
+                                                stroke_bmp.Get(),
+                                                use_cached_body);
+                Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+                if (SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
+                    dc->DrawImage(res.multiply_effect.Get(), highlighter_target_offset,
+                                  highlighter_rect,
+                                  D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                                  D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                    drew_multiply = true;
                 }
             }
             if (!drew_multiply) {
                 // Fallback: re-enter and draw with normal SOURCE_OVER.
-                rt->BeginDraw();
+                if (rt_needs_begin) {
+                    rt->BeginDraw();
+                }
                 Draw_freehand_points(rt, res, fh.points, fh.style,
                                      fh.freehand_tip_shape);
             }
@@ -2771,6 +2868,7 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
                                 std::span<const core::Annotation> annotations,
                                 std::span<const AnnotationPreviewPatch> patches,
                                 std::optional<uint64_t> skip_id) {
+
     if (!res.annotations_rt) {
         return;
     }
@@ -2790,6 +2888,7 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
 
 void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
                            int vd_width, int vd_height) {
+
     if (!res.frozen_rt || !res.screenshot || !res.annotations_bitmap) {
         return;
     }

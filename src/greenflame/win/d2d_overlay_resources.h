@@ -47,6 +47,7 @@ struct D2DOverlayResources final {
     core::PointPx draft_stroke_last_point =
         {}; // last point rendered into draft_stroke_rt
     size_t draft_stroke_body_raw_point_count = 0;
+    size_t draft_stroke_body_point_count = 0;
     size_t draft_stroke_stable_tail_start_index = 0;
     std::optional<core::StrokeStyle> draft_stroke_style = std::nullopt;
     core::FreehandTipShape draft_stroke_tip_shape = core::FreehandTipShape::Round;
