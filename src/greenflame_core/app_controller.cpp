@@ -496,12 +496,9 @@ core::OverlayHelpContent AppController::Build_overlay_help_content() const {
         {L"O", L"Toggle Obfuscate tool"},
         {L"T", L"Toggle Text tool"},
         {L"N", L"Toggle Bubble tool"},
-        {L"Right Click",
-         L"Open the active tool's color wheel at cursor (except Obfuscate)"},
-        {L"Wheel Up / Ctrl + =",
-         L"Increase Brush/Highlighter/Line/Arrow/Rectangle/Ellipse/Obfuscate size"},
-        {L"Wheel Down / Ctrl + -",
-         L"Decrease Brush/Highlighter/Line/Arrow/Rectangle/Ellipse/Obfuscate size"},
+        {L"Right Click", L"Open color / selection wheel"},
+        {L"Wheel Up / Ctrl + =", L"Increase tool size"},
+        {L"Wheel Down / Ctrl + -", L"Decrease tool size"},
     };
     content.sections.push_back(std::move(tools));
 

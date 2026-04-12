@@ -403,6 +403,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - A help overlay opens near the cursor.
   - It shows the current shortcut reference.
+  - The `Keyboard Shortcuts` title and the `Ctrl+H or Esc to close` hint share the same visual header line; the close hint does not render higher than the title.
   - The shortcut list includes `Ctrl + K` for the captured-cursor toggle.
   - The shortcut list includes `Ctrl + P` for pinning the current selection to the desktop.
   - All listed shortcuts remain readable without clipping, and the `Annotation Tools` section stays in the second column.
@@ -413,6 +414,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Keyboard, `Esc`, and left-click dismissal all work.
   - After dismissing help with `Esc` or a left-click, the toolbar button under the
     cursor becomes hovered and clickable again without requiring mouse movement.
+- Regression: the help-overlay close hint previously rendered a few pixels too high relative to the title text.
 
 ### GF-MAN-UI-002 - Toolbar Placement And Tooltips
 

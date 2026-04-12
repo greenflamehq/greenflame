@@ -293,32 +293,64 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
     float const content_w = content_r - content_l;
     float const top_row = panel_t + kHelpTitleTopPaddingPxF;
 
-    auto draw_text = [&](IDWriteTextFormat *fmt, std::wstring_view text, float x,
-                         float y, float max_width, float max_height, D2D1_COLOR_F color,
-                         DWRITE_TEXT_ALIGNMENT align = DWRITE_TEXT_ALIGNMENT_LEADING) {
-        if (!fmt || text.empty()) {
-            return;
-        }
+    auto create_text_layout = [&](IDWriteTextFormat *fmt, std::wstring_view text,
+                                  float max_width, float max_height,
+                                  DWRITE_TEXT_ALIGNMENT align =
+                                      DWRITE_TEXT_ALIGNMENT_LEADING) {
         Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
+        if (!fmt || text.empty()) {
+            return layout;
+        }
         if (FAILED(dwrite->CreateTextLayout(
                 text.data(), static_cast<UINT32>(text.size()), fmt, max_width,
                 max_height, layout.GetAddressOf()))) {
-            return;
+            layout.Reset();
+            return layout;
         }
         layout->SetTextAlignment(align);
-        brush->SetColor(color);
-        rt->DrawTextLayout(D2D1::Point2F(x, y), layout.Get(), brush);
+        return layout;
     };
 
-    if (!content_->title.empty()) {
-        draw_text(dwrite_title_.Get(), content_->title, content_l, top_row, content_w,
-                  static_cast<float>(kTitleRowHeightPx), kHelpTitleColor);
+    auto draw_text_layout = [&](IDWriteTextLayout *layout, float x, float y,
+                                D2D1_COLOR_F color) {
+        if (layout == nullptr) {
+            return;
+        }
+        brush->SetColor(color);
+        rt->DrawTextLayout(D2D1::Point2F(x, y), layout, brush);
+    };
+
+    auto first_line_baseline = [](IDWriteTextLayout *layout) noexcept {
+        if (layout == nullptr) {
+            return 0.f;
+        }
+        DWRITE_LINE_METRICS line_metrics[1] = {};
+        UINT32 actual_line_count = 0;
+        if (FAILED(layout->GetLineMetrics(line_metrics, 1, &actual_line_count)) ||
+            actual_line_count == 0) {
+            return 0.f;
+        }
+        return line_metrics[0].baseline;
+    };
+
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> const title_layout =
+        create_text_layout(dwrite_title_.Get(), content_->title, content_w,
+                           static_cast<float>(kTitleRowHeightPx));
+    Microsoft::WRL::ComPtr<IDWriteTextLayout> const close_hint_layout =
+        create_text_layout(dwrite_body_.Get(), content_->close_hint, content_w,
+                           static_cast<float>(kCloseHintRowHeightPx),
+                           DWRITE_TEXT_ALIGNMENT_TRAILING);
+
+    draw_text_layout(title_layout.Get(), content_l, top_row, kHelpTitleColor);
+
+    float close_hint_y = top_row;
+    float const title_baseline = first_line_baseline(title_layout.Get());
+    float const close_hint_baseline = first_line_baseline(close_hint_layout.Get());
+    if (title_baseline > 0.f && close_hint_baseline > 0.f) {
+        close_hint_y += title_baseline - close_hint_baseline;
     }
-    if (!content_->close_hint.empty()) {
-        draw_text(dwrite_body_.Get(), content_->close_hint, content_l, top_row,
-                  content_w, static_cast<float>(kCloseHintRowHeightPx),
-                  kHelpCloseHintColor, DWRITE_TEXT_ALIGNMENT_TRAILING);
-    }
+    draw_text_layout(close_hint_layout.Get(), content_l, close_hint_y,
+                     kHelpCloseHintColor);
 
     float const sep_y = top_row + kHelpSeparatorOffsetPxF;
     brush->SetColor(kHelpSeparatorColor);
@@ -370,8 +402,10 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
             if (section.gap_before) {
                 row_y += kHelpRowHeightPxF;
             }
-            draw_text(dwrite_section_.Get(), section.title, desc_l, row_y,
-                      content_r - desc_l, kHelpRowHeightPxF, kBorderColor);
+            draw_text_layout(create_text_layout(dwrite_section_.Get(), section.title,
+                                                content_r - desc_l, kHelpRowHeightPxF)
+                                 .Get(),
+                             desc_l, row_y, kBorderColor);
             row_y += kHelpRowHeightPxF + kHelpSectionTitleBottomGapPxF;
 
             for (core::OverlayHelpEntry const &entry : section.entries) {
@@ -381,10 +415,15 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
                 if (entry.shortcut.empty()) {
                     continue;
                 }
-                draw_text(dwrite_key_.Get(), entry.shortcut, content_l, row_y,
-                          key_col_w, kHelpRowHeightPxF, kHelpShortcutColor);
-                draw_text(dwrite_body_.Get(), entry.description, desc_l, row_y,
-                          content_r - desc_l, kHelpRowHeightPxF, kHelpBodyColor);
+                draw_text_layout(create_text_layout(dwrite_key_.Get(), entry.shortcut,
+                                                    key_col_w, kHelpRowHeightPxF)
+                                     .Get(),
+                                 content_l, row_y, kHelpShortcutColor);
+                draw_text_layout(
+                    create_text_layout(dwrite_body_.Get(), entry.description,
+                                       content_r - desc_l, kHelpRowHeightPxF)
+                        .Get(),
+                    desc_l, row_y, kHelpBodyColor);
                 row_y += kHelpRowHeightPxF;
             }
             row_y += kHelpSectionGapPxF;
@@ -424,8 +463,10 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
             if (section.gap_before && col == 0) {
                 row_y += kHelpRowHeightPxF;
             }
-            draw_text(dwrite_section_.Get(), section.title, col_desc_l, row_y,
-                      col_r - col_desc_l, kHelpRowHeightPxF, kBorderColor);
+            draw_text_layout(create_text_layout(dwrite_section_.Get(), section.title,
+                                                col_r - col_desc_l, kHelpRowHeightPxF)
+                                 .Get(),
+                             col_desc_l, row_y, kBorderColor);
             row_y += kHelpRowHeightPxF + kHelpSectionTitleBottomGapPxF;
 
             for (core::OverlayHelpEntry const &entry : section.entries) {
@@ -439,10 +480,15 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
                 if (entry.shortcut.empty()) {
                     continue;
                 }
-                draw_text(dwrite_key_.Get(), entry.shortcut, col_l, row_y, key_col_w,
-                          kHelpRowHeightPxF, kHelpShortcutColor);
-                draw_text(dwrite_body_.Get(), entry.description, col_desc_l, row_y,
-                          col_r - col_desc_l, kHelpRowHeightPxF, kHelpBodyColor);
+                draw_text_layout(create_text_layout(dwrite_key_.Get(), entry.shortcut,
+                                                    key_col_w, kHelpRowHeightPxF)
+                                     .Get(),
+                                 col_l, row_y, kHelpShortcutColor);
+                draw_text_layout(
+                    create_text_layout(dwrite_body_.Get(), entry.description,
+                                       col_r - col_desc_l, kHelpRowHeightPxF)
+                        .Get(),
+                    col_desc_l, row_y, kHelpBodyColor);
                 row_y += kHelpRowHeightPxF;
             }
             row_y += kHelpSectionGapPxF;
