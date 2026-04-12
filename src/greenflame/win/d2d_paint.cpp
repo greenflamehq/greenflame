@@ -2187,15 +2187,13 @@ void Draw_preview_segments(ID2D1RenderTarget *render_target, D2DOverlayResources
            res.draft_stroke_tip_shape == core::FreehandTipShape::Square &&
            res.draft_stroke_smoothing_mode != core::FreehandSmoothingMode::Off &&
            res.draft_stroke_body_bitmap != nullptr &&
-           res.draft_stroke_body_point_count != 0 &&
-           !stroke.points.empty() &&
+           res.draft_stroke_body_point_count != 0 && !stroke.points.empty() &&
            res.draft_stroke_last_point == stroke.points.back() &&
            res.draft_stroke_body_point_count <= stroke.points.size();
 }
 
 void Set_committed_square_mask_input(ID2D1Effect *multiply_effect,
-                                     D2DOverlayResources &res,
-                                     ID2D1Bitmap *tail_bitmap,
+                                     D2DOverlayResources &res, ID2D1Bitmap *tail_bitmap,
                                      bool use_cached_body) noexcept {
     if (multiply_effect == nullptr) {
         return;
@@ -2337,10 +2335,10 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     (void)res.draft_stroke_body_rt->GetBitmap(
         res.draft_stroke_body_bitmap.ReleaseAndGetAddressOf());
     res.draft_stroke_body_raw_point_count = plan.stable_raw_point_count;
-    res.draft_stroke_body_point_count = core::Smooth_freehand_points(
-                                            points.first(plan.stable_raw_point_count),
-                                            smoothing_mode, style.width_px)
-                                            .size();
+    res.draft_stroke_body_point_count =
+        core::Smooth_freehand_points(points.first(plan.stable_raw_point_count),
+                                     smoothing_mode, style.width_px)
+            .size();
     res.draft_stroke_stable_tail_start_index = plan.tail_start_index;
     return res.draft_stroke_body_bitmap != nullptr;
 }
@@ -2714,8 +2712,7 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         auto const *const patch = find_patch(i);
         core::Annotation const &ann = patch != nullptr ? *patch : annotations[i];
         if (can_multiply && is_highlighter(ann)) {
-            GREENFLAME_PROFILE_SCOPE(
-                "D2DPaint::Draw_annotations_to_rt::Highlighter");
+            GREENFLAME_PROFILE_SCOPE("D2DPaint::Draw_annotations_to_rt::Highlighter");
             auto const &fh = *std::get_if<core::FreehandStrokeAnnotation>(&ann.data);
             bool const use_cached_body =
                 Can_reuse_cached_square_commit(res, fh, i, annotations.size());
@@ -2775,7 +2772,8 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                 }
             }
 
-            if (!rt_needs_begin || stroke_bmp != nullptr || cached_body_covers_annotation) {
+            if (!rt_needs_begin || stroke_bmp != nullptr ||
+                cached_body_covers_annotation) {
                 if (rt_needs_begin) {
                     rt->BeginDraw();
                     rt_needs_begin = false;
@@ -2787,8 +2785,7 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
                 res.multiply_effect->SetInput(0, res.screenshot.Get());
                 Set_committed_square_mask_input(res.multiply_effect.Get(), res,
-                                                stroke_bmp.Get(),
-                                                use_cached_body);
+                                                stroke_bmp.Get(), use_cached_body);
                 Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
                 if (SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
                     GREENFLAME_PROFILE_SCOPE(

@@ -157,12 +157,10 @@ TEST(selection_handles, BorderHighlightRects_CornerOverhangMatchesHandleThicknes
     SelectionHandleHighlightRects const rects =
         Border_highlight_rects(sel, SelectionHandle::TopLeft);
 
-    EXPECT_EQ(rects.primary, (RectPx::From_ltrb(
-                                 100 - kSelectionHandleCornerOverhangPx, 46, 116,
-                                 52)));
-    EXPECT_EQ(rects.secondary, (RectPx::From_ltrb(
-                                   96, 50 - kSelectionHandleCornerOverhangPx, 102,
-                                   66)));
+    EXPECT_EQ(rects.primary,
+              (RectPx::From_ltrb(100 - kSelectionHandleCornerOverhangPx, 46, 116, 52)));
+    EXPECT_EQ(rects.secondary,
+              (RectPx::From_ltrb(96, 50 - kSelectionHandleCornerOverhangPx, 102, 66)));
     EXPECT_TRUE(rects.has_secondary);
 }
 
