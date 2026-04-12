@@ -19,7 +19,6 @@ constexpr float kTextMeasureMaxExtent = 8192.f;
 constexpr float kMagnifierBorderInset = 0.75f;
 constexpr float kMagnifierBorderStrokeWidth = 1.5f;
 constexpr float kOverlayDimAlpha = 0.5f;
-constexpr float kCommittedSelectionBorderOutsideThicknessPx = 2.0f;
 constexpr float kDraftTextSelectionAlpha = 0.7f;
 constexpr float kDraftTextOverwriteCaretAlpha = 0.65f;
 constexpr float kSelectionWheelFontPreviewPointSize = 18.f;
@@ -216,7 +215,8 @@ void Draw_selection_border(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     float const b = static_cast<float>(bounds.bottom);
     // Committed selection chrome sits fully outside the clipped capture so it
     // remains visually distinct from the restored screenshot region.
-    float const outside = kCommittedSelectionBorderOutsideThicknessPx;
+    float const outside =
+        static_cast<float>(core::kCommittedSelectionBorderOutsideThicknessPx);
     rt->FillRectangle(D2D1::RectF(l - outside, t - outside, r + outside, t),
                       res.solid_brush.Get());
     rt->FillRectangle(D2D1::RectF(l - outside, b, r + outside, b + outside),
@@ -1010,58 +1010,14 @@ void Draw_border_highlight(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     if (sel.Is_empty()) {
         return;
     }
-    core::RectPx const r = sel.Normalized();
-    int const cw = std::min(core::kMaxCornerSizePx, r.Width() / 2);
-    int const ch = std::min(core::kMaxCornerSizePx, r.Height() / 2);
     res.solid_brush->SetColor(kBorderColor);
-
-    // Helper: draw a filled 3-pixel-wide line segment.
-    // Each arm overhangs 1 px beyond the rect edge on its outer side (the -1.f / +2.f
-    // offsets).
-    constexpr float arm_outer = 1.f; // outer overhang = 1 px
-    auto hline = [&](float x0, float x1, float y) {
-        rt->FillRectangle(D2D1::RectF(x0, y - 1.f, x1, y + 2.f), res.solid_brush.Get());
-    };
-    auto vline = [&](float x, float y0, float y1) {
-        rt->FillRectangle(D2D1::RectF(x - 1.f, y0, x + 2.f, y1), res.solid_brush.Get());
-    };
-
-    float const l = static_cast<float>(r.left);
-    float const t = static_cast<float>(r.top);
-    float const ri = static_cast<float>(r.right);
-    float const b = static_cast<float>(r.bottom);
-    float const fcw = static_cast<float>(cw);
-    float const fch = static_cast<float>(ch);
-
-    switch (handle) {
-    case core::SelectionHandle::Top:
-        hline(l + fcw, ri - fcw, t);
-        break;
-    case core::SelectionHandle::Bottom:
-        hline(l + fcw, ri - fcw, b - 1.f);
-        break;
-    case core::SelectionHandle::Left:
-        vline(l, t + fch, b - fch);
-        break;
-    case core::SelectionHandle::Right:
-        vline(ri - 1.f, t + fch, b - fch);
-        break;
-    case core::SelectionHandle::TopLeft:
-        hline(l - arm_outer, l + fcw, t);
-        vline(l, t - arm_outer, t + fch);
-        break;
-    case core::SelectionHandle::TopRight:
-        hline(ri - fcw, ri + arm_outer, t);
-        vline(ri - 1.f, t - arm_outer, t + fch);
-        break;
-    case core::SelectionHandle::BottomLeft:
-        hline(l - arm_outer, l + fcw, b - 1.f);
-        vline(l, b - fch, b + arm_outer);
-        break;
-    case core::SelectionHandle::BottomRight:
-        hline(ri - fcw, ri + arm_outer, b - 1.f);
-        vline(ri - 1.f, b - fch, b + arm_outer);
-        break;
+    core::SelectionHandleHighlightRects const rects =
+        core::Border_highlight_rects(sel, handle);
+    if (!rects.primary.Is_empty()) {
+        rt->FillRectangle(Rect(rects.primary), res.solid_brush.Get());
+    }
+    if (rects.has_secondary && !rects.secondary.Is_empty()) {
+        rt->FillRectangle(Rect(rects.secondary), res.solid_brush.Get());
     }
 }
 

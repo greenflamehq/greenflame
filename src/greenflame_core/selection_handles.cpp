@@ -7,6 +7,50 @@ namespace {
 constexpr int32_t kMinSize = 1;
 constexpr int kBorderHitBandPx = 5;
 
+[[nodiscard]] RectPx Horizontal_highlight_rect(int32_t left, int32_t right,
+                                               int32_t top, int32_t bottom) noexcept {
+    return RectPx::From_ltrb(left, top, right, bottom);
+}
+
+[[nodiscard]] RectPx Horizontal_highlight_rect_for_top(int32_t left, int32_t right,
+                                                       int32_t y) noexcept {
+    return RectPx::From_ltrb(
+        left,
+        y - (kCommittedSelectionBorderOutsideThicknessPx +
+             kSelectionHandleHighlightOutsideThicknessPx),
+        right, y + kSelectionHandleHighlightInsideThicknessPx);
+}
+
+[[nodiscard]] RectPx Horizontal_highlight_rect_for_bottom(int32_t left, int32_t right,
+                                                          int32_t y) noexcept {
+    return RectPx::From_ltrb(
+        left, y - kSelectionHandleHighlightInsideThicknessPx, right,
+        y + kCommittedSelectionBorderOutsideThicknessPx +
+            kSelectionHandleHighlightOutsideThicknessPx);
+}
+
+[[nodiscard]] RectPx Vertical_highlight_rect(int32_t left, int32_t right,
+                                             int32_t top, int32_t bottom) noexcept {
+    return RectPx::From_ltrb(left, top, right, bottom);
+}
+
+[[nodiscard]] RectPx Vertical_highlight_rect_for_left(int32_t x, int32_t top,
+                                                      int32_t bottom) noexcept {
+    return RectPx::From_ltrb(
+        x - (kCommittedSelectionBorderOutsideThicknessPx +
+             kSelectionHandleHighlightOutsideThicknessPx),
+        top, x + kSelectionHandleHighlightInsideThicknessPx, bottom);
+}
+
+[[nodiscard]] RectPx Vertical_highlight_rect_for_right(int32_t x, int32_t top,
+                                                       int32_t bottom) noexcept {
+    return RectPx::From_ltrb(
+        x - kSelectionHandleHighlightInsideThicknessPx, top,
+        x + kCommittedSelectionBorderOutsideThicknessPx +
+            kSelectionHandleHighlightOutsideThicknessPx,
+        bottom);
+}
+
 } // namespace
 
 std::optional<SelectionHandle> Hit_test_border_zone(RectPx selection,
@@ -56,6 +100,85 @@ std::optional<SelectionHandle> Hit_test_border_zone(RectPx selection,
     if (on_left && !in_tc && !in_bc) return SelectionHandle::Left;
 
     return std::nullopt;
+}
+
+SelectionHandleHighlightRects Border_highlight_rects(RectPx selection,
+                                                     SelectionHandle handle) noexcept {
+    RectPx const r = selection.Normalized();
+    if (r.Is_empty()) {
+        return {};
+    }
+
+    int32_t const corner_w = std::min(kMaxCornerSizePx, r.Width() / 2);
+    int32_t const corner_h = std::min(kMaxCornerSizePx, r.Height() / 2);
+    int32_t const overhang = kSelectionHandleCornerOverhangPx;
+
+    switch (handle) {
+    case SelectionHandle::Top:
+        return {.primary = Horizontal_highlight_rect_for_top(r.left + corner_w,
+                                                             r.right - corner_w,
+                                                             r.top)};
+    case SelectionHandle::Bottom:
+        return {.primary = Horizontal_highlight_rect_for_bottom(r.left + corner_w,
+                                                                r.right - corner_w,
+                                                                r.bottom)};
+    case SelectionHandle::Left:
+        return {.primary = Vertical_highlight_rect_for_left(r.left, r.top + corner_h,
+                                                            r.bottom - corner_h)};
+    case SelectionHandle::Right:
+        return {.primary = Vertical_highlight_rect_for_right(
+                    r.right, r.top + corner_h, r.bottom - corner_h)};
+    case SelectionHandle::TopLeft:
+        return {.primary = Horizontal_highlight_rect(
+                    r.left - overhang, r.left + corner_w,
+                    r.top - (kCommittedSelectionBorderOutsideThicknessPx +
+                             kSelectionHandleHighlightOutsideThicknessPx),
+                    r.top + kSelectionHandleHighlightInsideThicknessPx),
+                .secondary = Vertical_highlight_rect(
+                    r.left - (kCommittedSelectionBorderOutsideThicknessPx +
+                              kSelectionHandleHighlightOutsideThicknessPx),
+                    r.left + kSelectionHandleHighlightInsideThicknessPx,
+                    r.top - overhang, r.top + corner_h),
+                .has_secondary = true};
+    case SelectionHandle::TopRight:
+        return {.primary = Horizontal_highlight_rect(
+                    r.right - corner_w, r.right + overhang,
+                    r.top - (kCommittedSelectionBorderOutsideThicknessPx +
+                             kSelectionHandleHighlightOutsideThicknessPx),
+                    r.top + kSelectionHandleHighlightInsideThicknessPx),
+                .secondary = Vertical_highlight_rect(
+                    r.right - kSelectionHandleHighlightInsideThicknessPx,
+                    r.right + kCommittedSelectionBorderOutsideThicknessPx +
+                        kSelectionHandleHighlightOutsideThicknessPx,
+                    r.top - overhang, r.top + corner_h),
+                .has_secondary = true};
+    case SelectionHandle::BottomRight:
+        return {.primary = Horizontal_highlight_rect(
+                    r.right - corner_w, r.right + overhang,
+                    r.bottom - kSelectionHandleHighlightInsideThicknessPx,
+                    r.bottom + kCommittedSelectionBorderOutsideThicknessPx +
+                        kSelectionHandleHighlightOutsideThicknessPx),
+                .secondary = Vertical_highlight_rect(
+                    r.right - kSelectionHandleHighlightInsideThicknessPx,
+                    r.right + kCommittedSelectionBorderOutsideThicknessPx +
+                        kSelectionHandleHighlightOutsideThicknessPx,
+                    r.bottom - corner_h, r.bottom + overhang),
+                .has_secondary = true};
+    case SelectionHandle::BottomLeft:
+        return {.primary = Horizontal_highlight_rect(
+                    r.left - overhang, r.left + corner_w,
+                    r.bottom - kSelectionHandleHighlightInsideThicknessPx,
+                    r.bottom + kCommittedSelectionBorderOutsideThicknessPx +
+                        kSelectionHandleHighlightOutsideThicknessPx),
+                .secondary = Vertical_highlight_rect(
+                    r.left - (kCommittedSelectionBorderOutsideThicknessPx +
+                              kSelectionHandleHighlightOutsideThicknessPx),
+                    r.left + kSelectionHandleHighlightInsideThicknessPx,
+                    r.bottom - corner_h, r.bottom + overhang),
+                .has_secondary = true};
+    }
+
+    return {};
 }
 
 RectPx Resize_rect_from_handle(RectPx anchor, SelectionHandle handle,

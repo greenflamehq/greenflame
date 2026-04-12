@@ -19,12 +19,43 @@ enum class SelectionHandle : uint8_t {
 
 // Corner zone size used by both hit-testing and border highlight rendering.
 inline constexpr int kMaxCornerSizePx = 16;
+// Committed selection border sits fully outside the clipped capture by this many px.
+inline constexpr int kCommittedSelectionBorderOutsideThicknessPx = 2;
+// Hovered resize-handle highlight occupies:
+// - one border-width inside the selection
+// - the committed border strip itself
+// - one border-width beyond the committed border strip
+inline constexpr int kSelectionHandleHighlightInsideThicknessPx =
+    kCommittedSelectionBorderOutsideThicknessPx;
+inline constexpr int kSelectionHandleHighlightOutsideThicknessPx =
+    kCommittedSelectionBorderOutsideThicknessPx;
+inline constexpr int kSelectionHandleHighlightTotalThicknessPx =
+    kSelectionHandleHighlightInsideThicknessPx +
+    kCommittedSelectionBorderOutsideThicknessPx +
+    kSelectionHandleHighlightOutsideThicknessPx;
+// Corner arms extend past the perpendicular arm by the border plus the extra
+// outside highlight thickness.
+inline constexpr int kSelectionHandleCornerOverhangPx =
+    kCommittedSelectionBorderOutsideThicknessPx +
+    kSelectionHandleHighlightOutsideThicknessPx;
+
+struct SelectionHandleHighlightRects final {
+    RectPx primary = {};
+    RectPx secondary = {};
+    bool has_secondary = false;
+};
 
 // Hit-test against the border band. Returns the zone under the cursor,
 // or nullopt if not within kBorderHitBandPx px of any border edge.
 // Corner size = min(kMaxCornerSizePx, side/2) per axis.
 [[nodiscard]] std::optional<SelectionHandle>
 Hit_test_border_zone(RectPx selection, PointPx cursor_client_px) noexcept;
+
+// Filled highlight rectangles for the hovered/active selection resize handle.
+// Corner handles return two rects (horizontal + vertical arm); edge handles return
+// one.
+[[nodiscard]] SelectionHandleHighlightRects
+Border_highlight_rects(RectPx selection, SelectionHandle handle) noexcept;
 
 // Resize rect: anchor rect with the given handle moved to cursor position.
 // Opposite corner/edge stays fixed. Result is normalized and has minimum size 1x1.

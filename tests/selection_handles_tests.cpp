@@ -131,6 +131,41 @@ TEST(selection_handles, Hit_test_border_zone_DegenerateNarrowRect) {
     }
 }
 
+TEST(selection_handles, BorderHighlightRects_EdgeStraddlesBorderEvenly) {
+    RectPx const sel = RectPx::From_ltrb(100, 50, 200, 150);
+
+    SelectionHandleHighlightRects const rects =
+        Border_highlight_rects(sel, SelectionHandle::Top);
+
+    EXPECT_EQ(rects.primary, (RectPx::From_ltrb(116, 46, 184, 52)));
+    EXPECT_FALSE(rects.has_secondary);
+}
+
+TEST(selection_handles, BorderHighlightRects_LeftEdgeWrapsBothSidesOfBorder) {
+    RectPx const sel = RectPx::From_ltrb(100, 50, 200, 150);
+
+    SelectionHandleHighlightRects const rects =
+        Border_highlight_rects(sel, SelectionHandle::Left);
+
+    EXPECT_EQ(rects.primary, (RectPx::From_ltrb(96, 66, 102, 134)));
+    EXPECT_FALSE(rects.has_secondary);
+}
+
+TEST(selection_handles, BorderHighlightRects_CornerOverhangMatchesHandleThickness) {
+    RectPx const sel = RectPx::From_ltrb(100, 50, 200, 150);
+
+    SelectionHandleHighlightRects const rects =
+        Border_highlight_rects(sel, SelectionHandle::TopLeft);
+
+    EXPECT_EQ(rects.primary, (RectPx::From_ltrb(
+                                 100 - kSelectionHandleCornerOverhangPx, 46, 116,
+                                 52)));
+    EXPECT_EQ(rects.secondary, (RectPx::From_ltrb(
+                                   96, 50 - kSelectionHandleCornerOverhangPx, 102,
+                                   66)));
+    EXPECT_TRUE(rects.has_secondary);
+}
+
 TEST(selection_handles, Resize_rect_from_handle_TopLeft_MovesToCursor) {
     RectPx anchor = RectPx::From_ltrb(100, 50, 200, 150);
     PointPx cursor = {80, 40};
