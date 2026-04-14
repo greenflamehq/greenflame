@@ -834,6 +834,8 @@ OverlayAction OverlayController::On_pointer_move(
     std::optional<RectPx> window_rect_screen, RectPx virtual_desktop_bounds,
     std::optional<size_t> monitor_index_under_cursor, int32_t origin_x,
     int32_t origin_y) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     Update_virtual_desktop_client_bounds(virtual_desktop_bounds, origin_x, origin_y);
 
     bool const snap_enabled = !mods.alt;

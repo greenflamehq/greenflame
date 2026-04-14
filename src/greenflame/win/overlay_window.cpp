@@ -8,6 +8,7 @@
 #include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/pixel_ops.h"
+#include "greenflame_core/profiling.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/save_image_policy.h"
 #include "greenflame_core/selection_handles.h"
@@ -922,6 +923,8 @@ std::optional<HWND> OverlayWindow::Resolve_ctrl_preview_window(
 
 bool OverlayWindow::Update_ctrl_window_preview(HWND window,
                                                core::RectPx capture_rect_screen) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (resources_ == nullptr) {
         return false;
     }
@@ -1012,6 +1015,8 @@ bool OverlayWindow::Update_ctrl_window_preview(HWND window,
 
 core::PointPx OverlayWindow::Update_pointer_state_from_current_input(
     core::OverlayModifierState mods) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
 
     auto const &s = controller_.State();
@@ -1025,6 +1030,8 @@ core::PointPx OverlayWindow::Update_pointer_state_from_current_input(
     int32_t ox = 0;
     int32_t oy = 0;
     if (needs_preview) {
+        GREENFLAME_PROFILE_SCOPE(
+            "OverlayWindow::Update_pointer_state_from_current_input::Modifier_preview");
         cursor_screen = Get_cursor_pos_px();
         RECT wr{};
         GetWindowRect(hwnd_, &wr);
@@ -1046,18 +1053,27 @@ core::PointPx OverlayWindow::Update_pointer_state_from_current_input(
                 : std::nullopt;
     }
 
-    core::OverlayAction const action = controller_.On_pointer_move(
-        mods, cursor_client, cursor_screen, win_rect, vdesk, monitor_idx, ox, oy);
+    core::OverlayAction action = core::OverlayAction::None;
+    {
+        GREENFLAME_PROFILE_SCOPE(
+            "OverlayWindow::Update_pointer_state_from_current_input::Controller");
+        action = controller_.On_pointer_move(mods, cursor_client, cursor_screen,
+                                             win_rect, vdesk, monitor_idx, ox, oy);
+    }
     Apply_action(action);
     return cursor_client;
 }
 
 void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client) {
-    if (Refresh_hover_handle()) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    bool const hover_handle_changed = Refresh_hover_handle();
+    if (hover_handle_changed) {
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
-    if (Update_toolbar_hover_states(cursor_client)) {
+    bool const toolbar_hover_changed = Update_toolbar_hover_states(cursor_client);
+    if (toolbar_hover_changed) {
         InvalidateRect(hwnd_, nullptr, FALSE);
     }
 
@@ -1065,6 +1081,8 @@ void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client)
         (!controller_.Has_active_annotation_gesture() &&
          (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
           controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
+        GREENFLAME_PROFILE_SCOPE(
+            "OverlayWindow::Refresh_pointer_visual_overlays::Forced_redraw");
         RedrawWindow(hwnd_, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
@@ -2467,6 +2485,8 @@ LRESULT CALLBACK OverlayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wpar
 }
 
 void OverlayWindow::Apply_action(core::OverlayAction action) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (action != core::OverlayAction::None) {
         Rebuild_toolbar_buttons();
     }
@@ -3107,6 +3127,8 @@ LRESULT OverlayWindow::On_l_button_down() {
 }
 
 LRESULT OverlayWindow::On_mouse_move() {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (obfuscate_warning_dialog_.Is_visible()) {
         bool const hover_changed =
             obfuscate_warning_dialog_.Update_hover(Get_client_cursor_pos_px(hwnd_));
@@ -3821,6 +3843,8 @@ namespace {
 void Gather_monitor_client_rects(HWND hwnd,
                                  std::vector<core::MonitorWithBounds> const &monitors,
                                  std::vector<core::RectPx> &out) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     out.clear();
     out.reserve(monitors.size());
     RECT overlay_rect{};
@@ -3839,6 +3863,8 @@ void Gather_monitor_client_rects(HWND hwnd,
 } // namespace
 
 LRESULT OverlayWindow::On_paint() {
+    GREENFLAME_PROFILE_FUNCTION();
+
     PAINTSTRUCT paint{};
     HDC const hdc = BeginPaint(hwnd_, &paint);
     if (!hdc) {
@@ -3852,7 +3878,10 @@ LRESULT OverlayWindow::On_paint() {
     hotkey_help_overlay_.Hide_if_selection_unstable(Is_selection_stable_for_help());
 
     std::vector<core::RectPx> monitor_client_rects;
-    Gather_monitor_client_rects(hwnd_, s.cached_monitors, monitor_client_rects);
+    {
+        GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Gather_monitor_rects");
+        Gather_monitor_client_rects(hwnd_, s.cached_monitors, monitor_client_rects);
+    }
 
     core::PointPx cursor = Get_client_cursor_pos_px(hwnd_);
     bool const snap_enabled = (GetKeyState(VK_MENU) & 0x8000) == 0;
@@ -3883,10 +3912,13 @@ LRESULT OverlayWindow::On_paint() {
     // --- D2D render path ---
     if (d2d_resources_) {
         if (!d2d_resources_->annotations_valid) {
+            GREENFLAME_PROFILE_SCOPE(
+                "OverlayWindow::On_paint::Rebuild_annotations_cache");
             Rebuild_annotations_bitmap(*d2d_resources_, controller_.Annotations(), {},
                                        controller_.Editing_annotation_id());
         }
         if (!d2d_resources_->frozen_valid) {
+            GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Rebuild_frozen_cache");
             Rebuild_frozen_bitmap(*d2d_resources_, s.final_selection,
                                   resources_->display_capture.width,
                                   resources_->display_capture.height);
@@ -3898,56 +3930,62 @@ LRESULT OverlayWindow::On_paint() {
         std::vector<AnnotationPreviewPatch> patches;
         core::Annotation const *paint_draft_annotation = controller_.Draft_annotation();
         bool has_live_obfuscate_preview = false;
-        if (core::TextEditController *const text_edit = controller_.Active_text_edit();
-            text_edit != nullptr) {
-            draft_text_view = text_edit->Build_view();
-        }
-        if (obfuscate_source_provider_ != nullptr) {
-            std::vector<size_t> const preview_indices =
-                controller_.Active_obfuscate_preview_indices();
-            if (!preview_indices.empty()) {
-                patches.reserve(preview_indices.size());
-                for (size_t index : preview_indices) {
-                    if (index >= controller_.Annotations().size()) continue;
+        {
+            GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Prepare_input");
+            if (core::TextEditController *const text_edit =
+                    controller_.Active_text_edit();
+                text_edit != nullptr) {
+                draft_text_view = text_edit->Build_view();
+            }
+            if (obfuscate_source_provider_ != nullptr) {
+                GREENFLAME_PROFILE_SCOPE(
+                    "OverlayWindow::On_paint::Obfuscate_preview_patches");
+                std::vector<size_t> const preview_indices =
+                    controller_.Active_obfuscate_preview_indices();
+                if (!preview_indices.empty()) {
+                    patches.reserve(preview_indices.size());
+                    for (size_t index : preview_indices) {
+                        if (index >= controller_.Annotations().size()) continue;
 
-                    // Build lower-annotations span with already-computed patches
-                    // applied for correct stacking when multiple obfuscates overlap.
-                    std::span<const core::Annotation> lower_span =
-                        controller_.Annotations().first(index);
-                    std::vector<core::Annotation> lower_scratch;
-                    for (auto const &patch : patches) {
-                        if (patch.index < index) {
-                            if (lower_scratch.empty()) {
-                                lower_scratch.assign(lower_span.begin(),
-                                                     lower_span.end());
+                        // Build lower-annotations span with already-computed patches
+                        // applied for correct stacking when multiple obfuscates overlap.
+                        std::span<const core::Annotation> lower_span =
+                            controller_.Annotations().first(index);
+                        std::vector<core::Annotation> lower_scratch;
+                        for (auto const &patch : patches) {
+                            if (patch.index < index) {
+                                if (lower_scratch.empty()) {
+                                    lower_scratch.assign(lower_span.begin(),
+                                                         lower_span.end());
+                                }
+                                lower_scratch[patch.index] = patch.annotation;
                             }
-                            lower_scratch[patch.index] = patch.annotation;
+                        }
+                        if (!lower_scratch.empty()) {
+                            lower_span = lower_scratch;
+                        }
+
+                        std::optional<core::Annotation> rebuilt =
+                            Build_preview_obfuscate_annotation(
+                                controller_.Annotations()[index], lower_span,
+                                *obfuscate_source_provider_);
+                        if (rebuilt.has_value()) {
+                            patches.push_back({index, std::move(*rebuilt)});
+                            has_live_obfuscate_preview = true;
                         }
                     }
-                    if (!lower_scratch.empty()) {
-                        lower_span = lower_scratch;
-                    }
+                }
 
-                    std::optional<core::Annotation> rebuilt =
-                        Build_preview_obfuscate_annotation(
-                            controller_.Annotations()[index], lower_span,
-                            *obfuscate_source_provider_);
-                    if (rebuilt.has_value()) {
-                        patches.push_back({index, std::move(*rebuilt)});
+                if (paint_draft_annotation != nullptr &&
+                    std::holds_alternative<core::ObfuscateAnnotation>(
+                        paint_draft_annotation->data)) {
+                    draft_obfuscate_preview = Build_preview_obfuscate_annotation(
+                        *paint_draft_annotation, controller_.Annotations(),
+                        *obfuscate_source_provider_);
+                    if (draft_obfuscate_preview.has_value()) {
+                        paint_draft_annotation = &*draft_obfuscate_preview;
                         has_live_obfuscate_preview = true;
                     }
-                }
-            }
-
-            if (paint_draft_annotation != nullptr &&
-                std::holds_alternative<core::ObfuscateAnnotation>(
-                    paint_draft_annotation->data)) {
-                draft_obfuscate_preview = Build_preview_obfuscate_annotation(
-                    *paint_draft_annotation, controller_.Annotations(),
-                    *obfuscate_source_provider_);
-                if (draft_obfuscate_preview.has_value()) {
-                    paint_draft_annotation = &*draft_obfuscate_preview;
-                    has_live_obfuscate_preview = true;
                 }
             }
         }
@@ -4168,9 +4206,14 @@ LRESULT OverlayWindow::On_paint() {
         input.toolbar_buttons = std::span<IOverlayButton *const>(btn_ptrs);
         input.toolbar_button_glyphs = std::span<ID2D1Bitmap *const>(btn_glyphs);
 
-        bool const ok =
-            Paint_d2d_frame(*d2d_resources_, input, resources_->display_capture.width,
-                            resources_->display_capture.height, Active_top_layer());
+        bool ok = true;
+        {
+            GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Paint_d2d_frame");
+            ok = Paint_d2d_frame(*d2d_resources_, input,
+                                 resources_->display_capture.width,
+                                 resources_->display_capture.height,
+                                 Active_top_layer());
+        }
         if (!ok) {
             Handle_device_loss();
         }

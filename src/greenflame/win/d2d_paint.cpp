@@ -530,6 +530,8 @@ void Draw_coord_tooltip(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                         core::PointPx cursor,
                         std::span<const core::RectPx> monitor_rects_client,
                         int vd_width, int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!res.text_dim) {
         return;
     }
@@ -598,6 +600,8 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     core::PointPx cursor,
                     std::span<const core::RectPx> monitor_rects_client, int vd_width,
                     int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!res.screenshot || !res.factory) {
         return;
     }
@@ -665,15 +669,21 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     // Build ellipse geometry for clipping.
     Microsoft::WRL::ComPtr<ID2D1EllipseGeometry> ellipse_geo;
-    if (FAILED(res.factory->CreateEllipseGeometry(D2D1::Ellipse(center, radius, radius),
-                                                  ellipse_geo.GetAddressOf()))) {
-        return;
+    {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Draw_magnifier::Create_clip_geometry");
+        if (FAILED(res.factory->CreateEllipseGeometry(
+                D2D1::Ellipse(center, radius, radius), ellipse_geo.GetAddressOf()))) {
+            return;
+        }
     }
 
     // Push clip layer.
     Microsoft::WRL::ComPtr<ID2D1Layer> layer;
-    if (FAILED(rt->CreateLayer(nullptr, layer.GetAddressOf()))) {
-        return;
+    {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Draw_magnifier::Create_clip_layer");
+        if (FAILED(rt->CreateLayer(nullptr, layer.GetAddressOf()))) {
+            return;
+        }
     }
     D2D1_LAYER_PARAMETERS layer_params =
         D2D1::LayerParameters(D2D1::InfiniteRect(), ellipse_geo.Get());
@@ -681,6 +691,7 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     // Checkerboard background (covers the full magnifier area, tiled from source).
     {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Draw_magnifier::Checkerboard");
         constexpr int tile = 16; // kMagnifierCheckerTile
         int const tile_sx0 = src_x & ~1;
         int const tile_sy0 = src_y & ~1;
@@ -722,6 +733,7 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     // Zoomed screenshot — only cover sampled area.
     if (sample_l < sample_r && sample_t < sample_b) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Draw_magnifier::Draw_zoomed_screenshot");
         float const dst_l =
             mag_lf +
             static_cast<float>((sample_l - src_x) * kMagnifierZoom - half_zoom);
@@ -741,6 +753,7 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     // Crosshair arms (semi-transparent black body, white contour).
     {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Draw_magnifier::Crosshair_overlay");
         int const crosshair_left = (cx - src_x) * kMagnifierZoom - half_zoom;
         int const crosshair_top = (cy - src_y) * kMagnifierZoom - half_zoom;
         int const arm_left = std::clamp(crosshair_left, 0,
@@ -830,6 +843,8 @@ void Draw_dimension_labels(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                            std::optional<core::SizePx> selection_size_override,
                            int vd_w, int vd_h, bool show_side, bool show_center,
                            bool show_offscreen_capture_note) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!rt || !res.text_dim || !res.text_center || sel.Is_empty()) {
         return;
     }
@@ -1513,6 +1528,8 @@ void Draw_square_cursor_preview(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
 void Draw_toolbar(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                   D2DPaintInput const &input) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (input.toolbar_buttons.empty()) {
         return;
     }
@@ -1562,6 +1579,8 @@ void Draw_toolbar(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
 void Draw_selection_wheel(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                           D2DPaintInput const &input) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!input.show_selection_wheel || input.selection_wheel_segment_count == 0) {
         return;
     }
@@ -2254,6 +2273,8 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     core::StrokeStyle style, core::FreehandTipShape tip_shape,
     core::FreehandSmoothingMode smoothing_mode, size_t raw_point_count,
     size_t tail_start_index) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!res.draft_stroke_body_rt) {
         return false;
     }
@@ -2286,6 +2307,8 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     D2DOverlayResources &res, std::span<const core::PointPx> points,
     core::StrokeStyle style, core::FreehandSmoothingMode smoothing_mode,
     core::FreehandPreviewPlan const &plan) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     bool const cache_matches =
         res.draft_stroke_body_bitmap != nullptr &&
         res.draft_stroke_style == std::optional<core::StrokeStyle>(style) &&
@@ -2347,6 +2370,8 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     D2DOverlayResources &res, std::span<const core::PointPx> points,
     core::StrokeStyle style, core::FreehandTipShape tip_shape,
     core::FreehandSmoothingMode smoothing_mode, core::FreehandPreviewPlan const &plan) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!res.draft_stroke_rt || !res.draft_stroke_body_bitmap) {
         return false;
     }
@@ -2373,6 +2398,8 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     D2DOverlayResources &res, std::span<const core::PointPx> points,
     core::StrokeStyle style, core::FreehandSmoothingMode smoothing_mode,
     core::FreehandPreviewPlan const &plan) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!res.draft_stroke_rt) {
         return false;
     }
@@ -2406,6 +2433,8 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
                                 std::optional<core::StrokeStyle> const &style,
                                 core::FreehandTipShape tip_shape,
                                 core::FreehandSmoothingMode smoothing_mode) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (points.empty() || !style.has_value()) {
         Clear_draft_stroke_surface(res);
         return;
@@ -2423,8 +2452,12 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
         smoothing_mode != core::FreehandSmoothingMode::Off && points.size() > 2;
     std::optional<core::FreehandPreviewPlan> preview_plan = std::nullopt;
     if (uses_smoothed_preview) {
-        preview_plan.emplace(
-            core::Build_freehand_preview_plan(points, smoothing_mode, style->width_px));
+        {
+            GREENFLAME_PROFILE_SCOPE(
+                "D2DPaint::Update_draft_stroke_bitmap::Build_preview_plan");
+            preview_plan.emplace(core::Build_freehand_preview_plan(
+                points, smoothing_mode, style->width_px));
+        }
         bool drew_from_cached_body = false;
         if (preview_plan->stable_raw_point_count != 0) {
             bool body_ready = false;
@@ -2475,6 +2508,7 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
         res.draft_stroke_stable_tail_start_index = 0;
     }
 
+    GREENFLAME_PROFILE_SCOPE("D2DPaint::Update_draft_stroke_bitmap::Full_rebuild");
     res.draft_stroke_rt->BeginDraw();
     res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
 
@@ -2528,6 +2562,8 @@ void Set_live_square_draft_mask_input(ID2D1Effect *multiply_effect,
 
 void Draw_live_annotation_draft(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                 D2DPaintInput const &input) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (input.draft_text_annotation != nullptr) {
         Draw_draft_text(rt, res, input);
     } else if (input.draft_annotation != nullptr) {
@@ -2568,6 +2604,8 @@ void Draw_live_annotation_draft(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                      D2DPaintInput const &input, int vd_width, int vd_height,
                      bool draw_annotation_draft = true) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     // Draft annotation (while gesture is active).
     if (draw_annotation_draft) {
         Draw_live_annotation_draft(rt, res, input);
@@ -2889,19 +2927,27 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
 
 bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_width,
                      int vd_height, IOverlayTopLayer *top_layer) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (!res.hwnd_rt) {
         return true;
     }
 
-    Update_draft_stroke_bitmap(
-        res, input.draft_freehand_points, input.draft_freehand_style,
-        input.draft_freehand_tip_shape, input.draft_freehand_smoothing_mode);
+    {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Update_draft_stroke");
+        Update_draft_stroke_bitmap(res, input.draft_freehand_points,
+                                   input.draft_freehand_style,
+                                   input.draft_freehand_tip_shape,
+                                   input.draft_freehand_smoothing_mode);
+    }
 
     // When an annotation edit interaction is active, the annotation under the cursor
     // changes every frame. Rebuild annotations_bitmap with the live state now, before
     // hwnd_rt->BeginDraw(), so the normal blit path gets the correct multiply-blend
     // rendering for highlighters without any mid-frame EndDraw on hwnd_rt.
     if (input.annotation_editing) {
+        GREENFLAME_PROFILE_SCOPE(
+            "D2DPaint::Paint_d2d_frame::Rebuild_annotations_for_edit");
         Rebuild_annotations_bitmap(res, input.annotations, input.annotation_patches);
     }
 
@@ -2917,11 +2963,13 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     res.hwnd_rt->BeginDraw();
 
     if (is_steady_state) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Steady_state");
         // Fastest path: one GPU blit of the frozen composite.
         if (res.frozen_bitmap) {
             res.hwnd_rt->DrawBitmap(res.frozen_bitmap.Get());
         }
     } else {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Dynamic_frame");
         // Dynamic path: rebuild per frame from screenshot + annotations + dim +
         // selection restore.
         D2D1_RECT_F const full = D2D1::RectF(0.f, 0.f, static_cast<float>(vd_width),
@@ -2977,15 +3025,23 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
 
     // Draft visuals were already composited in the dynamic path above; skip them here
     // so Draw_live_layer does not draw them again on top of the dim.
-    Draw_live_layer(res.hwnd_rt.Get(), res, input, vd_width, vd_height,
-                    /*draw_annotation_draft=*/!has_live_annotation_draft);
+    {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Live_layer");
+        Draw_live_layer(res.hwnd_rt.Get(), res, input, vd_width, vd_height,
+                        /*draw_annotation_draft=*/!has_live_annotation_draft);
+    }
 
     if (top_layer != nullptr && top_layer->Is_visible()) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Top_layer");
         (void)top_layer->Paint_d2d(res.hwnd_rt.Get(), res.dwrite_factory.Get(),
                                    res.solid_brush.Get());
     }
 
-    HRESULT const hr = res.hwnd_rt->EndDraw();
+    HRESULT hr = S_OK;
+    {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::End_draw");
+        hr = res.hwnd_rt->EndDraw();
+    }
     return hr != D2DERR_RECREATE_TARGET;
 }
 

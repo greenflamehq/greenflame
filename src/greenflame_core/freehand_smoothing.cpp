@@ -1,4 +1,5 @@
 #include "greenflame_core/freehand_smoothing.h"
+#include "greenflame_core/profiling.h"
 
 namespace greenflame::core {
 
@@ -279,6 +280,8 @@ std::string_view Freehand_smoothing_mode_token(FreehandSmoothingMode mode) noexc
 std::vector<PointPx> Smooth_freehand_points(std::span<const PointPx> points,
                                             FreehandSmoothingMode mode,
                                             int32_t stroke_width_px) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (mode == FreehandSmoothingMode::Off || points.size() <= 2) {
         return {points.begin(), points.end()};
     }
@@ -296,6 +299,8 @@ std::vector<PointPx> Smooth_freehand_points(std::span<const PointPx> points,
 FreehandPreviewPlan Build_freehand_preview_plan(std::span<const PointPx> points,
                                                 FreehandSmoothingMode mode,
                                                 int32_t stroke_width_px) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (mode == FreehandSmoothingMode::Off || points.size() <= 2) {
         return FreehandPreviewPlan{
             .stable_raw_point_count = 0,

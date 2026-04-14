@@ -1,6 +1,7 @@
 #include "greenflame/win/d2d_annotation_draw.h"
 
 #include "greenflame/win/d2d_draw_helpers.h"
+#include "greenflame_core/profiling.h"
 
 namespace greenflame {
 
@@ -328,6 +329,8 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               std::span<const core::PointPx> points,
                               core::StrokeStyle style,
                               core::FreehandTipShape tip_shape) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     if (render_target == nullptr || context.factory == nullptr ||
         context.solid_brush == nullptr || context.round_cap_style == nullptr ||
         points.empty()) {
@@ -423,6 +426,8 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
 void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                          D2DAnnotationDrawContext context,
                          core::Annotation const &annotation) {
+    GREENFLAME_PROFILE_FUNCTION();
+
     std::visit(core::Overloaded{
                    [&](core::FreehandStrokeAnnotation const &freehand) {
                        Draw_d2d_freehand_points(render_target, context, freehand.points,
