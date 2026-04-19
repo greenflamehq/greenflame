@@ -24,6 +24,7 @@ Correctness, especially DPI and coordinate behavior, takes priority over conveni
 - [docs/build.md](docs/build.md): configure/build/lint/static-analysis expectations
 - [docs/testing.md](docs/testing.md): test philosophy, build/run commands, and policy
 - [README.md](README.md): user-facing behavior, CLI semantics, and exit code table
+- [docs/index.md](docs/index.md): optional documentation TOC for finding the right secondary doc quickly; the three items above still take precedence
 
 Before considering any task complete:
 
