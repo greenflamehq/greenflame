@@ -1,14 +1,13 @@
 ---
 title: Captured Cursor Design
-summary: Adds optional captured-cursor retention for interactive and CLI captures,
-  with persistent config, overlay toggle, and CLI overrides.
+summary: Current reference for Greenflame's captured-cursor capture, overlay toggle, tray persistence, and live-capture export behavior.
 audience:
   - contributors
   - qa
-status: draft
+status: reference
 owners:
   - core-team
-last_updated: 2026-03-27
+last_updated: 2026-04-19
 tags:
   - capture
   - overlay
@@ -19,628 +18,346 @@ tags:
 
 # Captured Cursor Design
 
-## Overview
+This document describes the current shipped captured-cursor implementation.
 
-Greenflame currently captures the desktop image but does not preserve the cursor
-as part of the captured scene. This feature adds support for capturing the cursor
-image and its position at capture time, then optionally showing that frozen
-cursor inside the overlay and in the final saved or copied output.
+It replaces the earlier proposal-style version of this file. The implementation,
+tests, and higher-priority reference docs are authoritative when this document is
+updated.
 
-The feature is intentionally **not** a live-cursor feature. It applies to the
-captured image only.
+For user-facing behavior, see [README.md](../README.md). For shared overlay and
+toolbar behavior, see [docs/annotation_tools.md](../annotation_tools.md). For CLI
+window-capture backend semantics, see [cli_window_capture.md](cli_window_capture.md).
 
-The desired end state is:
+## Current Status
 
-- interactive capture can show or hide the captured cursor after the capture is
-  already on screen
-- the captured cursor always renders **below annotations**
-- the captured cursor is never selectable, movable, resizable, or undoable as an
+Captured-cursor support is already shipped across the live-capture paths:
+
+- interactive overlay capture
+- direct tray and global-hotkey clipboard captures
+- CLI live captures
+- pinned-image creation from the interactive overlay
+
+Current invariants:
+
+- the captured cursor is sampled from the live screen capture, not from imported
+  `--input` images
+- the captured cursor is part of screenshot content, not an annotation
+- when shown, it is composited below annotations
+- it is never selectable, movable, resizable, deletable, or undoable as an
   annotation object
-- a toolbar button and `Ctrl+K` toggle the captured cursor on or off
-- the toggle state persists across captures and across app restarts
-- CLI capture defaults to the persisted config value and can be overridden by
-  `--cursor` or `--no-cursor` without changing the config
-- direct tray and hotkey clipboard captures honor the same persisted cursor
-  preference
+- the persisted default lives at `capture.include_cursor`
 
-## Terminology
+Current default behavior:
 
-This feature needs strict terminology because "cursor" can refer to two different
-things during overlay use.
+- default value is `false`
+- the key is omitted from serialized config when it remains `false`
+- absent config parses as `false`
 
-- **Captured cursor**: a frozen cursor image plus metadata sampled at capture
-  time. This is part of the screenshot content.
-- **Live cursor**: the current OS pointer the user uses to interact with the
-  overlay UI after capture.
-
-This document uses **captured cursor** for the feature and **live cursor** for
-normal pointer interaction.
-
-## Goals
-
-- Preserve the cursor from the original screen capture as an optional visual layer.
-- Keep captured-cursor positioning correct in physical pixels on mixed-DPI,
-  multi-monitor desktops.
-- Allow the user to toggle the captured cursor during the interactive overlay.
-- Keep the captured cursor outside the annotation model.
-- Persist the default include/exclude preference in config.
-- Let CLI invocations override that preference without mutating config.
-- Reuse one cursor-compositing model for interactive output and CLI output.
-
-## Non-goals
-
-- Treating the captured cursor as an annotation.
-- Allowing the captured cursor to be selected, moved, resized, deleted with the
-  annotation system, or included in undo/redo.
-- Capturing a live cursor for `--input` images or any other imported image source.
-- Animating cursors in output. A still image captures a single sampled frame.
-- Solving Greenshot's I-beam issue preemptively without evidence. The design must
-  reduce the risk and test for it, but the root cause is not confirmed.
-
-## Greenshot Reference
-
-DeepWiki research on `greenshot/greenshot` indicates that Greenshot handles the
-cursor as a separate captured artifact rather than baking it into the base screen
-bitmap up front.
-
-Confirmed findings from the repo research:
-
-- Greenshot captures cursor data separately from the screenshot bitmap.
-- Greenshot tracks cursor image data, visibility, position, and hotspot-aware
-  placement.
-- Greenshot renders or inserts the cursor later in the editor flow instead of
-  requiring it to be part of the original screen bitmap.
-- DeepWiki points to `WindowCapture.CaptureCursor`, `Capture` / `ICapture`,
-  `CaptureForm`, and editor-surface code as the relevant areas.
-- Greenshot documents a known issue that the **I-beam cursor is not displayed
-  correctly in the final result**. DeepWiki attributes that note to
-  `installer/additional_files/readme.txt`.
-
-What is **not** confirmed from the Greenshot repo research:
-
-- no documented root cause for the I-beam issue was found
-- no documented workaround for the I-beam issue was found
-
-Reasonable but unconfirmed inference:
-
-- hotspot handling is a likely risk area, but it is not enough to claim that
-  hotspot math alone explains Greenshot's I-beam bug
-
-Design consequence for Greenflame:
-
-- Greenflame should also model the captured cursor separately from annotations
-  and from the base screenshot
-- Greenflame should preserve explicit hotspot metadata
-- Greenflame should treat I-beam and other cursor families as a validation focus,
-  not as a solved problem
-
-## Current Greenflame Baseline
-
-Relevant current behavior:
-
-- the interactive overlay starts from a capture-first model
-- the virtual desktop is captured as a `GdiCaptureResult`
-- annotations are rendered later and composited into the output
-- the toolbar currently contains annotation tools, then a spacer, then help
-- annotation tools are inactive until a capture region exists
-- overlay rendering and interaction operate in physical pixels
-- CLI save paths and interactive save paths already have shared output concerns,
-  but there is no captured-cursor layer today
-
-This matters because the new feature should fit the existing architecture:
-
-- keep cursor capture and bitmap conversion in the Win32 layer
-- keep annotation behavior in `greenflame_core`
-- do not introduce the captured cursor as a `core::Annotation`
-
-## Recommended User Experience
+## User Model
 
 ### Interactive overlay
 
-When an interactive capture starts, Greenflame should capture:
+When the overlay opens, `OverlayWindow` always attempts to capture both:
 
-- the base desktop image
-- the current cursor image, if one is available
-- the cursor hotspot position in screen physical pixels
-- the cursor hotspot offset within the cursor image
+- the full virtual-desktop bitmap
+- one frozen cursor snapshot for that capture session
 
-The overlay should initialize the captured-cursor visibility from config.
+That snapshot is retained for the full overlay lifetime even when the persisted
+setting currently hides it. This is why turning the feature on mid-session can
+still reveal the cursor that was sampled at capture time.
 
-Behavior:
+Current overlay controls:
 
-- if the setting is on and a cursor sample exists, the captured cursor is visible
-  immediately in the overlay background
-- if the setting is off, the captured cursor is hidden even if a cursor sample
-  exists
-- toggling the setting updates the current overlay immediately
-- the captured cursor always renders below annotations
-- the captured cursor never participates in hit testing, selection, move, resize,
-  delete, undo, redo, copy, or annotation serialization
+- `Ctrl+K` toggles captured-cursor visibility
+- the toolbar contains a dedicated captured-cursor button
+- the button uses the same stable cursor glyph in both states
+- the button is active when the captured cursor is currently shown
 
-### Toolbar button
+Current toolbar layout is:
 
-The toolbar order should become:
+`[annotation tools][spacer][cursor][pin][spacer][help]`
 
-`[annotation tools] [spacer] [captured cursor toggle] [spacer] [help]`
+Current tooltip behavior:
 
-The button should use a **single stable cursor icon**, not dual "cursor" /
-"no-cursor" icons.
+- shown state: `Hide captured cursor (Ctrl+K)`
+- hidden state: `Show captured cursor (Ctrl+K)`
+- when the current capture has no usable sampled cursor, the tooltip appends
+  ` - no captured cursor in this image`
 
-Rationale:
+Current interaction rules:
 
-- dual icons are ambiguous about whether they represent the **current state** or
-  the **action that will happen when clicked**
-- adding a separate toggle active/inactive treatment on top of that makes the
-  semantics harder to read, not easier
-- Greenflame already has an active/inactive button treatment, so state should be
-  expressed by button styling and tooltip text, not by swapping the glyph meaning
-
-Button rules:
-
-- icon in both states: `cursor.png`
-- toggled-on state means "captured cursor is currently shown"
-- toggled-off state means "captured cursor is currently hidden"
-- the button is not an annotation tool and does not affect the active annotation
-  tool selection
-- clicking the button toggles the captured-cursor visibility state
-
-Recommendation:
-
-- do not use `cursor-no.png` for the primary toolbar toggle in the first
-  iteration
-- if that asset is kept, reserve it for a future explicit action surface only if
-  the UX clearly communicates action rather than state
-
-Because the toolbar is currently selection-anchored, the button inherits that
-behavior:
-
-- the toolbar button is only visible when the toolbar itself is visible
-- the hotkey remains the way to toggle before a selection exists
-
-### Hotkey
-
-`Ctrl+K` toggles captured-cursor visibility.
-
-Rules:
-
-- it should work whether or not an annotation tool is active
-- it should not clear or change the active annotation tool
-- it should be blocked by higher-priority modal/top-layer UI such as the help
-  overlay or the obfuscate warning dialog
-
-### Persistence semantics
-
-The toggle is a persisted preference, not a temporary edit-only switch.
-
-Recommended behavior:
-
-- clicking the toolbar button or pressing `Ctrl+K` updates the current overlay
+- toggling the captured cursor does not change the active annotation tool
+- the toggle affects the frozen screenshot only, never the live editing pointer
+- the cursor remains outside hit testing, selection, annotation copy/paste, and
+  undo/redo
+- saved output, copied output, and pinned output all reflect the current visible
   state
-- the same action also updates the persisted config immediately
-- if the user cancels the current capture afterward, the new preference still
-  applies to the next capture
 
-This matches the feature request more closely than treating the toggle as a
-per-capture-only choice.
+### Direct tray and hotkey clipboard captures
 
-Scope of the persisted preference:
+The non-overlay clipboard paths have no post-capture editor, so they use only the
+persisted default.
 
-- applies to interactive overlay captures
-- applies to direct tray and hotkey clipboard captures that perform a live capture
-- applies to CLI live captures unless overridden by `--cursor` or `--no-cursor`
-- does not apply to `--input` because imported images do not have a live
-  capture-time cursor sample
+Current behavior:
 
-### Captures with no available cursor sample
+- tray `Capture current window`
+- tray `Capture current monitor`
+- tray `Capture full screen`
+- tray `Capture last region`
+- tray `Capture last window`
+- `Ctrl + Prt Scrn`
+- `Shift + Prt Scrn`
+- `Ctrl + Shift + Prt Scrn`
+- `Alt + Prt Scrn`
+- `Ctrl + Alt + Prt Scrn`
 
-Some captures may have no usable cursor sample because the cursor was not visible
-or the OS capture step could not provide one.
+All honor `capture.include_cursor` directly.
 
-Recommended behavior:
+### CLI live captures
 
-- keep the toggle available because it controls the persisted default for future
-  captures
-- if the current capture has no cursor sample, toggling changes the preference but
-  has no visible effect on the current image
-- the tooltip should make this clear for the current capture, for example by
-  indicating that no captured cursor is available in this image
-
-This avoids needing a separate settings surface just to change the default.
-
-## Config Design
-
-### Proposed key
-
-Persist the setting as:
-
-`capture.include_cursor`
-
-### Rationale
-
-This should not live under `tools` because the captured cursor is not an
-annotation tool.
-
-This should not live under `ui` because the setting affects CLI output behavior
-too.
-
-This should not live under `save` because it affects captured content, not naming
-or encoding policy.
-
-`capture.include_cursor` scopes the setting to capture content and leaves room for
-future capture-related options.
-
-### Behavior
-
-- type: boolean
-- default: `false`
-- parser default when absent: `false`
-- serializer writes only when `true`, matching the current write-non-defaults
-  config style
-
-Recommended default: `false`
-
-Reason:
-
-- it preserves today's behavior for existing users
-- it avoids surprising users by suddenly including a cursor in screenshots after an
-  upgrade
-
-## CLI Design
-
-### New options
+Live CLI captures use the persisted config value by default and allow per-run
+override flags:
 
 - `--cursor`
 - `--no-cursor`
 
-### Semantics
+Current CLI rules:
 
-For capture-producing CLI flows:
-
-1. Start from `capture.include_cursor`.
-2. If `--cursor` is present, force inclusion for that invocation.
-3. If `--no-cursor` is present, force exclusion for that invocation.
-
-Rules:
-
+- default behavior resolves from `capture.include_cursor`
+- `--cursor` forces inclusion for one invocation
+- `--no-cursor` forces exclusion for one invocation
 - `--cursor` and `--no-cursor` are mutually exclusive
-- neither option writes back to config
+- neither flag mutates the saved config
+- both flags are rejected for `--input`
 
-Outside CLI:
+`--input` images never have a live cursor sample, so excluding these flags is
+intentional current behavior, not a future proposal.
 
-- direct tray and hotkey clipboard captures use `capture.include_cursor`
-- interactive overlay captures initialize from `capture.include_cursor` but allow
-  the user to change the current and persisted state with the toolbar button or
-  `Ctrl+K`
+## Data Model And Ownership
 
-### Scope
+### Core policy state
 
-These switches should apply only to CLI flows that actually perform a live screen
-or window capture.
+`greenflame_core` owns the policy-level state only:
 
-Recommended validation rule:
+- `AppConfig::include_cursor`
+- `CliCursorOverride`
+- `CaptureSaveRequest::include_cursor`
 
-- reject `--cursor` and `--no-cursor` when `--input` is used
+`AppController` resolves effective CLI behavior through
+`Resolve_include_cursor(...)`, which folds:
 
-Reason:
+- persisted config
+- `--cursor`
+- `--no-cursor`
 
-- imported images do not have a live capture-time cursor sample
-- silently accepting the switches for `--input` would imply behavior Greenflame
-  cannot honor correctly
+The direct clipboard paths also read `config_.include_cursor` directly when they
+dispatch copy requests to the capture service.
 
-The error should fail loudly and name the incompatible options.
+### Win32 snapshot model
 
-## Architecture And Ownership
+The Win32 layer owns cursor acquisition and compositing.
 
-### Principle
+The current `CapturedCursorSnapshot` stores:
 
-The captured cursor is **capture metadata plus a renderable bitmap**, not an
-annotation.
+- an owned copied `HCURSOR`
+- `image_width`
+- `image_height`
+- `hotspot_screen_px`
+- `hotspot_offset_px`
 
-That implies:
+Current helper boundaries:
 
-- Win32 capture code owns cursor acquisition and bitmap normalization
-- overlay rendering owns display of the captured cursor
-- output rendering owns compositing the captured cursor into saved or copied images
-- `greenflame_core` owns only the persisted preference and CLI parse state that are
-  needed for policy
+- `Capture_cursor_snapshot(...)`
+  - samples the visible cursor
+  - copies the icon handle
+  - records hotspot position in physical screen pixels
+  - derives size from either the color bitmap or the mask bitmap
+- `Composite_cursor_snapshot(...)`
+  - translates hotspot-based screen coordinates into the target bitmap's local
+    coordinate space
+  - draws with `DrawIconEx`
+  - omits fully out-of-bounds cursors without treating that as an error
 
-### Keep it out of the annotation model
+This keeps cursor-specific Win32 details out of the annotation model and out of
+CLI parsing code.
 
-Do **not** model the cursor as:
+### Overlay ownership
 
-- `core::Annotation`
-- an annotation tool
-- annotation-controller state
-- annotation-preparation payload
+`OverlayWindow` owns the interactive session artifacts:
 
-Why:
+- `base_capture`
+- `display_capture`
+- optional `captured_cursor`
+- optional lifted full-window capture bitmaps for the `Ctrl` quick-select path
 
-- the user explicitly does not want it selectable or movable
-- annotations are user-created markup; the captured cursor is captured scene data
-- putting the cursor into annotations would create wrong semantics for hit testing,
-  undo, copy/paste, and future feature work
+Current responsibility split:
 
-### Proposed Win32-side cursor snapshot
+- `OverlayWindow`
+  - captures and stores the per-session cursor snapshot
+  - rebuilds display bitmaps when visibility changes
+  - applies the current visible state to save/copy/pin flows
+- `GreenflameApp`
+  - owns persisted app config in memory
+  - exposes tray-menu toggle events
+- `TrayWindow`
+  - exposes the persisted default as a checked menu item
+- `Win32CaptureService`
+  - handles direct clipboard capture and CLI save composition
 
-The Win32 layer should normalize the cursor into a durable snapshot type. Exact
-type names can change, but the snapshot should contain at least:
+## Capture And Composition Pipeline
 
-- `available`: whether a usable cursor sample exists
-- `bitmap`: a 32bpp top-down bitmap or equivalent owned image data
-- `bitmap_size_px`: width and height in physical pixels
-- `hotspot_offset_px`: hotspot offset within the cursor image in physical pixels
-- `hotspot_screen_px`: hotspot position in virtual-desktop screen physical pixels
+### Overlay session pipeline
 
-Recommended storage rule:
+Current interactive pipeline:
 
-- store the **hotspot screen position**, not only the image top-left
+1. Capture the virtual desktop into `resources_->base_capture`.
+2. Attempt `Capture_cursor_snapshot(...)`.
+3. Build `resources_->display_capture` from the base capture plus the current
+   visibility flag.
+4. Upload the display bitmap into the D2D overlay renderer.
+5. Paint annotations and overlay chrome separately above that screenshot layer.
 
-Reason:
+Because annotations are painted after `display_capture`, the captured cursor
+always stays below committed annotations and draft previews.
 
-- the hotspot is the real semantic cursor location
-- drawing into overlay client space and cropped output space becomes a simple,
-  explicit translation:
-  - `draw_top_left = hotspot_screen_px - hotspot_offset_px - target_origin_px`
+### Mid-session toggle behavior
 
-### Ownership lifetime
+Current toggle behavior is implemented by
+`OverlayWindow::Toggle_captured_cursor_visibility()`.
 
-For interactive capture:
+On each toggle, the overlay:
 
-- store the cursor snapshot next to the captured desktop image for the lifetime of
-  the overlay session
+1. flips `config_->include_cursor`
+2. rebuilds the display bitmap from `base_capture` plus the stored cursor snapshot
+3. rebuilds toolbar state and uploads the new screenshot layer
+4. attempts to persist the updated config
 
-For CLI capture:
+If rebuilding the display bitmap fails, the in-memory toggle is rolled back.
 
-- either capture the cursor inline in the save path or reuse the same lower-level
-  helper that produces the snapshot
+### Save, copy, pin, and export layering
 
-Recommendation:
+Interactive output uses two stages:
 
-- share the same cursor-normalization and compositing helpers between interactive
-  and CLI paths
-- avoid exposing Win32 cursor handles outside the Win32 layer
+- `Build_selection_capture(...)`
+  - crops the base capture for the current selection
+  - composites the captured cursor only when it is currently visible
+- `Build_rendered_selection_capture(...)`
+  - starts from that selection capture
+  - rasterizes annotations into it
 
-## Capture And Render Pipeline
+That rendered result is then used by:
 
-### Interactive capture pipeline
+- save
+- copy to clipboard
+- pin to desktop
 
-Recommended pipeline:
+As a result, pinned images match the rendered overlay export: the captured cursor
+is included only when currently shown, and it still sits below annotations.
 
-1. Capture the virtual desktop bitmap.
-2. Capture and normalize the cursor snapshot.
-3. Open the overlay with both artifacts retained.
-4. Render the base desktop image.
-5. If captured-cursor visibility is enabled and a cursor snapshot exists, render
-   the captured cursor.
-6. Render committed annotations.
-7. Render in-progress annotation previews and remaining overlay chrome.
+### Direct clipboard and CLI composition
 
-This keeps the cursor visually under annotations while still behaving like part of
-the original scene.
+`Win32CaptureService` uses the same basic ordering for non-overlay outputs:
 
-### Saved and copied output
+1. capture source bitmap
+2. capture cursor snapshot when `include_cursor` is enabled
+3. composite cursor into the source or padded canvas
+4. render annotations
+5. copy or save final bitmap
 
-When the user saves or copies the final selection:
+The helper `Maybe_composite_captured_cursor(...)` centralizes the
+"include only when requested and valid" gate for the save paths.
 
-1. Crop the base capture as today.
-2. If captured-cursor visibility is enabled and the cursor intersects the cropped
-   output, composite the cursor into the cropped capture.
-3. Render annotations into the result.
-4. Save or copy the final bitmap.
+## Window Capture And WGC Interaction
 
-This ordering is required by the feature request.
+The current WGC path intentionally disables backend-native cursor capture:
 
-### Direct tray and hotkey clipboard captures
+- `wgc_window_capture.cpp` calls `session.IsCursorCaptureEnabled(false)`
 
-For non-overlay live captures triggered directly from the tray or capture hotkeys:
+Greenflame then samples its own cursor snapshot and composites it later using the
+same helper path as the non-WGC flows.
 
-1. Perform the live capture.
-2. If `capture.include_cursor` is enabled, capture and normalize the cursor
-   snapshot.
-3. Composite the cursor into the output image.
-4. Copy the final bitmap to the clipboard.
+Current consequences:
 
-These flows do not expose a post-capture toggle because they do not open the
-overlay editor.
+- WGC window capture never bakes in a second backend-provided cursor
+- `Ctrl+K` still fully hides or shows the one Greenflame-managed captured cursor
+- exported results keep one consistent layering rule regardless of window-capture
+  backend
 
-### CLI output
+The interactive `Ctrl` window quick-select path also rebuilds its lifted
+full-window display bitmap through the same cursor-compositing helper, so the
+lifted preview stays consistent with the main screenshot layer.
 
-For live capture CLI flows:
+## Persistence And Config Semantics
 
-1. Perform the screen or window capture.
-2. If cursor inclusion is enabled, capture and normalize the cursor snapshot.
-3. Composite the cursor into the output image before annotations.
-4. Render annotations.
-5. Save output.
+The captured-cursor default is persisted at:
 
-If the final CLI path already routes through a common output compositor, reuse it.
+- `capture.include_cursor`
 
-## Positioning, DPI, And Correctness Rules
+Current parse/serialize behavior in `app_config_json.*`:
 
-The captured cursor must obey Greenflame's existing correctness rules:
+- parser accepts only booleans
+- non-boolean values are rejected
+- serializer writes the key only when it differs from the default
 
-- all stored cursor geometry must be in physical pixels
-- no implicit DIP conversion
-- all boundary conversions must be explicit and localized
+Current toggle entry points differ slightly:
 
-Positioning rules:
+- tray menu toggle:
+  - flips the persisted default through `GreenflameApp::On_set_include_cursor_enabled`
+  - rolls back on save failure
+  - shows a warning balloon when persistence fails
+- overlay toggle:
+  - updates the current overlay immediately
+  - attempts to persist the new default after rebuilding the display
 
-- cursor sampling should use virtual-desktop screen coordinates
-- overlay rendering converts screen coordinates to overlay client coordinates by
-  subtracting the overlay window origin
-- output rendering converts screen coordinates to crop-local coordinates by
-  subtracting the crop origin
+Both are current implementation details and should stay aligned if this area is
+refactored.
 
-Cropping rules:
+## Correctness Rules
 
-- if the cursor lies fully outside the cropped output, draw nothing
-- if the cursor partially overlaps the cropped output, clip normally and draw the
-  visible portion
+Captured-cursor handling follows Greenflame's normal coordinate rules:
 
-Multi-monitor rules:
+- hotspot and target origins are tracked in physical pixels
+- overlay placement is derived from virtual-desktop screen coordinates
+- composition uses explicit origin subtraction, not implicit DPI conversion
+- partially intersecting cursors clip normally
+- fully out-of-bounds cursors are omitted without error
 
-- support negative-coordinate monitors
-- support mixed DPI without reinterpreting cursor coordinates in DIP space
+The current acquisition helper supports both:
 
-## Cursor Acquisition Notes
+- color-bitmap cursors
+- mask-based cursors
 
-The exact Win32 API sequence can be finalized during implementation, but the design
-should assume these requirements:
+I-beam, resize, crosshair, busy/wait, and custom cursors remain important manual
+validation targets, but they are validation focus areas rather than open design
+questions in this document.
 
-- acquire the currently visible cursor and its hotspot metadata from the OS
-- normalize the cursor into owned 32bpp pixel data at capture time
-- preserve alpha correctly
-- support both normal alpha cursors and older mask-based cursor representations
+## Existing Coverage
 
-Recommended implementation guardrails:
+Key automated coverage already exists in:
 
-- do not store raw `HCURSOR` handles as the long-lived session representation
-- do not assume the bitmap origin is the hotspot
-- do not special-case only arrow cursors; validate text, resize, crosshair, and
-  custom cursors too
+- `tests/app_config_tests.cpp`
+- `tests/cli_options_tests.cpp`
+- `tests/app_controller_tests.cpp`
 
-## I-beam Risk And Mitigation
+Covered areas include:
 
-Greenshot's known I-beam issue is the strongest external warning for this feature.
+- default `capture.include_cursor = false`
+- parse/serialize behavior for `capture.include_cursor`
+- rejection of non-boolean config values
+- CLI parsing for `--cursor`
+- CLI parsing for `--no-cursor`
+- rejection of `--cursor --no-cursor`
+- rejection of cursor overrides with `--input`
+- direct clipboard paths honoring the persisted config
+- CLI save requests honoring both config defaults and explicit overrides
 
-Facts:
+Key manual coverage already exists in `docs/manual_test_plan.md`, especially:
 
-- Greenshot documents that the I-beam cursor may not display correctly in final
-  output
-- the available research did not reveal a documented root cause
+- `GF-MAN-CURSOR-001`
+- `GF-MAN-CURSOR-002`
+- `GF-MAN-CURSOR-002A`
+- `GF-MAN-CURSOR-003`
+- `GF-MAN-PIN-001` for rendered pin parity
 
-Risks for Greenflame:
-
-- hotspot math may be correct for most cursors but still wrong for some cursor
-  families
-- cursor bitmap extraction may differ between alpha cursors and mask-based cursors
-- DPI scaling or system-provided cursor resources may behave differently for text
-  cursors
-
-Mitigation strategy:
-
-- preserve hotspot metadata explicitly
-- normalize every captured cursor through one renderable bitmap path
-- add manual coverage for I-beam, resize, crosshair, wait, and custom cursors
-- validate on mixed-DPI, multi-monitor setups, especially where monitors have
-  negative virtual-desktop coordinates
-- if a cursor sample is obviously invalid, prefer omitting it over drawing it in a
-  clearly wrong location
-
-The last point is intentionally conservative. A missing captured cursor is less
-damaging than a visibly misplaced one that undermines trust in output correctness.
-
-## UI And Help Content
-
-The overlay help content should be updated later to include:
-
-- `Ctrl+K` for toggling the captured cursor
-- a short explanation that this affects the **captured** cursor, not the live one
-
-Suggested help wording:
-
-- `Ctrl+K` - show or hide the captured cursor in this screenshot
-
-Tooltip guidance:
-
-- on state: `Hide captured cursor (Ctrl+K)`
-- off state: `Show captured cursor (Ctrl+K)`
-- if no sample exists in the current capture, append a short note that the current
-  image has no captured cursor available
-
-The tooltip should carry the **action** wording. The button styling should carry
-the **state** wording. The icon itself should stay semantically stable.
-
-## Proposed Implementation Touchpoints
-
-This document is design-only, but the likely implementation areas are:
-
-- `src/greenflame_core/app_config.*`
-  - add `capture.include_cursor`
-- `src/greenflame_core/cli_options.*`
-  - add `--cursor` and `--no-cursor`
-- `src/greenflame/win/gdi_capture.*`
-  - capture and normalize the cursor snapshot
-  - provide cursor compositing helpers
-- `src/greenflame/win/overlay_window.*`
-  - add `Ctrl+K`
-  - add the toolbar button and spacer layout
-  - store per-session cursor snapshot and visibility state
-- `src/greenflame/win/d2d_paint.*`
-  - draw captured cursor between screenshot and annotations
-- `src/greenflame/win/win32_services.*`
-  - apply cursor compositing in save/copy/CLI paths as needed
-- `src/greenflame_core/app_services.*`
-  - flow cursor policy through direct clipboard capture paths if those remain on
-    a separate service boundary
-- `README.md`
-  - document the new toggle, hotkey, config, and CLI switches
-- `docs/manual_test_plan.md`
-  - add end-to-end validation cases
-
-## Testing Impact
-
-If the implementation adds or changes code in `greenflame_core`, automated tests
-are required under the repository rules.
-
-Expected automated coverage:
-
-- config parse and serialize tests for `capture.include_cursor`
-- CLI parse tests for:
-  - `--cursor`
-  - `--no-cursor`
-  - mutual exclusion
-  - incompatibility with `--input`
-
-Win32-only rendering and OS cursor acquisition are not good unit-test targets in
-`greenflame_core`. Those should be covered in the human test plan.
-
-Recommended manual coverage additions:
-
-- toggle on/off with toolbar button after region selection
-- toggle on/off with `Ctrl+K`
-- persistence across multiple captures
-- persistence across application restarts
-- save and clipboard output with cursor shown
-- save and clipboard output with cursor hidden
-- direct tray window/monitor/desktop copy with cursor shown
-- direct tray window/monitor/desktop copy with cursor hidden
-- mixed-DPI multi-monitor placement
-- negative-coordinate monitor placement
-- cursor partially intersecting the crop boundary
-- text I-beam cursor
-- resize cursors
-- crosshair cursor
-- wait/busy cursor
-- a custom application cursor if available
-- `--cursor` and `--no-cursor` CLI overrides
-- validation failure for `--input --cursor` and `--input --no-cursor`
-
-## Recommended Decisions Summary
-
-To remove ambiguity before implementation, this document recommends:
-
-- config key: `capture.include_cursor`
-- default value: `false`
-- interactive overlay always captures cursor metadata when possible, even if the
-  current setting is off
-- toolbar button changes both the current overlay state and the persisted default
-- captured cursor remains outside the annotation model
-- cursor compositing happens before annotation compositing
-- direct tray and hotkey clipboard captures honor the persisted config value
-- CLI overrides are transient and rejected for `--input`
-- missing or invalid cursor samples should fail safe by omitting the cursor rather
-  than drawing it in an obviously wrong location
-
-## Open Questions
-
-These are the main design questions that implementation should confirm early:
-
-- whether the current Win32 cursor-capture path can reliably normalize mask-based
-  cursors and alpha cursors through one helper without quality loss
-- whether the overlay should expose any stronger visual hint than tooltip text when
-  the current capture has no cursor sample
-- whether window-capture backends need backend-specific cursor handling, or whether
-  one desktop-relative cursor path is sufficient for the first iteration
-
-None of these questions block the core design direction in this document.
+Future changes in this area should keep the cursor as captured scene content and
+should not route it through the annotation model.

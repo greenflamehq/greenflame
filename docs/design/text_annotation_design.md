@@ -1,688 +1,341 @@
 ---
 title: Text Annotation Design
-summary: Proposed UX and architecture for a new text annotation tool in the interactive overlay.
-audience: contributors
-status: proposed
+summary: Current reference for Greenflame's interactive text annotation workflow, re-edit behavior, and implementation boundaries.
+audience:
+  - contributors
+status: reference
 owners:
   - core-team
-last_updated: 2026-03-13
+last_updated: 2026-04-19
 tags:
   - overlay
   - annotations
   - text
-  - proposal
+  - clipboard
+  - spell-check
 ---
 
 # Text Annotation Design
 
-This document defines the proposed behavior and implementation shape for a new
-interactive **Text annotation** tool.
+This document describes the current shipped Text tool implementation in the
+interactive overlay.
 
-It is intentionally written as an implementation handoff for another agent or
-contributor. It assumes the current annotation architecture described in
-[docs/annotation_tools.md](annotation_tools.md).
+It replaces the earlier proposal-style version of this file. The implementation,
+tests, and higher-priority reference docs are authoritative when this document is
+updated.
 
-## Goals
+For shared annotation architecture, see [docs/annotation_tools.md](../annotation_tools.md).
+For the Text/Bubble hub-and-ring selection wheel, see
+[text_style_wheel_redesign.md](text_style_wheel_redesign.md).
 
-- Add a new `Text tool` to the existing annotation toolbar and hotkey system.
-- Keep the existing ownership model:
-  - Win32/D2D/DWrite remain in `src/greenflame/win/`
-  - behavior and edit policy remain in `greenflame_core`
-- Preserve the current correctness rules:
-  - overlay-space storage stays in **physical pixels**
-  - save/copy output uses the same committed representation as selection/hit-test
-- Keep the tool usable enough for day-one screenshot annotation:
-  - multi-line text
-  - caret movement and selection
-  - style-flag formatting during draft editing
-  - move/delete after commit
+## Current Status
 
-## Non-goals For V1
+Text annotations are shipped and support both:
 
-- Re-editing a committed text annotation after pressing `Enter`
-- IME-specific composition UI beyond normal `WM_CHAR` text input
-- Arbitrary text box resize or automatic word-wrap
-- Rich-text clipboard interop beyond plain `CF_UNICODETEXT`
-- Per-range font, color, or point-size changes inside a live draft
+- creating a new text annotation from the Text tool
+- re-editing a committed text annotation in place
 
-Those can be added later, but they materially increase scope and do not appear in
-the current requirement set.
+Two areas in particular drifted from the original proposal and are now part of
+the current implementation:
 
-## UX Specification
+- committed text is re-editable
+- draft clipboard operations round-trip rich text style flags through RTF and
+  HTML clipboard formats, not just plain text
 
-### Tool activation
+The current implementation keeps one uniform base style per annotation for:
 
-- New toolbar button: `Text tool`
-- New hotkey: `T`
-- Registry order:
-  - Brush
-  - Highlighter
-  - Line
-  - Arrow
-  - Rectangle
-  - Filled Rectangle
-  - Text
-  - Help
-- When the active tool is `Text`, the overlay cursor is `IDC_IBEAM`.
-- Border resize handles still take priority over the text tool exactly as they do
-  for the other tools.
+- color
+- font slot / resolved font family
+- point size
 
-### Text tool states
+Per-range variation is limited to the four text style flags:
 
-The tool has two live interaction states:
+- bold
+- italic
+- underline
+- strikethrough
 
-1. `Armed`
-   - `Text` is the active tool, but no draft annotation exists yet.
-   - Cursor is I-beam.
-   - Left-click starts a new draft edit session at the clicked point.
-   - Right-click opens the text style wheel.
-   - Mouse-wheel and `Ctrl+=` / `Ctrl+-` step the persisted text size.
+## User Model
 
-2. `Editing`
-   - A draft text annotation exists.
-   - Keyboard input edits the draft.
-   - Mouse input inside the draft moves the caret or creates/extends a selection.
-   - Left-click in the canvas outside the current draft finalizes or discards the
-     current draft and immediately starts a new draft at the clicked point.
-   - Right-click is ignored.
-   - Mouse-wheel and `Ctrl+=` / `Ctrl+-` are ignored.
-   - Pressing `Enter` commits the draft as a normal annotation and returns to the
-     `Armed` state with the `Text` tool still active.
-   - Pressing `Esc` cancels the draft and returns to the `Armed` state.
+### Armed Text tool
 
-### New draft defaults
+With the Text tool active and no draft open:
 
-Every new draft starts with:
+- the overlay shows an `I-beam` cursor plus the existing text placement preview
+- left-click inside the capture selection starts a new draft
+- right-click or bare `Tab` opens the Text style wheel
+- mouse-wheel and `Ctrl+=` / `Ctrl+-` change the persisted text size step
 
-- empty text
-- plain style flags: bold off, italic off, underline off, strikethrough off
-- current annotation color slot from the shared 8-color palette
-- current text font choice from config
-- current text size from config, default `12 pt`
-- insert mode enabled
-- a fresh draft-local undo/redo history seeded with the empty snapshot
+Each new draft inherits its base style from the current tool defaults:
 
-`Edition always start plain` applies only to the four style flags. Color, font,
-and size still come from the current persisted tool defaults.
+- color from the shared annotation color selection
+- font slot from `tools.text.current_font`
+- point size from `tools.text.size`, mapped through
+  `kTextSizePtTable` (`1..50` -> `5..288 pt`)
 
-### Text layout model
+Current default behavior is:
 
-- A draft starts at the clicked point and is **top-left anchored** at that point.
-- Text is **left-aligned**.
-- There is **no automatic wrapping** in V1.
-- Multi-line text is created only by `Ctrl+Enter`.
-- Color, font choice, and point size are captured at draft creation and are uniform
-  for the whole draft and committed annotation in V1.
-- Only the four style flags (`Bold`, `Italic`, `Underline`, `Strikethrough`) may
-  vary by text range within a draft.
-- The visual bounds grow as text is inserted.
-- As with existing annotations, text is stored in overlay coordinates and may
-  extend outside the capture selection; save/copy include only the intersecting
-  pixels.
+- `tools.text.size = 10`
+- step `10` maps to `14 pt`
 
-### Keyboard behavior while editing
+Draft placement uses the clicked cursor position plus a small implementation
+offset so the preview glyph and the actual text baseline align visually.
 
-While a text draft is active, the text editor owns these inputs:
+### Live draft editing
 
-- text insertion via `WM_CHAR`
-- caret motion:
-  - `Left`, `Right`, `Up`, `Down`
-  - `Home`, `End`
-  - `PgUp`, `PgDn`
-  - `Ctrl+Left`, `Ctrl+Right`
-  - `Ctrl+Home`, `Ctrl+End`
-  - all shift-extended variants for selection
-- deletion:
-  - `Backspace`
-  - `Delete`
-  - `Ctrl+Backspace`
-  - `Ctrl+Delete`
-  - selected-range delete via either key
-- mode toggle:
-  - `Insert` toggles insert vs overwrite
-- formatting toggles:
-  - `Ctrl+B`
-  - `Ctrl+I`
-  - `Ctrl+U`
-  - `Alt+Shift+5`
-- clipboard editing:
-  - `Ctrl+A` selects the whole draft
-  - `Ctrl+C` copies the selected text to the Windows clipboard as plain
-    `CF_UNICODETEXT`
-  - `Ctrl+X` cuts the selected text to the clipboard
-  - `Ctrl+V` pastes plain Unicode text, replacing the selection if present
-- draft-local undo/redo:
-  - `Ctrl+Z` undoes within the current draft only
-  - `Ctrl+Shift+Z` redoes within the current draft only, matching the current
-    overlay redo binding
-- finalize/cancel:
-  - `Enter` commits
-  - `Ctrl+Enter` inserts newline
-  - `Esc` cancels the draft
+While a draft is active, `TextEditController` owns text editing behavior.
 
-Additional V1 rules:
+Current editing behavior includes:
 
-- `Ctrl+S` does **not** save the screenshot while editing; global save shortcuts
-  remain suppressed while a draft is active.
-- `Alt+Shift+5` is the strikethrough shortcut for text editing in V1.
-- `Ctrl+=`, `Ctrl+-`, and the mouse wheel do **not** change text size while a
-  draft is live.
-- `PgUp` and `PgDn` move to document start/end in V1 because the editor has no
-  scroll viewport.
-- Clipboard paste accepts plain Unicode text only; incoming `CRLF` or `CR`
-  line endings are normalized to internal `LF`.
-- Save/copy screenshot shortcuts and overlay-level annotation undo/redo are
-  suppressed while editing and resume after the draft is committed or canceled.
+- text insertion through `WM_CHAR`
+- caret movement by character, word, line, and document
+- mouse selection using layout-engine hit testing
+- backspace/delete, including word variants
+- insert vs. overwrite mode
+- `Ctrl+B`, `Ctrl+I`, `Ctrl+U`, and `Alt+Shift+5`
+- `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`
+- draft-local `Ctrl+Z` and `Ctrl+Shift+Z`
+- `Ctrl+Enter` newline insertion
+- `Enter` commit
+- `Esc` cancel
 
-### Formatting semantics
+Current draft rules:
 
-Only the four style flags are editable during a live draft.
+- right-click does not open the style wheel while editing
+- mouse-wheel and `Ctrl+=` / `Ctrl+-` do not change text size while editing
+- overlay-global shortcuts such as screenshot save/copy and session undo/redo are
+  suppressed while the text editor has focus
+- explicit newlines are supported and layout remains `no-wrap`
 
-- If the selection is empty:
-  - style toggles update the current typing style
-- If the selection is non-empty:
-  - style toggles apply to the selected range
+Pointer behavior while a draft is active:
 
-Recommended toggle rule for selected text:
+- clicking inside the draft moves the caret or starts a selection drag
+- clicking outside the draft commits a non-empty draft or discards an empty one
+- when the Text tool remains active and the outside click lands inside the
+  capture selection, a fresh draft starts at that click point
+- clicking a toolbar button first commits or discards the current draft, then
+  applies the toolbar action without starting a replacement draft
 
-- if the entire selection already has the flag, toggle it off for the whole range
-- otherwise toggle it on for the whole range
+### Spell-check behavior
 
-Color, font, and point size do **not** change during editing:
+Live spell-check is optional and applies only while editing.
 
-- the text style wheel is unavailable while a draft exists
-- size stepping is unavailable while a draft exists
-- those values are selected before the draft starts and apply to the whole
-  annotation
+Current behavior:
 
-### Mouse behavior while editing
+- language tags come from `tools.text.spell_check_languages`
+- `OverlayWindow` rebuilds the spell-check service when that config changes
+- `TextEditController` requests spell results on layout rebuild
+- squiggles are visible only in the live draft view
+- committed annotations, saved output, and copied images never include squiggles
+- when multiple languages are configured, a word is flagged only if every active
+  checker reports it as misspelled
 
-- Left-click inside the draft:
-  - place caret if no drag follows
-  - start mouse selection if drag follows
-- Left-click and drag:
-  - extend selection to the hit-tested text position
-- Left-click in the canvas outside the draft:
-  - if the current draft is empty, discard it
-  - if the current draft is non-empty, commit it as one annotation
-  - after either case, start a new draft at the clicked point because the tool
-    remains armed
-- Right-click:
-  - ignored while editing
-- Mouse-wheel:
-  - ignored while editing
+### Clipboard behavior
 
-### Insert vs overwrite mode
+Clipboard behavior is richer than the original proposal.
 
-- Default is insert mode.
-- `Insert` toggles overwrite mode.
-- Overwrite mode replaces the next character on the current line when possible.
-- If the caret is at line end or immediately before a newline, insertion behaves
-  like normal insert mode.
-- Visual cue:
-  - insert mode: thin caret
-  - overwrite mode: block caret spanning the next glyph advance when available
+Current copy/cut behavior:
 
-### Mouse-wheel size stepping
+- `Ctrl+C` and `Ctrl+X` export the selected text as:
+  - `CF_UNICODETEXT`
+  - `CF_RTF`
+  - Windows `"HTML Format"`
+- when there is no selection, Greenflame leaves the clipboard unchanged
 
-- Text size is independent from `brush_width`.
-- Config default: `12 pt`
-- Allowed sizes:
-  - `5, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72, 84, 96, 108, 144, 192, 216, 288`
-- While the `Text` tool is armed and no draft is active:
-  - mouse-wheel up/down moves to the previous/next entry in that list
-  - `Ctrl+=` / `Ctrl+-` do the same
-- While editing, those inputs do nothing.
-- Size persists to config immediately when changed.
-- Reuse the existing centered transient overlay, but show values as `12 pt`
-  instead of `12 px`.
+Current paste behavior:
 
-### Right-click wheel
+- `Ctrl+V` tries `CF_RTF` first
+- if no usable RTF is present, it tries HTML clipboard data
+- if no usable rich format is present, it falls back to plain text
 
-The existing selection wheel becomes a text-specific **style wheel** while the active
-tool is `Text` and no draft is active.
+Current fidelity rules:
 
-- Left half:
-  - the existing 8 annotation colors
-- Right half:
-  - 4 font choices:
-    - Sans
-    - Serif
-    - Mono
-    - Art
+- bold, italic, underline, and strikethrough are preserved through rich-text
+  copy/paste
+- font face, point size, and color are intentionally discarded on rich-text
+  import
+- plain-text paste uses the current typing style
+- incoming `CRLF` and bare `CR` are normalized to internal `LF`
 
-Recommended presentation:
+## Re-editing Committed Text
 
-- left-half color wedges remain solid-color wedges
-- right-half wedges use a neutral fill and display a large lowercase `m`
-  rendered in the target font
-- `m` is preferred here because it makes `Sans`, `Serif`, `Mono`, and `Art`
-  visually distinct with the default families while remaining readable at wheel
-  size
+Committed text annotations are re-editable in the current implementation.
 
-Wheel behavior:
+Re-edit entry rules:
 
-- hover highlights the hovered segment
-- left-click applies the hovered color or font choice for the **next** draft and
-  closes the wheel
-- `Esc` closes the wheel without changes
-- starting a draft closes the wheel if it is visible
-- while editing, right-click does not open the wheel
+- no annotation tool may be active
+- no text draft may already be active
+- exactly one annotation must be selected
+- that selected annotation must be a `TextAnnotation`
+- double-click enters text editing at the clicked hit-tested position
 
-## Config
+This works for both already-selected and newly double-clicked text annotations,
+because the normal default-mode click path can select the annotation before the
+double-click path begins re-editing.
 
-Add the following `[tools]` keys:
+Implementation model:
 
-- `text_size_points=12`
-- `text_current_font=sans`
-- `text_font_sans=Arial`
-- `text_font_serif=Times New Roman`
-- `text_font_mono=Courier New`
-- `text_font_art=Comic Sans MS`
+- `AnnotationController` records the target id in `editing_annotation_id_`
+- the draft is pre-populated from the committed annotation's origin, base style,
+  and logical runs
+- the same `TextEditController` used for new drafts is reused for re-edit
 
-Normalization rules:
+Current re-edit outcomes:
 
-- `text_size_points`
-  - if not in the allowed list, clamp to the nearest allowed value
-- `text_current_font`
-  - valid values: `sans`, `serif`, `mono`, `art`
-  - if invalid or empty, restore `sans`
-- font family strings
-  - trim surrounding whitespace
-  - if empty after trimming, restore the choice default
-  - cap length to `128` UTF-16 code units
+- commit updates the existing annotation through `UpdateAnnotationCommand`
+- cancel leaves the original annotation unchanged
+- committing an empty result leaves the original annotation unchanged and does
+  not push a new undo entry
+- undo after a committed re-edit restores the previous committed text
 
-The `Text` tool uses the existing shared annotation palette keys:
+While re-editing:
 
-- `current_color`
-- `color_0` through `color_7`
+- selected-annotation resize handles stay hidden
+- the live draft bounds temporarily replace the stored committed bounds for the
+  marquee, so the selection frame tracks the edited text correctly
 
-## Core Model
+## Data Model And Ownership
 
-### New enums and structs
+### Core data types
 
-Add:
+Committed text is represented by `TextAnnotation`, which stores:
 
-- `AnnotationToolId::Text`
-- `AnnotationToolbarGlyph::Text`
-- `AnnotationKind::Text`
-- `TextAnnotationBaseStyle`
-  - `COLORREF color`
-  - `TextFontChoice font_choice`
-  - `int32_t point_size`
-- `TextFontChoice`
-  - `Sans`
-  - `Serif`
-  - `Mono`
-  - `Art`
-- `TextStyleFlags`
-  - `bold`
-  - `italic`
-  - `underline`
-  - `strikethrough`
+- `origin`
+- `base_style`
+- `runs`
+- `visual_bounds`
+- committed premultiplied BGRA bitmap data
 
-New draft-only core types:
+The live editor is built around:
 
-- `TextTypingStyle`
-  - `TextStyleFlags flags`
-- `TextRun`
-  - `std::wstring text`
-  - `TextStyleFlags flags`
-- `TextSelection`
-  - `int32_t anchor_utf16`
-  - `int32_t active_utf16`
 - `TextDraftBuffer`
-  - `TextAnnotationBaseStyle base_style`
-  - ordered runs
-  - current typing style
-  - current selection
-  - overwrite mode
-  - preferred x-position for vertical movement
 - `TextDraftSnapshot`
-  - `TextDraftBuffer buffer`
-- `TextDraftHistory`
-  - private undo stack
-  - private redo stack
-  - lifetime limited to one live draft
+- `TextDraftView`
+- `TextEditController`
 
-New committed annotation payload:
+`TextDraftBuffer` owns the transient editing state:
 
-- `TextAnnotation`
-  - `PointPx origin`
-  - `TextAnnotationBaseStyle base_style`
-  - `std::vector<TextRun> runs`
-  - `RectPx visual_bounds`
-  - `int32_t bitmap_width_px`
-  - `int32_t bitmap_height_px`
-  - `int32_t bitmap_row_bytes`
-  - `std::vector<uint8_t> premultiplied_bgra`
+- logical runs
+- typing style
+- selection
+- overwrite mode
+- preferred x-position for vertical navigation
 
-All text positions in the draft model are insertion offsets in the flattened
-`std::wstring`, measured in UTF-16 code units.
+### Controller split
 
-Keeping the logical runs in the committed payload is intentional even though V1
-does not re-edit committed text:
+Current ownership is intentionally split:
 
-- it keeps undo values self-describing
-- it leaves a clean path for future re-edit support
-- hit-test and output still use the cached bitmap so committed behavior stays
-  deterministic and shared
+- `AnnotationController`
+  - owns the committed annotation document
+  - owns persisted Text tool defaults such as size step and current font slot
+  - owns the optional active `TextEditController`
+  - owns the optional `editing_annotation_id_` used during re-edit
+- `TextEditController`
+  - owns one live draft buffer
+  - owns private snapshot-based undo/redo history for that draft
+  - collaborates with the text layout engine and spell-check service
+- `OverlayController`
+  - routes overlay pointer and cancel/commit behavior
+  - decides whether a text commit is a new annotation or an edit of an existing
+    one
+- `OverlayWindow`
+  - owns the Win32 keyboard routing, caret blink timer, and clipboard helpers
 
-### Variant updates
+Draft-local undo history is intentionally separate from the overlay session undo
+stack. Typing inside a draft does not create session-level undo entries.
 
-Extend `AnnotationData` in `annotation_types.h` to include `TextAnnotation`.
+## Layout, Rendering, And Output
 
-The normal compile-time enforcement via `std::visit` remains useful and should
-catch every required call site update:
+### Layout engine boundary
 
-- `Annotation::Kind()`
-- `Annotation_bounds(...)`
-- `Annotation_visual_bounds(...)`
-- `Annotation_hits_point(...)`
-- `Translate_annotation(...)`
-- `Blend_annotations_onto_pixels(...)`
-- live D2D paint dispatch
+Text layout stays behind `ITextLayoutEngine`.
 
-## Layout And Rasterization Service
+The layout engine is responsible for:
 
-Text layout should not be hand-coded in core.
+- draft layout construction
+- point hit testing
+- selection rectangle generation
+- caret geometry
+- line ascent lookup
+- final rasterization of committed text
 
-Add a core interface, owned by the controller and implemented in `win/`, for all
-text measurement, hit-test, caret, selection-rect, and rasterization work.
-
-Suggested name:
-
-- `ITextLayoutEngine`
-
-Suggested responsibilities:
-
-- build a `DraftTextLayoutResult` from a `TextDraftBuffer`
-- hit-test a point to a text insertion position
-- move vertically while preserving preferred x-position
-- produce selection highlight rectangles
-- produce caret rectangle geometry
-- report the overwrite caret advance width at the current insertion position
-- rasterize a finalized `TextAnnotation` bitmap
-
-This keeps:
-
-- edit policy in core
-- DWrite-specific shaping and rasterization in the Win32 layer
-- unit tests independent from DWrite by using a fake engine
-
-Word-boundary navigation and deletion should stay in core on the flattened text
-buffer so behavior is testable without DWrite.
-
-## Draft-local History And Clipboard
-
-Each live draft owns a private, temporary history stack.
-
-- The stack is created when the draft starts.
-- The stack is destroyed on commit or cancel.
-- The overlay session `UndoStack` must not observe any draft-local edits.
-- Committing a draft pushes exactly one `AddAnnotationCommand` onto the overlay
-  undo stack.
-- Undoing annotations after commit removes the whole committed text annotation in
-  one step, regardless of any draft-local undo/redo that happened earlier.
-
-Recommended V1 implementation:
-
-- store full `TextDraftSnapshot` values rather than edit deltas
-- create history entries only for mutating operations:
-  - insert
-  - paste
-  - cut
-  - backspace/delete
-  - style toggle
-- do not create history entries for pure caret motion or pure selection changes
-
-Clipboard behavior should be plain-text only:
-
-- copy and cut export the selected text as `CF_UNICODETEXT`
-- outbound newlines use Windows `CRLF`
-- paste prefers `CF_UNICODETEXT`
-- incoming `CRLF` and bare `CR` normalize to internal `LF`
-- if the clipboard does not contain plain Unicode text, paste is a no-op
-
-## Controller Integration
-
-### Recommended split
-
-Do not add a wide no-op text API to `OverlayController` or `AnnotationController`.
-
-Recommended design:
-
-- keep `TextAnnotationTool` as the registered tool for armed-state pointer entry
-- add a dedicated `TextEditController` in `greenflame_core` that exists only
-  while a live text draft exists
-- `AnnotationController` keeps ownership of:
-  - the committed annotation document
-  - tool registry and selection/edit interactions
-  - persisted text defaults: shared annotation color, current font choice, point
-    size
-- `TextEditController` owns:
-  - the live `TextDraftBuffer`
-  - the private `TextDraftHistory`
-  - collaboration with `ITextLayoutEngine`
-  - all draft-only keyboard and pointer edit behavior
-- `OverlayController` routes events to the active subcontroller and should expose
-  only a small bridge to the active `TextEditController`
-
-Suggested `TextEditController` surface:
-
-- `Build_view() const -> TextDraftView`
-- `On_text_input(std::wstring_view text)`
-- `On_select_all()`
-- `On_navigation(TextNavigationAction action, bool extend_selection)`
-- `On_backspace(bool by_word)`
-- `On_delete(bool by_word)`
-- `Toggle_style(TextStyleToggle which)`
-- `Toggle_insert_mode()`
-- `Copy_selected_text()`
-- `Cut_selected_text()`
-- `Paste_text(std::wstring_view plain_text)`
-- `Undo()`
-- `Redo()`
-- `On_pointer_press(PointPx cursor)`
-- `On_pointer_move(PointPx cursor, bool primary_down)`
-- `On_pointer_release(PointPx cursor)`
-- `Commit() -> TextAnnotation`
-- `Cancel()`
-
-Suggested minimal bridge outside the text editor:
-
-- `Has_active_text_edit() const`
-- `Active_text_edit()`
-- `Begin_text_draft(PointPx origin)`
-- `Commit_text_annotation(TextAnnotation annotation, UndoStack &undo_stack)`
-- `Text_point_size() / Step_text_size(int delta_steps)`
-- `Text_current_font() / Set_text_current_font(TextFontChoice choice)`
-
-Controller ownership recommendation:
-
-- `AnnotationController` owns:
-  - the committed annotation document
-  - the pending text defaults: color, font choice, point size
-  - the optional active `TextEditController`
-- `OverlayController` continues to arbitrate between region behavior, annotation
-  behavior, and text-draft precedence
-
-### Cancel priority
-
-`OverlayController::On_cancel()` should change for text only as follows:
-
-1. active selection move
-2. active selection resize
-3. active selection drag
-4. active text draft: cancel draft, keep text tool armed
-5. active non-text tool gesture: cancel gesture and deselect tool
-6. active tool without gesture: deselect tool
-7. selected committed annotation: deselect annotation
-8. clear final selection
-9. close overlay
-
-This preserves the current mental model while making `Esc` match the text
-requirement.
-
-## Overlay Window Integration
-
-### New input handling
-
-`OverlayWindow` must start handling:
-
-- `WM_CHAR`
-- optionally `WM_UNICHAR` as a fallback convenience path
-
-`WM_KEYDOWN` should gain a text-edit precedence block before save/copy/undo/redo.
-
-When `Active_text_edit()` is non-null, `OverlayWindow` should route text-edit
-keyboard and pointer events to that controller and bypass unrelated overlay
-shortcuts.
-
-`OverlayWindow` should also gain small plain-text clipboard helpers for
-`CF_UNICODETEXT` read/write. Keep the Win32 clipboard API in the window layer and
-pass plain strings into core controller methods.
-
-### Cursor rules
-
-- text tool armed or editing: `IDC_IBEAM`
-- active text mouse-selection drag: still `IDC_IBEAM`
-- committed text selected in default mode: normal arrow, or move cursor during drag
-- existing handle, toolbar, help, and wheel rules stay unchanged
-
-While editing, overlay chrome remains visible but non-interactive. Draft text owns
-the pointer on the canvas, and outside-canvas chrome clicks should not steal focus
-or trigger unrelated overlay actions.
-
-### Paint input
-
-Extend `D2DPaintInput` with text-draft fields:
-
-- `draft_text_annotation`
-- `draft_text_selection_rects`
-- `draft_text_caret_rect`
-- `draft_text_insert_mode`
-- `draft_text_blink_visible`
-
-Draft text should be rendered in the live layer, after committed annotations and
-before toolbar/color-wheel chrome.
-
-### Timers
-
-Reuse the existing overlay timer infrastructure for caret blink:
-
-- one new timer id for caret blink
-- blink rate from `GetCaretBlinkTime()`
-- reset blink visibility on any edit, caret move, or mouse selection change
-
-## Rendering And Output
+The current Win32 implementation uses DirectWrite with `DWRITE_WORD_WRAPPING_NO_WRAP`.
 
 ### Draft rendering
 
-Draft text is not part of the committed annotation cache.
+The live draft is not treated as a committed annotation bitmap.
 
-It should be rendered like the current freehand draft path:
+Current draft paint data includes:
 
-- draw current draft runs with DWrite
-- draw translucent selection highlights behind glyphs
-- draw the caret on top
-- do not draw the wheel or size overlay while a draft is active
+- draft annotation runs and bounds
+- selection rectangles
+- insert or overwrite caret geometry
+- spell-check squiggles
+
+The draft is rendered in the live overlay layer and is excluded from saved or
+copied image output until it is committed.
 
 ### Committed rendering
 
-When the draft is committed:
+On commit:
 
-1. core finalizes the logical `TextAnnotation`
+1. core finalizes a `TextAnnotation` value from the live draft
 2. the layout engine rasterizes it into a tight premultiplied BGRA bitmap
-3. the annotation is pushed through `AddAnnotationCommand`
+3. core records it as either:
+   - a new annotation via `AddAnnotationCommand`
+   - an edit of an existing annotation via `UpdateAnnotationCommand`
 
-After commit:
+After commit, the same committed bitmap is reused for:
 
-- live overlay paint uses the cached committed bitmap
-- hit-test uses the cached alpha coverage
-- save/copy blits the same cached bitmap into the cropped output buffer
+- live overlay paint
+- topmost hit testing
+- save output
+- clipboard image output
 
-This keeps committed text aligned with the existing non-negotiable rule: paint,
-selection, and output all use the same committed coverage.
+This keeps committed text consistent with the repository-wide rule that paint,
+selection, and exported output must agree on committed pixel coverage.
 
-### Selection affordance for committed text
+## Configuration
 
-Committed text should behave like a freehand annotation in default mode:
+The Text tool currently depends on:
 
-- topmost covered pixel wins selection
-- selected text shows the shared clockwise marquee around `visual_bounds`
-- no resize handles in V1
-- body drag moves the entire annotation
+- `tools.text.size`
+- `tools.text.current_font`
+- `tools.text.spell_check_languages`
+- `tools.font.sans`
+- `tools.font.serif`
+- `tools.font.mono`
+- `tools.font.art`
+- the shared annotation color selection in `tools.current_color`
 
-## Resources
+Current normalization and behavior rules are implemented in `app_config.*` and
+the Win32 font-resolution path:
 
-- Add `Text` glyph ids beside the existing toolbar glyph ids.
-- There is already a `resources/text.png` source asset in the repo; derive a
-  matching alpha-mask asset and wire it through the existing resource pipeline.
+- text size persists as a size step, not directly as a point size
+- the active font setting is a four-slot token (`sans`, `serif`, `mono`, `art`)
+- configured family names fill those four slots and fall back to built-in defaults
+- unsupported spell-check language tags trigger a warning and are skipped
 
-## Testing Plan
+## Existing Coverage
 
-### New automated unit tests
+Key automated coverage already exists in:
 
 - `tests/text_draft_buffer_tests.cpp`
-  - insert text
-  - replace selected text
-  - backspace/delete
-  - `Ctrl+Backspace` and `Ctrl+Delete`
-  - caret move by char, word, line, doc
-  - `PgUp` / `PgDn` map to doc start/end
-  - shift-extended selection
-  - select all
-  - copy/cut/paste plain text normalization
-  - style toggle with empty selection
-  - style toggle over a non-empty selection
-  - local undo/redo
-  - insert/overwrite mode
-- `tests/annotation_controller_tests.cpp`
-  - `T` toggles the tool
-  - new draft starts plain and captures current color/font/size
-  - `Enter` commits
-  - `Ctrl+Enter` inserts newline
-  - `Esc` cancels
-  - click outside empty draft discards and starts a new draft
-  - click outside non-empty draft commits and starts a new draft
-  - committed text stays movable/deletable
+- `tests/text_annotation_redit_tests.cpp`
+- `tests/text_html_tests.cpp`
+- `tests/text_rtf_tests.cpp`
+- `tests/spell_check_tests.cpp`
 - `tests/overlay_controller_tests.cpp`
-  - cancel priority with active text draft
-  - toolbar visibility and non-interactivity while editing
-  - text size stepping uses the discrete list only while armed
-  - draft-local undo/redo does not touch the overlay undo stack
 - `tests/app_config_tests.cpp`
-  - text size normalization
-  - `text_current_font` token normalization
-  - empty-font fallback
-- `tests/annotation_hit_test_tests.cpp`
-  - text hit-test against cached bitmap alpha
-  - text translation updates bounds only
-- `tests/color_wheel_tests.cpp`
-  - composite text style wheel segment geometry and hit-test
 
-### Manual coverage additions
+Key manual coverage already exists in `docs/manual_test_plan.md`, especially:
 
-Add manual cases for:
+- `GF-MAN-ANN-011` through `GF-MAN-ANN-015`
+- `GF-MAN-ANN-014A`
+- `GF-MAN-ANN-022`
+- `GF-MAN-TXT-RTF-001` through `GF-MAN-TXT-RTF-006`
+- `GF-MAN-TXT-HTML-001`
 
-- tool toggle and I-beam cursor
-- right-click style wheel while armed
-- no style wheel while editing
-- starting a draft by click
-- caret blink and overwrite caret
-- mouse selection
-- movement keys including `Ctrl+Arrow`, `Home`, `End`, `PgUp`, `PgDn`
-- `Ctrl+A`, `Ctrl+C`, `Ctrl+X`, `Ctrl+V`
-- draft-local `Ctrl+Z` / `Ctrl+Shift+Z`
-- style toggles
-- font wheel half and selection wheel half before drafting
-- size wheel stepping and persistence before drafting
-- no size changes while editing from mouse wheel or `Ctrl+=` / `Ctrl+-`
-- multi-line via `Ctrl+Enter`
-- commit via `Enter`
-- click outside current draft creating the next draft
-- cancel via `Esc`
-- move/delete committed text
-- verify committed text is not re-editable
-- save/copy output containing committed text but not draft chrome
+Future edits to the Text tool should update this document only when the shipped
+behavior changes. Wheel-specific details should stay in
+`text_style_wheel_redesign.md` instead of being duplicated here.

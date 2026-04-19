@@ -1,348 +1,221 @@
-# Undo/Redo Command System Design
-
-## Overview
-
-Greenflame's overlay allows users to capture and annotate screenshots. Every user action —
-snap-region draw, resize, move, and future annotation operations (lines, arrows, shapes, text,
-property changes) — must be undoable and redoable via **Ctrl+Z** / **Ctrl+Y**.
-
-This document specifies the design of that system: the core abstractions, how concrete commands
-are written, where state lives, how keyboard integration works, and how to test it all.
-
+---
+title: Undo/Redo Command System
+summary: Current reference for the overlay undo/redo architecture in Greenflame.
+audience:
+  - contributors
+status: reference
+owners:
+  - core-team
+last_updated: 2026-04-19
+tags:
+  - overlay
+  - undo
+  - redo
+  - annotations
 ---
 
-## Guiding Principles
+# Undo/Redo Command System
 
-| Principle | How it is upheld |
-|-----------|-----------------|
-| **Simple core, minimal boilerplate** | A single generic `ModificationCommand<T>` covers the majority of property-change commands. Named classes are only needed for structurally complex operations (add/remove annotation). |
-| **Fully testable** | All abstractions (`ICommand`, `UndoStack`, `ModificationCommand<T>`) live in `greenflame_core` — the static library with no Win32 dependencies. Tests use Google Test. |
-| **Easy to extend** | Adding a new command is one of two things: (a) construct a `ModificationCommand<T>` inline, or (b) write a small named class. No registration, no factory, no macros. |
-| **Session-scoped** | The undo/redo history belongs to one overlay session. It is created when the overlay opens and is discarded when it closes. |
+This document describes the current undo/redo architecture used by the interactive
+overlay.
 
----
+For user-visible behavior, [docs/annotation_tools.md](../annotation_tools.md) is the
+authoritative reference. This document focuses on the command model, ownership,
+and integration points in the implementation.
 
-## Core Abstractions (in `greenflame_core`)
+## Current Status
+
+Undo/redo is implemented and active for both region operations and committed
+annotation operations.
+
+- One chronological session-scoped stack is used for both region and annotation changes.
+- The stack lives in `greenflame_core`, not in Win32-only code.
+- Region operations restore a full `OverlaySelectionState`, not just a `RectPx`.
+- Annotation operations use dedicated command classes in `annotation_commands.*`.
+- Tool switching is not part of undo history.
+- While a text draft is active, `Ctrl+Z` and `Ctrl+Shift+Z` operate on the draft
+  editor first. Once the draft is committed, undo/redo returns to the session stack.
+
+## Keyboard Behavior
+
+The overlay uses:
+
+- `Ctrl+Z` for undo
+- `Ctrl+Shift+Z` for redo
+
+There is no `Ctrl+Y` overlay shortcut in the current implementation.
+
+## Core Types
 
 ### `ICommand`
 
-```cpp
-// src/greenflame_core/command.h
-namespace greenflame::core {
+`src/greenflame_core/command.h` defines the common interface:
 
-class ICommand {
-  public:
-    virtual ~ICommand() = default;
-    virtual void Undo() = 0;
-    virtual void Redo() = 0;
-    virtual std::string_view Description() const { return ""; }
-};
+- `Undo()`
+- `Redo()`
+- `Description()`
 
-} // namespace greenflame::core
-```
+Every command type used by the overlay implements this interface.
 
-Rules:
-- A command is **created in its already-executed state**. The overlay already applied the change
-  imperatively via normal mouse/keyboard handling; the command just records what happened so it
-  can be reversed or replayed.
-- `Undo()` reverts the state to what it was **before** the action.
-- `Redo()` re-applies the state to what it was **after** the action.
+### `ModificationCommand<T>`
 
----
+`src/greenflame_core/modification_command.h` provides a small generic before/after
+command:
 
-### `UndoStack` (Qt-inspired, index-based)
+- it stores `before` and `after` values of type `T`
+- it stores an `apply` callback
+- `Undo()` applies `before`
+- `Redo()` applies `after`
 
-The stack uses a single list of commands and an **index** (the next command to redo), rather than
-two separate stacks. This matches Qt's `QUndoStack` model.
+This is used for region selection history, where restoring the previous state is
+more important than modeling each low-level gesture as a separate command class.
 
-```
-Commands:  [ C0 ][ C1 ][ C2 ]     index = 3 (all done, nothing to redo)
-                Undo
-Commands:  [ C0 ][ C1 ][ C2 ]     index = 2 (C2 undone)
-                Undo
-Commands:  [ C0 ][ C1 ][ C2 ]     index = 1 (C1, C2 undone)
+### `UndoStack`
 
-Push (new command): commands above index are discarded, new cmd pushed, index = count
-```
+`src/greenflame_core/undo_stack.*` implements a single-list, index-based undo stack.
 
-```cpp
-// src/greenflame_core/undo_stack.h
-namespace greenflame::core {
+Key properties:
 
-class UndoStack {
-  public:
-    void Push(std::unique_ptr<ICommand> cmd);
+- `Push()` discards any redo branch above the current index
+- `Push()` immediately executes `Redo()` on the pushed command
+- `Undo()` moves the index backward, then calls `Undo()`
+- `Redo()` calls `Redo()`, then moves the index forward
+- `Set_undo_limit(0)` means no limit
 
-    bool CanUndo() const;
-    bool CanRedo() const;
+This means callers build a command that can move between the `before` and `after`
+states, then push it once when the interaction is committed.
 
-    void Undo();
-    void Redo();
+### `OverlaySelectionState`
 
-    void Clear();
+Region undo does not restore only a rectangle. It restores the full
+`OverlaySelectionState` value from `overlay_controller.h`, which includes:
 
-    std::size_t Count() const;
-    int Index() const;
+- `final_selection`
+- `selection_source`
+- `selection_window`
+- `selection_monitor_index`
+- `selection_capture_rect_screen`
+- `selection_capture_offset_px`
+- `selection_uses_full_window_capture`
+- `selection_has_offscreen_capture`
 
-    void SetUndoLimit(int limit);
-    int UndoLimit() const;
-};
+That broader state is necessary because selection history must preserve more than
+geometry. Window-based and monitor-based selections carry capture metadata that
+must survive undo and redo intact.
 
-} // namespace greenflame::core
-```
+## Command Types In Use
 
-- `Index()`: current position (next command to redo). `Index() == Count()` when nothing to redo.
-- When a **new command is pushed** after a partial undo, commands above the index are discarded.
-  This clears the redo branch and matches the standard behavior of every major editor.
-- `SetUndoLimit(0)` = no limit (Qt default).
+### Region commands
 
----
+Region history is recorded with `ModificationCommand<OverlaySelectionState>`.
 
-### `ModificationCommand<T>` — Generic Before/After Command
+Current region command descriptions include:
 
-Covers the large class of operations that change a single value: move selection, resize
-selection, change line width, change color, toggle a flag, etc.
+- `Create selection`
+- `Draw selection`
+- `Move selection`
+- `Resize selection`
 
-```cpp
-// src/greenflame_core/modification_command.h   (header-only template)
-namespace greenflame::core {
+These commands are created in `src/greenflame/win/overlay_window.cpp` and restore
+state through `OverlayWindow::Restore_selection_state(...)`.
 
-template <typename T>
-class ModificationCommand final : public ICommand {
-  public:
-    ModificationCommand(std::string_view description,
-                        std::function<void(T const&)> apply,
-                        T before,
-                        T after);
+### Annotation commands
 
-    void Undo() override;
-    void Redo() override;
-    std::string_view Description() const override;
+Committed annotation history uses named command classes from
+`src/greenflame_core/annotation_commands.*`:
 
-  private:
-    std::string description_;
-    std::function<void(T const&)> apply_;
-    T before_;
-    T after_;
-};
+- `AddAnnotationCommand`
+- `DeleteAnnotationCommand`
+- `UpdateAnnotationCommand`
+- `AddBubbleAnnotationCommand`
+- `CompoundCommand`
 
-} // namespace greenflame::core
-```
+These commands are created by `AnnotationController`.
 
-The **apply lambda** is where Win32-specific side effects (like `InvalidateRect`) belong. The
-`ModificationCommand` itself remains pure and testable.
+Notable current behavior:
 
----
+- annotation add, delete, move, resize, and edit operations are undoable
+- bubble annotations use a dedicated add command so undo/redo also keeps the bubble
+  counter in sync
+- grouped edits use `CompoundCommand`
+- reactive obfuscate recomputes are appended to the same undo record as the user
+  action that triggered them
 
-## Named Command Classes
+## Ownership And Flow
 
-For operations that are not a simple property swap — principally add/remove annotation — write
-a dedicated class. This keeps intent explicit and enables type-specific behaviour.
+### `OverlayController`
 
-### Example: `AddAnnotationCommand`
+`OverlayController` owns the session undo stack:
 
 ```cpp
-// (future, when annotation data structures exist)
-class AddAnnotationCommand final : public greenflame::core::ICommand {
-  public:
-    AddAnnotationCommand(AnnotationList* list, Annotation annotation)
-        : list_(list), annotation_(std::move(annotation)) {}
-
-    void Undo() override { list_->pop_back(); }
-    void Redo() override { list_->push_back(annotation_); }
-    std::string_view Description() const override { return "Add annotation"; }
-
-  private:
-    AnnotationList* list_;
-    Annotation annotation_;
-};
+UndoStack undo_stack_;
 ```
 
-This works correctly because undo is always applied in strict reverse order — the command
-added at `push_back` is always the last element when `Undo()` runs.
+It exposes:
 
----
+- `Push_command(...)`
+- `Undo()`
+- `Redo()`
+- `Selection_state()`
+- `Restore_selection_state(...)`
 
-## State Changes to `OverlayState`
+This keeps undoable policy in core while leaving Win32 message routing in the
+overlay window.
 
-`OverlayState` is a private struct defined in `overlay_window.cpp`. Three additions:
+### `OverlayWindow`
 
-### 1. `UndoStack`
+`src/greenflame/win/overlay_window.cpp` is responsible for:
 
-```cpp
-greenflame::core::UndoStack undo_stack;
-```
+- detecting committed region interactions
+- capturing `before` and `after` `OverlaySelectionState` snapshots
+- pushing `ModificationCommand<OverlaySelectionState>` entries
+- routing `Ctrl+Z` / `Ctrl+Shift+Z`
+- refreshing toolbar state, cursor state, and annotation caches after undo/redo
 
-Cleared automatically when the overlay is destroyed or reset.
+### `AnnotationController`
 
-### 2. `final_selection` becomes `std::optional<greenflame::core::RectPx>`
+`src/greenflame_core/annotation_controller.cpp` is responsible for:
 
-```cpp
-// Before:
-greenflame::core::RectPx final_selection;
+- building annotation commands
+- grouping primary and reactive commands
+- pushing single commands directly when no grouping is required
+- maintaining selected annotation ids across undo and redo
 
-// After:
-std::optional<greenflame::core::RectPx> final_selection;
-```
+## Text Draft Interaction
 
-`std::nullopt` means **no selection has been drawn yet**. This allows the undo of an initial
-selection draw to cleanly return to the "no selection" state, without relying on a sentinel
-zero-area rect.
+Text editing has two layers of undo:
 
-All existing uses of `final_selection` in `overlay_window.cpp` are guarded with
-`.has_value()` / `.value()` / `.value_or()` as appropriate.
+- while a text draft is active, undo/redo applies to the draft editor itself
+- after the draft is committed, the committed annotation change is recorded in the
+  session undo stack
 
-### 3. `pre_drag_selection` — Snapshot for Command Creation
-
-```cpp
-std::optional<greenflame::core::RectPx> pre_drag_selection;
-```
-
-Captured at `WM_LBUTTONDOWN` whenever a resize or move drag begins. Used as the `before`
-value when the command is pushed at `WM_LBUTTONUP`.
-
----
-
-## Command Creation Pattern (in `overlay_window.cpp`)
-
-### Resize / Move
-
-```cpp
-// --- On_l_button_down() ---
-// When a handle or move drag starts, snapshot the current selection:
-state_->pre_drag_selection = state_->final_selection;
-
-// --- On_l_button_up() ---
-// After snapping and committing final_selection:
-if (state_->pre_drag_selection != state_->final_selection) {
-    auto before = state_->pre_drag_selection;
-    auto after  = state_->final_selection;
-    state_->undo_stack.Push(
-        std::make_unique<greenflame::core::ModificationCommand<std::optional<greenflame::core::RectPx>>>(
-            "Resize selection",        // or "Move selection"
-            [this](std::optional<greenflame::core::RectPx> const& r) {
-                state_->final_selection = r;
-                InvalidateRect(hwnd_, nullptr, TRUE);
-            },
-            before, after));
-}
-```
-
-### Initial Selection Draw
-
-Same pattern — `before` is `std::nullopt` (no selection), `after` is the drawn rect.
-
-```cpp
-// On_l_button_up() after the initial drag:
-state_->undo_stack.Push(
-    std::make_unique<greenflame::core::ModificationCommand<std::optional<greenflame::core::RectPx>>>(
-        "Draw selection",
-        [this](std::optional<greenflame::core::RectPx> const& r) {
-            state_->final_selection = r;
-            InvalidateRect(hwnd_, nullptr, TRUE);
-        },
-        std::nullopt,              // before: no selection
-        state_->final_selection)); // after: the new rect
-```
-
----
-
-## Keyboard Integration
-
-In `OverlayWindow::On_key_down()`, add two cases alongside existing Ctrl+S, Ctrl+C:
-
-```cpp
-case 'Z':
-    if (GetKeyState(VK_CONTROL) & 0x8000) {
-        state_->undo_stack.Undo();
-        InvalidateRect(hwnd_, nullptr, TRUE);
-        return 0;
-    }
-    break;
-
-case 'Y':
-    if (GetKeyState(VK_CONTROL) & 0x8000) {
-        state_->undo_stack.Redo();
-        InvalidateRect(hwnd_, nullptr, TRUE);
-        return 0;
-    }
-    break;
-```
-
-`InvalidateRect` is called unconditionally — `Undo()`/`Redo()` are no-ops when the stack is
-empty, and a spurious repaint is harmless.
-
----
-
-## File Structure
-
-```
-src/greenflame_core/
-    command.h                   ICommand interface
-    undo_stack.h                UndoStack declaration
-    undo_stack.cpp              UndoStack implementation
-    modification_command.h      ModificationCommand<T> template (header-only)
-
-src/greenflame/win/
-    overlay_window.cpp          MOD  OverlayState changes; command push; Ctrl+Z/Y (future)
-
-CMakeLists.txt                  MOD  Add undo_stack.h/.cpp to greenflame_core sources
-
-tests/
-    undo_stack_tests.cpp        UndoStack + ModificationCommand tests
-    CMakeLists.txt              MOD  Add undo_stack_tests.cpp
-
-docs/
-    undo_command_system.md      THIS FILE
-```
-
-Note: `overlay_window.h` does **not** change — `UndoStack` is hidden inside the private
-`OverlayState` struct defined in the `.cpp` file, so no new public include is needed.
-
----
+This is why `OverlayWindow::On_key_down(...)` routes `Ctrl+Z` and
+`Ctrl+Shift+Z` to the active text editor before it falls back to
+`OverlayController::Undo()` or `Redo()`.
 
 ## Testing
 
-All tests use Google Test.
+Current automated coverage is split across several levels:
 
-### `undo_stack_tests.cpp` — `UndoStack` behaviour
+- `tests/undo_stack_tests.cpp`
+  - `UndoStack` semantics
+  - redo-branch clearing
+  - undo-limit behavior
+  - `ModificationCommand<T>` behavior
+- `tests/annotation_controller_tests.cpp`
+  - committed annotation add/delete/edit flows
+  - grouped annotation history
+  - committed text annotation history
+  - bubble-specific counter behavior through undo/redo
+- `tests/overlay_controller_tests.cpp`
+  - overlay-level selection and command integration points
 
-- Empty stack: `CanUndo`/`CanRedo` false, `Count` 0
-- Push one: `CanUndo` true, `CanRedo` false
-- Undo: calls setter with `before`, moves to redo branch
-- Redo: calls setter with `after`, moves back
-- Push after undo: clears redo branch
-- Multiple push/undo/redo: correct state transitions
-- Clear: empties stack
-- Undo/Redo on empty: no-op
-- `ModificationCommand`: Undo/Redo apply correct values
-- `UndoLimit`: old commands dropped from bottom when limit exceeded
+Manual verification for user-visible overlay behavior belongs in
+[docs/manual_test_plan.md](../manual_test_plan.md) when automation is not practical.
 
-### Manual / Integration Verification (when overlay integration is done)
+## Related Documents
 
-1. Open overlay → draw selection → resize → move.
-2. Ctrl+Z three times: move reverts → resize reverts → selection disappears.
-3. Ctrl+Y three times: all actions replay in order.
-4. Draw new selection after partial undo: redo branch is cleared, Ctrl+Y does nothing.
-
----
-
-## Future Commands Reference
-
-This table shows how new operations map to command types once annotation tools are built:
-
-| User action                  | Command class                               | T / data                         |
-|------------------------------|---------------------------------------------|----------------------------------|
-| Draw initial selection       | `ModificationCommand<optional<RectPx>>`     | `nullopt` → rect                 |
-| Resize selection             | `ModificationCommand<optional<RectPx>>`     | old rect → new rect              |
-| Move selection               | `ModificationCommand<optional<RectPx>>`     | old rect → new rect              |
-| Change line width            | `ModificationCommand<int>`                  | old width → new width            |
-| Change tool color            | `ModificationCommand<COLORREF>`             | old color → new color            |
-| Add freehand stroke          | `AddAnnotationCommand`                      | `AnnotationList*` + `Annotation` |
-| Add line / arrow / shape     | `AddAnnotationCommand`                      | same                             |
-| Add text annotation          | `AddAnnotationCommand`                      | same                             |
-| Delete annotation            | `RemoveAnnotationCommand`                   | index + `Annotation`             |
-| Edit annotation property     | `ModificationCommand<T>` on annotation field | old/new property value           |
-
-The pattern is intentionally uniform. New annotation types inherit the same undo behaviour
-for free as long as they are represented as entries in an `AnnotationList`.
+- [docs/annotation_tools.md](../annotation_tools.md): authoritative behavior and current
+  architecture overview for annotation features
+- [README.md](../../README.md): user-visible shortcuts and behavior summary
+- [docs/manual_test_plan.md](../manual_test_plan.md): manual coverage for Win32-only flows

@@ -5,7 +5,7 @@ audience: users
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-27
+last_updated: 2026-04-19
 tags:
   - cli
   - annotations
@@ -61,6 +61,7 @@ greenflame.exe --input "%TEMP%\greenflame-source.png" --overwrite --annotate ".\
   - `--input`
 - `--input` requires `--annotate`.
 - `--input` also requires either `--output` or `--overwrite`.
+- `--input --overwrite` without `--output` writes back to the input path.
 - `--input` is incompatible with live capture modes and with `--window-capture`.
 - If the first non-whitespace character is `{`, the value is treated as inline
   JSON.
@@ -117,7 +118,7 @@ Resolved values follow this order:
 This applies to:
 
 - `color`
-- `highlighter_opacity_percent`
+- Highlighter opacity
 - `font`
 - `size` for annotation types that support it
 
@@ -149,33 +150,35 @@ non-opaque alpha, the command fails with exit code `16`.
 Supported annotation types:
 
 - `brush`
-  - `points`, `size`, optional `color`
+  - `points`, optional `size`, optional `color`
 - `highlighter`
   - Either `start`/`end` or `points`
-  - `size`, optional `color`, optional `highlighter_opacity_percent`
+  - optional `size`, optional `color`, optional `opacity_percent`
 - `line`
-  - `start`, `end`, `size`, optional `color`
+  - `start`, `end`, optional `size`, optional `color`
 - `arrow`
-  - `start`, `end`, `size`, optional `color`
+  - `start`, `end`, optional `size`, optional `color`
 - `rectangle`
-  - `left`, `top`, `width`, `height`, `size`, optional `color`
+  - `left`, `top`, `width`, `height`, optional `size`, optional `color`
 - `filled_rectangle`
   - `left`, `top`, `width`, `height`, optional `color`
 - `ellipse`
-  - `center`, `width`, `height`, `size`, optional `color`
+  - `center`, `width`, `height`, optional `size`, optional `color`
 - `filled_ellipse`
   - `center`, `width`, `height`, optional `color`
 - `obfuscate`
-  - `left`, `top`, `width`, `height`, `size`
+  - `left`, `top`, `width`, `height`, optional `size`
 - `text`
-  - `origin`, `size`, optional `color`, optional `font`, plus either `text` or
+  - `origin`, optional `size`, optional `color`, optional `font`, plus either `text` or
     `spans`
 - `bubble`
-  - `center`, `size`, optional `color`, optional `font`
+  - `center`, optional `size`, optional `color`, optional `font`
 
 Rules:
 
 - `size` is valid only for annotations that support sizing.
+- If `size` is omitted, Greenflame uses that annotation family's current config
+  default.
 - Filled shapes do not accept `size`.
 - Obfuscate does not accept `color`, `font`, or highlighter opacity settings.
 - Brush point lists use the same shared freehand smoothing path as interactive
@@ -195,8 +198,10 @@ Rules:
 
 - Colors use `#rrggbb`.
 - Alpha is not encoded in the color string.
-- Highlighter transparency uses `highlighter_opacity_percent` in the range
-  `0..100`.
+- Highlighter transparency uses:
+  - top-level `highlighter_opacity_percent` for the document default
+  - per-annotation `opacity_percent` for an individual Highlighter override
+  - both in the range `0..100`
 - `size` uses the same `1..50` tool-step concept as the GUI.
 
 Size behavior by annotation family:
@@ -295,10 +300,11 @@ payload is invalid, the command fails.
 
 For CLI render flows, Greenflame builds the output in this order:
 
-1. Source image pixels
-2. Synthetic fill for off-desktop regions, when applicable for live captures
-3. Outer padding, when applicable
-4. Annotations
+1. Build the source canvas from the captured or decoded image
+2. Include any synthetic fill needed for uncovered live-capture areas
+3. For live captures, composite the captured cursor when it is included
+4. Add outer padding, when applicable
+5. Render annotations
 
 That means annotations always appear on top of the final saved image, including
 any padded area.
@@ -307,4 +313,4 @@ any padded area.
 
 - User examples: `schemas/examples/cli_annotations/`
 - Manual verification cases: `docs/manual_test_plan.md`
-- Implementation design note: `docs/cli_annotation_design.md`
+- Contributor reference: [cli_annotation_design.md](cli_annotation_design.md)

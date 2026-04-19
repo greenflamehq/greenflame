@@ -128,7 +128,7 @@ While editing a draft:
 
 Clicking outside a draft commits it if it has text, otherwise discards it. Clicking a toolbar button does the same before applying the button action.
 
-Committed text annotations can be selected, moved, and deleted, but are not re-editable as live text.
+Committed text annotations can be selected, moved, deleted, and re-edited. With no active annotation tool and exactly one text annotation selected, double-click it to reopen live text editing at the clicked position.
 
 Live **spell-check squiggles** appear under misspelled words while editing a draft. Configure one or more BCP-47 language tags in `tools.text.spell_check_languages` (e.g. `["en-US", "fr-CA"]`). Squiggles are visible only during editing and never appear in saved images. When multiple languages are configured, a word is only flagged if all languages agree it is misspelled.
 
@@ -385,7 +385,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `tools.highlighter.size` | `10` | Highlighter size step (1–50). |
 | `tools.highlighter.colors` | Object with slot index keys (e.g. `{"2": "#ffb44d"}`) | Highlighter selection wheel slots (indices 0–5). Only non-default slots are written. Values use `#rrggbb`. |
 | `tools.highlighter.current_color` | `0` | Current Highlighter color slot index, clamped to `0..5`. |
-| `tools.highlighter.opacity_percent` | `35` | Default Highlighter opacity for live preview, save output, and clipboard output. Values are clamped to `0..100`. |
+| `tools.highlighter.opacity_percent` | `33` | Default Highlighter opacity for live preview, save output, and clipboard output. Values are clamped to `0..100`. |
 | `tools.highlighter.smoothing_mode` | `smooth` | Freehand Highlighter smoothing mode. Accepted values: `off`, `smooth`. Straightened highlighter bars bypass this setting and stay explicit `start`/`end` segments. |
 | `tools.highlighter.pause_straighten_ms` | `800` | After the mouse is still for this many milliseconds during a highlighter stroke, the stroke snaps to a straight bar (start to cursor). `0` means always straight. |
 | `tools.highlighter.pause_straighten_deadzone_px` | `0` | Mouse must move more than this many physical pixels from the last timer-reset position before the pause timer resets. `0` means any movement resets the timer. |
@@ -439,7 +439,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
     "highlighter": {
       "colors": { "2": "#ffb44d" },
       "current_color": 0,
-      "opacity_percent": 35,
+      "opacity_percent": 33,
       "smoothing_mode": "off",
       "pause_straighten_ms": 800,
       "pause_straighten_deadzone_px": 0

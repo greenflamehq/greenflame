@@ -1,484 +1,314 @@
 ---
 title: Capture Padding Design
-summary: Proposed CLI and config design for synthetic color padding around CLI capture outputs.
-audience: contributors
-status: proposed
+summary: Current contributor reference for CLI synthetic padding on live captures and `--input`, including parser rules, color resolution, and out-of-bounds behavior.
+audience:
+  - contributors
+status: reference
 owners:
   - core-team
-last_updated: 2026-03-20
+last_updated: 2026-04-19
 tags:
   - cli
   - padding
-  - proposal
+  - capture
+  - images
 ---
 
 # Capture Padding Design
 
-This document defines the proposed behavior and implementation shape for a new
-CLI padding feature that adds synthetic color around a captured image.
+This document describes the current shipped CLI padding behavior.
 
-The final user-facing feature is:
+It replaces the earlier proposal-style version of this file. The implementation,
+tests, and higher-priority reference docs are authoritative when this document is
+updated.
+
+For the user-facing CLI contract, see [README.md](../../README.md). For the
+shared `--input` path, see
+[cli_input_image_annotation_design.md](cli_input_image_annotation_design.md).
+
+## Current Status
+
+CLI padding is already shipped.
+
+Current surfaced pieces:
 
 - `--padding`
+- `-p`
 - `--padding-color`
 - `save.padding_color`
 
-The feature applies to CLI capture modes and is intentionally written as an
-implementation handoff.
+Current invariants:
 
-## Recommendation Summary
+- padding measurements are always in physical pixels
+- padding is synthetic fill, never extra captured screen pixels
+- the parser supports live capture sources and `--input`
+- the controller resolves one padding color for the whole invocation
+- the Win32 save path applies padding after source-image acquisition
 
-- Recommended option name: `--padding`
-- Recommended override option: `--padding-color`
-- Recommended config key: `save.padding_color`
-- Default padding color: `#000000`
-- Supported capture modes: `--region`, `--window`, `--monitor`, `--desktop`
-- Padding values are in **physical pixels**
-- Padding is always synthetic color and **never** sampled from the screen
-- Four-value order: `l,t,r,b`
-- Recommended short alias: `-p` for `--padding`
-- No short alias for `--padding-color`
+This is no longer an implementation handoff. The parser, config property,
+controller policy, Win32 save path, and tests already exist.
 
-`padding` is the correct term because the feature adds generated canvas around the
-captured pixels. It does not expand what Greenflame captures from the screen.
+## CLI Contract
 
-## Goals
+### Parser and validation rules
 
-- Let CLI users add stable colored space around any one-shot captured image.
-- Keep all padding measurements in **physical pixels**, matching the rest of the
-  CLI capture model.
-- Make padding behavior identical across `region`, `window`, `monitor`, and
-  `desktop` capture modes.
-- Keep color behavior deterministic across `png`, `jpg/jpeg`, and `bmp`.
-- Keep parser, padding policy, and source-rect math testable in `greenflame_core`.
-- Keep bitmap allocation, fill, and blit logic in `src/greenflame/win/`.
+Current parser behavior in `cli_options.cpp`:
 
-## Non-Goals For V1
+- `--padding` and `-p` are aliases
+- `--padding` may be specified at most once
+- `--padding-color` may be specified at most once
+- `--padding` requires exactly one render source:
+  - `--region`
+  - `--window`
+  - `--window-hwnd`
+  - `--monitor`
+  - `--desktop`
+  - `--input`
+- `--padding-color` requires `--padding`
 
-- Interactive-overlay support
-- Per-side padding colors
-- Alpha or transparency in padding color
-- Pattern fills such as checkerboard
-- Persisting `--padding-color`
+Current `--padding` grammar:
 
-## User-Facing Behavior
+- one value: `n`
+  - expands to `left=top=right=bottom=n`
+  - `n` must be `> 0`
+- two values: `h,v`
+  - expands to `left=right=h`, `top=bottom=v`
+  - each value must be `>= 0`
+  - at least one value must be `> 0`
+- four values: `l,t,r,b`
+  - each value must be `>= 0`
+  - at least one value must be `> 0`
 
-### Option availability
+Other current parser details:
 
-`--padding` is available with every CLI capture mode:
+- surrounding whitespace around comma-separated parts is trimmed
+- negative values are rejected
+- three-value forms are rejected
+- all-zero forms are rejected
 
-- `--region`
-- `--window`
-- `--monitor`
-- `--desktop`
+Current `--padding-color` grammar:
 
-It is invalid with:
-
-- no capture mode
-- `--help`
-- `--version`
-
-`--padding-color` is valid only when `--padding` is also present in the same
-invocation.
-
-### `--padding` grammar
-
-- Long option: `--padding`
-- Short option: `-p`
-
-The option accepts exactly **1**, **2**, or **4** comma-separated integers.
-
-1. One value: `<n>`
-   - Applies the same padding to all four sides.
-   - `n` must be `> 0`.
-
-2. Two values: `<h,v>`
-   - `h` applies to both left and right.
-   - `v` applies to both top and bottom.
-   - `h >= 0`, `v >= 0`, and at least one must be `> 0`.
-
-3. Four values: `<l,t,r,b>`
-   - `l` applies to the left side.
-   - `t` applies to the top side.
-   - `r` applies to the right side.
-   - `b` applies to the bottom side.
-   - Every value must be `>= 0`, and at least one must be `> 0`.
-
-Whitespace around comma-separated parts should be accepted and trimmed.
-
-### `--padding-color` grammar
-
-`--padding-color` accepts one value in the existing Greenflame config color form:
-
-- `#rrggbb`
-
-Rules:
-
-- exactly 7 characters
-- first character must be `#`
-- hex digits may be upper- or lowercase
+- exact form: `#rrggbb`
 - no alpha component
+- uppercase and lowercase hex digits are both accepted
 
-Examples:
+CLI misuse still fails during parse and validation before capture or save work.
 
-- `#000000`
-- `#ffffff`
-- `#1a2B3c`
+## Color Resolution And Config
 
-Because `#` has shell-specific meaning in some environments, examples should quote
-the color value in user-facing docs unless the surrounding shell is explicitly
-`cmd.exe`.
+Padding color resolution is centralized in
+`AppController::Resolve_padding_color(...)`.
 
-### Config key
+Current resolution order when `--padding` is present:
 
-Add:
-
-- `save.padding_color`
-
-Rules:
-
-- stored as `#rrggbb`
-- default value is `#000000`
-- used for CLI padding whenever `--padding` is present and `--padding-color` is not
-- normalized the same way as existing color config values
-
-### Examples
-
-```bat
-greenflame.exe --desktop --padding 12
-greenflame.exe --monitor 2 --padding 24,12 --padding-color "#ffffff"
-greenflame.exe --window "Notepad" --padding 8,16,24,32
-greenflame.exe --region 1200,100,800,600 --padding 16 --output "D:\shots\crop.png"
-```
-
-## Semantics
-
-### High-level model
-
-Padding is not extra captured screen area. Padding is generated output canvas.
-
-The output image is produced in two stages:
-
-1. Build the **source canvas** for the selected capture mode.
-2. Add synthetic outer padding around that source canvas using the resolved padding
-   color.
-
-### Source canvas model
-
-When `--padding` is present, Greenflame should preserve the **nominal geometry**
-of the selected capture request and fill any uncapturable pixels with the resolved
-padding color.
-
-Nominal source geometry by mode:
-
-- `--region`: the requested region width and height
-- `--window`: the matched window rect width and height
-- `--monitor`: the selected monitor bounds width and height
-- `--desktop`: the virtual desktop bounds width and height
-
-This means:
-
-- Any real desktop pixels that exist inside the nominal source rect are copied into
-  the source canvas.
-- Any part of the nominal source rect that lies outside the virtual desktop is
-  filled with the resolved padding color.
-- For `--window`, if the matched window is partially outside the virtual desktop,
-  the output still preserves the full nominal window size; the uncapturable portion
-  is filled with the resolved padding color.
-
-This gives the feature one consistent rule across all capture modes.
-
-### Outer padding model
-
-After the source canvas exists, Greenflame allocates the final output canvas:
-
-- `output_width = source_width + left_padding + right_padding`
-- `output_height = source_height + top_padding + bottom_padding`
-
-The entire output canvas is first filled with the resolved padding color, then the
-source canvas is blitted into it at offset:
-
-- `x = left_padding`
-- `y = top_padding`
-
-### Color resolution order
-
-When `--padding` is present, resolve the padding color in this order:
-
-1. `--padding-color`, if present
+1. `--padding-color`, if supplied
 2. `save.padding_color` from config
-3. runtime default `#000000`
+3. the `AppConfig` default, `#000000`
 
-`--padding-color` affects only the current invocation and is not persisted.
+Current config facts:
 
-## Warnings And Error Behavior
+- `AppConfig` defaults `padding_color` to black
+- `app_config_json.cpp` reads and validates `save.padding_color`
+- the JSON value must be a `#rrggbb` string
+- the property is persisted under the `save` object
 
-### Obscuration warnings
+The controller resolves this color for both live capture and `--input` mode and
+passes it to the concrete save service as `fill_color`.
 
-Existing `--window` obscuration warnings remain valid and should stay:
+## Live Capture Semantics
 
-- fully obscured window
-- partially obscured window
+### Source extent and outer padding
 
-Padding does not change those capture limitations.
+For live capture, `AppController::Run_cli_capture_mode(...)` resolves one target
+rect from the selected source:
 
-### Off-desktop fill warning
+- requested region for `--region`
+- matched window rect for `--window` or `--window-hwnd`
+- selected monitor bounds for `--monitor`
+- virtual desktop bounds for `--desktop`
 
-When `--padding` is present and any part of the nominal source rect lies outside
-the virtual desktop, the command should succeed if at least one real desktop pixel
-is capturable, and should emit a warning that uncovered areas were filled.
+When `--padding` is present, the controller:
 
-Recommended wording:
+- keeps the original target rect as the source-extent truth
+- computes the final padded output size up front
+- sets `CaptureSaveRequest::padding_px`
+- sets `CaptureSaveRequest::fill_color`
+- sets `CaptureSaveRequest::preserve_source_extent = true`
+
+That `preserve_source_extent` flag is important. It tells the Win32 save path to
+preserve the requested source extent instead of silently shrinking the source to
+only the capturable intersection.
+
+The current Win32 save path then:
+
+1. captures or materializes the source image
+2. preserves the requested source extent when padding requires it
+3. fills uncovered source holes with the resolved padding color
+4. applies outer padding using the same fill color
+5. renders later output layers such as annotations onto the final canvas
+
+### Partially outside the virtual desktop
+
+For the GDI-backed live-capture path, padding changes partially out-of-bounds
+behavior from clipping to fill-preserving output.
+
+Current behavior:
+
+- if the target rect still intersects the virtual desktop, the command succeeds
+- uncapturable areas inside the preserved source extent are filled with the
+  resolved padding color
+- stderr includes:
 
 ```text
 Warning: Requested capture area extends outside the virtual desktop.
-Uncovered areas were filled with the configured padding color.
+Uncovered areas were filled with the padding color.
 ```
 
-This warning should apply consistently to padded `region`, `window`, `monitor`, or
-`desktop` captures if their nominal source geometry extends beyond capturable
-bounds.
+This warning is covered by `app_controller_tests.cpp`.
 
-### Completely outside desktop
+### Completely outside the virtual desktop
 
-If the nominal source rect has no intersection with the virtual desktop at all,
-the command should still fail. A fully synthetic image with no captured pixels is
-not a useful screenshot result.
+Padding does not allow a fully synthetic live capture result.
 
-### Overflow
+Current controller behavior for the GDI-prechecked live path:
 
-The implementation must detect arithmetic overflow when:
+- if the requested target rect has no intersection with the virtual desktop, the
+  command fails
+- region, monitor, and desktop captures fail before output-path reservation
+- forced GDI window capture follows the same rule
 
-- expanding the output canvas with padding
-- computing the source-canvas copy offsets
-- translating between virtual-desktop and destination coordinates
+Representative current errors are:
 
-If any of those calculations overflow 32-bit coordinate math, fail loudly with a
-clear CLI error message. The implementation may add a new unique exit code if that
-failure does not fit an existing category cleanly.
+- `Error: Requested capture area is outside the virtual desktop.`
+- `Error: Matched window is completely outside the virtual desktop. Nothing to capture.`
 
-## Parsing And Validation Design
+Window-backend-specific fallback behavior for `auto` and forced `wgc` is covered
+separately by the CLI window-capture design docs.
 
-### Core types
+### Overflow checks
 
-Add an explicit physical-pixel padding type in `greenflame_core`, for example:
+Before output-path work begins, the controller validates that padding can expand
+the requested source size without overflowing.
 
-```cpp
-struct InsetsPx final {
-    int32_t left{0};
-    int32_t top{0};
-    int32_t right{0};
-    int32_t bottom{0};
-};
-```
-
-And store the resolved CLI override color in an explicit field, for example:
-
-```cpp
-std::optional<COLORREF> padding_color_override = std::nullopt;
-```
-
-### CLI parser changes
-
-- Add a new option spec for `--padding-color`.
-- Extend `CliOptions` with:
-  - `std::optional<InsetsPx> padding_px`
-  - `std::optional<COLORREF> padding_color_override`
-- Reject duplicate `--padding`.
-- Reject duplicate `--padding-color`.
-- Allow `--padding` with any capture mode.
-- Reject `--padding-color` unless `--padding` is present.
-
-### Validation rules
-
-Parser-level checks for `--padding`:
-
-- token count must be 1, 2, or 4
-- every token must parse as `int32_t`
-- no token may be negative
-- 1-token form requires `n > 0`
-- 2-token and 4-token forms require at least one positive value
-
-Parser-level checks for `--padding-color`:
-
-- value must be present
-- value must parse as `#rrggbb`
-
-Cross-option validation:
-
-- `--padding` requires a capture mode
-- `--padding-color` requires both a capture mode and `--padding`
-
-## Capture Pipeline Design
-
-### Current limitation
-
-The current capture service is rect-oriented and clips requested screen rects to
-the virtual desktop before cropping the captured virtual-desktop bitmap.
-
-That is not enough for padding mode because padded captures now need:
-
-- preserved nominal source geometry
-- fill for uncapturable source pixels
-- synthetic outer padding
-
-### Recommended capture request model
-
-Instead of passing only a plain screen rect, introduce an explicit capture-render
-request, for example:
-
-```cpp
-struct CaptureRenderRequest final {
-    core::RectPx source_rect_screen = {};
-    core::InsetsPx outer_padding_px = {};
-    COLORREF fill_color = RGB(0, 0, 0);
-    bool preserve_source_extent = false;
-};
-```
-
-The exact type shape is flexible. The important requirement is that the Win32
-capture boundary knows:
-
-- the nominal source rect in screen coordinates
-- the amount of synthetic outer padding
-- the fill color
-- whether off-desktop portions of the source rect must be preserved and filled
-
-### Recommended Win32 algorithm
-
-For a padded capture:
-
-1. Capture the full virtual desktop once, as it does today.
-2. Allocate a source canvas sized to the nominal source rect.
-3. Fill the source canvas with the resolved padding color.
-4. Intersect the nominal source rect with the virtual desktop.
-5. Copy any intersecting real desktop pixels from the captured virtual-desktop
-   bitmap into the correct offset inside the source canvas.
-6. Allocate the final output canvas sized to `source + outer padding`.
-7. Fill the final output canvas with the same resolved padding color.
-8. Blit the source canvas into the final output canvas at `(left_padding, top_padding)`.
-9. Save the final output canvas through the existing file-format encode path.
-
-This keeps all Win32 bitmap work in `src/greenflame/win/` and all policy in
-`greenflame_core`.
-
-### Color consistency
-
-Use the same resolved padding color for both:
-
-- uncapturable portions of the nominal source rect
-- the synthetic outer padding area
-
-Using one color for both keeps the result visually coherent and avoids inventing
-an unnecessary second concept.
-
-## README / Help / Config Impact
-
-When implemented, the following user-facing docs must be updated:
-
-- `README.md`
-  - command-line option table
-  - examples
-  - output behavior notes
-  - config table under `save.*`
-  - exit-code table if a new exit code is added
-- `Build_cli_help_text(...)`
-  - add `--padding <n|h,v|l,t,r,b>`
-  - add `--padding-color <#rrggbb>`
-
-Recommended help descriptions:
+If padded dimensions cannot be represented, the command fails loudly with:
 
 ```text
-Add synthetic padding around the captured image in physical pixels.
-Accepts n, h,v, or l,t,r,b. Valid with any capture mode.
+Error: Requested padded output dimensions are invalid or too large.
 ```
 
-```text
-Override the padding color for this invocation only.
-Accepts #rrggbb. Valid only with --padding.
-```
+## `--input` Semantics
 
-Recommended README config entry:
+The old proposal limited padding to live capture. The shipped implementation does
+not.
 
-- `save.padding_color`
-  - default `#000000`
-  - padding color used by CLI captures when `--padding` is present and
-    `--padding-color` is not supplied
+Current `--input` behavior:
 
-## Testing Plan For Implementation
+- `--padding` is accepted with `--input`
+- `--padding-color` and `save.padding_color` apply the same way they do for live
+  capture
+- the controller probes the source image first, then derives
+  `RectPx::From_ltrb(0, 0, width, height)` as the unpadded source extent
+- the controller passes `InputImageSaveRequest::padding_px` and
+  `InputImageSaveRequest::fill_color` into the input-image save service
 
-This document does not add code, but the implementation should include both
-automated and manual coverage.
+Important differences from live capture:
 
-### Automated tests
+- there is no virtual-desktop clipping step
+- there is no off-desktop fill warning
+- there is no obscuration warning
+- padding is applied around the decoded source image, not around desktop pixels
 
-Add parser tests for:
+The Win32 input-image save path reuses the same exact-source save helper used by
+the capture path, which keeps padding behavior aligned across both modes.
 
-- `--padding` one-value form
-- `--padding` two-value form
-- `--padding` four-value form with `l,t,r,b`
-- trimming whitespace around comma-separated tokens
-- rejecting zero-only padding
-- rejecting negative values
-- rejecting 3-value padding
-- accepting `--padding` with `region`, `window`, `monitor`, and `desktop`
-- rejecting `--padding` without a capture mode
-- accepting valid `--padding-color`
-- rejecting invalid `--padding-color`
-- rejecting `--padding-color` without `--padding`
-- rejecting duplicates of either option
+## Output Resolution And Failure Ordering
 
-Add controller tests for:
+Padding-related validation happens before the controller starts reserving or
+creating output files.
 
-- color resolution order: CLI override, config value, default black
-- padded region capture
-- padded window capture
-- padded monitor capture
-- padded desktop capture
-- preserving nominal source size when part of the source rect is off-desktop
-- adding outer padding around the source canvas
-- keeping existing window obscuration warnings
-- emitting the new off-desktop fill warning
-- failing cleanly when the nominal source rect has no capturable pixels
-- failing cleanly on arithmetic overflow
+### Live capture ordering
 
-Add Win32 capture tests if a test seam is practical for:
+Current high-level order for live capture is:
 
-- source-canvas fill
-- final-canvas fill
-- intersection copy offsets
-- source-to-output blit offsets
+1. resolve target rect and source metadata
+2. validate padded output dimensions
+3. validate required virtual-desktop intersection for the GDI-prechecked path
+4. parse and prepare annotations
+5. resolve and reserve output path
+6. call the save service
 
-If some of that bitmap behavior is not practical to cover automatically, add
-explicit manual coverage instead.
+This ordering matters because padding overflow and fully-outside-desktop errors do
+not leave behind reserved output files.
 
-### Manual coverage to add
+### `--input` ordering
 
-When implemented, add manual CLI coverage for:
+Current high-level order for `--input` is:
 
-- `--region` with `--padding`
-- `--window` with `--padding`
-- `--monitor` with `--padding`
-- `--desktop` with `--padding`
-- symmetric and asymmetric padding
-- default config color
-- CLI color override
-- partially off-desktop padded captures
-- mixed-DPI, multi-monitor validation
-- invalid `--padding-color`
-- `--padding-color` without `--padding`
+1. resolve absolute input path
+2. probe and validate the input image
+3. validate padded output dimensions against decoded image size
+4. parse and prepare annotations
+5. resolve or reuse output path
+6. call the input-image save service
 
-## Settled CLI Shape
+This keeps padding validation dependent on real decoded dimensions rather than file
+extensions or guessed metadata.
 
-The user-facing feature is:
+### Cleanup on later save failure
 
-- `--padding`
-- `--padding-color`
-- `save.padding_color`
+If output-path reservation already happened and the later save step fails, the
+controller deletes the reserved output path when it owns that reservation:
 
-The semantics are:
+- default live-capture outputs reserved through `Reserve_unique_file_path(...)`
+- explicit outputs reserved through `Try_reserve_exact_file_path(...)`
 
-- padding is available on every CLI capture mode
-- padding is synthetic color only
-- the same resolved color fills both uncapturable source pixels and outer padding
-- four-value order is `l,t,r,b`
+For `--input` in-place overwrite, the save service handles crash-safe replacement
+internally instead of relying on controller-side reservation.
+
+## Ownership Split
+
+Current implementation split:
+
+- `cli_options.cpp`
+  - parses `--padding` and `--padding-color`
+  - enforces option-shape and source-availability rules
+- `app_controller.cpp`
+  - resolves padding color
+  - validates padded dimensions
+  - decides live-capture out-of-bounds failure vs warning behavior
+  - forwards padding metadata into live and input save requests
+- `app_config_json.cpp`
+  - parses and writes `save.padding_color`
+- `win32_services.cpp`
+  - materializes preserved source extents
+  - fills uncovered areas and outer padding
+  - shares the final save helper between capture and input-image flows
+
+This split is consistent with the rest of Greenflame's controller-first CLI
+design: policy in core, pixel work in Win32 services.
+
+## Automated Coverage
+
+Current automated coverage includes:
+
+- `cli_options_tests.cpp`
+  - one-, two-, and four-value padding parsing
+  - whitespace trimming
+  - duplicate-option rejection
+  - zero-value, negative-value, and malformed-form rejection
+  - `--padding` source requirements
+  - `--padding-color` dependency and parsing
+- `app_controller_tests.cpp`
+  - config-default color use
+  - CLI override precedence
+  - preserved-source-extent save requests
+  - partially out-of-bounds fill warning
+  - fully outside-desktop failure
+  - padded-dimension overflow failure
+  - `--input` save-request wiring
+- `app_config_tests.cpp`
+  - default black padding color
+  - config parse and round-trip coverage for `save.padding_color`
+
+At this point, doc drift risk is mostly around parser details and backend-specific
+window behavior, not missing feature coverage.

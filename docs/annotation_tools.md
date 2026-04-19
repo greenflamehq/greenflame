@@ -483,8 +483,10 @@ The overlay paint path draws in this order:
 The output pipeline is:
 
 1. crop the original desktop capture to the selected region
-2. composite committed annotations whose bounds intersect that region
-3. either encode, copy, or pin the composited bitmap
+2. if the captured cursor is currently shown, composite it into the cropped
+   screenshot
+3. composite committed annotations whose bounds intersect that region
+4. either encode, copy, or pin the composited bitmap
 
 The overlay UI chrome itself is not included in output.
 

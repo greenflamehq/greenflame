@@ -1,112 +1,181 @@
+---
+title: Wheel Keyboard Navigation
+summary: Current reference for keyboard and mouse-wheel navigation of the overlay selection wheel.
+audience:
+  - contributors
+status: reference
+owners:
+  - core-team
+last_updated: 2026-04-19
+tags:
+  - overlay
+  - selection-wheel
+  - keyboard
+  - input
+---
+
 # Wheel Keyboard Navigation
 
-## Overview
+This document describes the current keyboard and mouse-wheel behavior for the
+overlay selection wheel.
 
-The selection wheel currently only responds to mouse hover and click. This document specifies
-keyboard and scroll-wheel navigation: moving the hover with the mouse wheel or the Up/Down
-arrow keys, confirming with `Enter`, and showing the wheel with `Tab`.
+For user-visible shortcut wording, [README.md](../../README.md) is the public
+reference. This document focuses on the current input model in
+`src/greenflame/win/overlay_window.cpp`.
 
----
+## Current Status
 
-## New Inputs
+Wheel navigation is implemented.
 
-| Input | Action |
-|---|---|
-| Scroll wheel up | Navigate hover counter-clockwise |
-| Scroll wheel down | Navigate hover clockwise |
-| `↑` (Up arrow) | Navigate hover counter-clockwise |
-| `↓` (Down arrow) | Navigate hover clockwise |
-| `Enter` | Select the currently hovered segment |
-| `Tab` | Show wheel at cursor (first press); cycle views on subsequent presses |
+- `Tab` shows the wheel when it is hidden.
+- `Tab` cycles wheel views while the wheel is visible for multi-view tools.
+- `Up`, `Down`, and mouse-wheel input navigate ring segments.
+- `Enter` confirms the effective segment and dismisses the wheel.
+- Hub buttons remain pointer-only.
 
-All of the above only apply while the wheel is visible, except `Tab` (which can show it).
+## Supported Inputs
 
----
+While the wheel is visible:
 
-## Hover State Model
+- mouse-wheel up: navigate counter-clockwise
+- mouse-wheel down: navigate clockwise
+- `Up`: navigate counter-clockwise
+- `Down`: navigate clockwise
+- `Enter`: select the effective segment, then dismiss the wheel
+- `Escape`: dismiss the wheel without changing the selection
 
-Two hover sources exist simultaneously:
+While the wheel is hidden:
 
-- **Mouse hover** — whichever segment the cursor is physically over (or none).
-- **Nav hover** — the segment most recently set by keyboard/scroll-wheel navigation.
+- bare `Tab`: show the wheel at the current cursor position
 
-### Effective hover
+## Hover Model
 
-```
-effective_hover =
-    nav_hover            if nav_hover is set
-    mouse_hover          if mouse is over a segment
-    currently_selected   otherwise
-```
+The wheel uses two segment-hover sources:
 
-The effective hover is what is displayed and what `Enter` acts on.
+- `mouse_hovered_segment`
+- `nav_hovered_segment`
 
-### Nav hover lifetime
+Hover precedence is:
 
-- **Set** by any keyboard or scroll-wheel navigation event.
-- **Cleared** when the mouse cursor enters a segment.
-  After clearing, the effective hover reverts to the mouse-over segment.
-- Mouse movement that does not cross into any segment leaves nav hover unaffected.
+1. `nav_hovered_segment`
+2. `mouse_hovered_segment`
+3. the currently selected segment
 
-Nav hover is also cleared when the wheel is dismissed.
+This means keyboard or mouse-wheel navigation temporarily overrides mouse hover
+until the pointer enters a ring segment again.
 
----
+## Mouse Interaction Rules
 
-## Navigation Baseline
+Current pointer behavior is slightly narrower than the earlier proposal:
 
-When a navigation event fires, the starting point for the step is:
+- entering a ring segment clears `nav_hovered_segment`
+- moving the mouse without entering a ring segment does not clear `nav_hovered_segment`
+- hovering a hub updates hub hover state, but does not create a keyboard-navigable
+  target
 
-1. `nav_hover` — if already set, continue from there.
-2. Mouse-over segment — if the cursor is currently on a segment.
-3. Currently selected segment — if the tool has a selection.
-4. *(No selection)* — counter-clockwise lands on the last segment; clockwise on the first.
+As a result, keyboard navigation remains in control until the pointer actively
+re-enters the ring.
 
-Navigation wraps around (segment `0` ↔ segment `N−1`).
+## Initial State When Shown
 
----
+Showing the wheel resets:
 
-## Tab Behaviour
+- `mouse_hovered_segment`
+- `nav_hovered_segment`
+- hub hover state
+- scroll-delta remainder
 
-- **First `Tab`** while wheel is hidden: show the wheel at the current cursor position
-  (same as right-click). No segment is pre-hovered by keyboard; effective hover is the
-  currently selected segment (or none if the cursor is over a segment).
-- **Subsequent `Tab`** presses while wheel is visible:
-  - *Multi-view wheels* — cycle to the next view.
-    Nav hover is cleared on view switch (segment indices change meaning between views).
-  - *Single-view wheels* — ignored.
+The wheel does not immediately recompute hover from the stationary cursor when it
+opens. Until the mouse moves or navigation input occurs, the effective segment is
+the currently selected segment for the active wheel view.
 
----
+## `Tab` Behavior
 
-## Enter Behaviour
+### When hidden
 
-`Enter` selects the effective hover segment (same effect as clicking that segment) and
-dismisses the wheel. If there is no effective hover (wheel shown but no selection and cursor
-not over a segment), `Enter` is ignored.
+Bare `Tab` shows the wheel at the current cursor position, using the same entry
+path as the explicit wheel-open action.
 
----
+### When visible
 
-## Interaction with Mouse
+Bare `Tab` cycles views only for tools with multiple wheel views:
 
-Mouse hover never blocks keyboard navigation. Keyboard navigation immediately overrides the
-displayed hover. The moment the mouse moves, `nav_hover` is cleared and the mouse position
-takes over. This means:
+- Text
+- Bubble
+- Highlighter
 
-- Mouse over segment 1 → hover displays segment 1.
-- `↓` twice → nav hover set to segment 3; display shows segment 3 (mouse still over 1).
-- `Enter` → segment 3 selected.
-- Mouse moves one pixel (cursor stays over segment 1) → nav hover cleared; display reverts to
-  segment 1 (where the mouse is).
-- Alternatively: mouse moves into empty space (no segment) → nav hover is **not** cleared;
-  display remains on segment 3.
+View switching clears both segment-hover sources and the relevant hub hover state.
 
----
+Current view switching is:
 
-## Scope
+- Text and Bubble: `Color` <-> `Font`
+- Highlighter: `Color` <-> `Opacity`
 
-- Navigation applies to both ring segments and font-mode segments.
-- Hub buttons (Color / Font toggle in the text wheel center) are not keyboard-navigable;
-  they remain pointer-only.
-- Scroll-wheel input is consumed by the wheel only while the wheel is visible; default
-  window scroll behaviour is unaffected when the wheel is hidden.
-- `Tab` view-cycling generalises to any wheel with more than one view; no hardcoded
-  per-tool check.
+Single-view tools ignore `Tab` while the wheel is visible.
+
+## Navigation Model
+
+### Standard ring views
+
+For ordinary color and font rings, navigation wraps.
+
+Examples:
+
+- moving past the last segment wraps to segment `0`
+- moving backward from segment `0` wraps to the last segment
+
+### Highlighter opacity view
+
+The highlighter opacity view uses clamped navigation rather than wraparound.
+
+Implementation details:
+
+- the rendered layout includes one phantom slot to keep the wheel geometry aligned
+- navigation excludes that phantom slot
+- `Up` and `Down` clamp at the first and last real preset
+
+This is the only current wheel view that uses clamped navigation.
+
+## `Enter` Behavior
+
+Pressing `Enter` while the wheel is visible:
+
+1. resolves the effective segment using the current hover-precedence rules
+2. applies that segment through `Select_wheel_segment(...)`
+3. dismisses the wheel
+
+Because the effective segment falls back to the currently selected segment, `Enter`
+can reaffirm the existing selection even when no explicit hover is active.
+
+## Scope Limits
+
+The current implementation does not provide keyboard navigation for hub buttons.
+
+That applies to:
+
+- the Text/Bubble center hub
+- the Highlighter center hub
+
+Those mode switches remain pointer-only.
+
+## Source Locations
+
+Current behavior is split across:
+
+- `src/greenflame/win/overlay_window.cpp`
+  - view switching
+  - hover precedence
+  - wheel navigation
+  - `Tab`, `Enter`, `Up`, `Down`, and mouse-wheel routing
+- `src/greenflame_core/selection_wheel.*`
+  - segment geometry
+  - ring hit-testing
+  - hub hit-testing
+  - clamped-navigation angle helpers
+- `tests/selection_wheel_tests.cpp`
+  - geometry and hit-testing coverage for ring and hub layouts
+
+## Related Documents
+
+- [README.md](../../README.md): user-facing shortcut documentation
+- [docs/annotation_tools.md](../annotation_tools.md): authoritative annotation-tool behavior

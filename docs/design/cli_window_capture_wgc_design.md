@@ -1,488 +1,327 @@
 ---
 title: CLI WGC Window Capture Design
-summary: Proposed CLI backend-selection design for using Windows Graphics Capture for window captures.
-audience: contributors
-status: proposed
+summary: Current contributor reference for the shipped WGC window-capture backend, including controller fallback rules and the Win32 capture pipeline.
+audience:
+  - contributors
+status: reference
 owners:
   - core-team
-last_updated: 2026-03-22
+last_updated: 2026-04-19
 tags:
   - cli
   - window
   - capture
   - wgc
-  - proposal
 ---
 
 # CLI WGC Window Capture Design
 
-This document defines the proposed behavior and implementation shape for adding
-an optional Windows Graphics Capture backend to CLI window capture.
+This document describes the current shipped implementation of the CLI WGC window
+capture path.
 
-The user-facing feature is:
+It replaces the earlier proposal-style version of this file. The implementation,
+tests, and higher-priority reference docs are authoritative when this document is
+updated.
 
-- `--window-capture auto|gdi|wgc`
+For the public CLI contract, see [cli_window_capture.md](cli_window_capture.md)
+and [README.md](../../README.md).
 
-This option applies only to CLI window capture modes:
+## Current Status
 
-- `--window`
-- `--window-hwnd`
+The `--window-capture auto|gdi|wgc` feature is already shipped.
 
-The current GDI path remains available. The new WGC path is CLI-only and does
-not change interactive overlay capture behavior.
+Current facts:
 
-## Recommendation Summary
+- the backend selector is CLI-only
+- the option applies only to `--window` and `--window-hwnd`
+- `auto` is the current default and prefers WGC
+- `gdi` preserves the visible-desktop crop path
+- `wgc` forces the dedicated WGC capture path and does not fall back
 
-- Recommended option name: `--window-capture`
-- Recommended values:
-  - `auto`
-  - `gdi`
-  - `wgc`
-- Recommended default: `auto`
-- Option is valid only with:
-  - `--window`
-  - `--window-hwnd`
-- `auto` should prefer WGC when runtime/platform support is acceptable, and
-  otherwise fall back to GDI
-- `gdi` preserves current behavior
-- `wgc` forces the WGC backend and must not fall back to GDI
-- Minimized windows remain errors even under WGC
-- Current obscuration and partially-off-screen warnings should disappear when
-  WGC is the selected backend
-- Recommended new exit code: `15` for forced-window-backend failure or
-  unavailability
-- The yellow-border question is explicitly unresolved and must be decided later
-  before the final `auto` policy is locked
+This is no longer a design handoff. The parser, controller policy, request
+model, WGC capture implementation, fallback behavior, and coverage already
+exist.
 
-## Goals
+## Request Model
 
-- Let CLI users capture window content even when the target window is:
-  - obscured by other windows
-  - partially outside the visible desktop
-- Keep the existing GDI path as an explicit, deterministic backend
-- Make backend selection explicit and scriptable
-- Keep the feature limited to CLI window capture
-- Preserve current exit-code behavior wherever practical
-- Preserve existing annotation and padding behavior on the final saved image
-- Keep core orchestration in `greenflame_core`
-- Keep Win32/WGC implementation details in `src/greenflame/win/`
+The shipped implementation no longer treats window capture as a rect-only
+special case.
 
-## Non-Goals For V1
+Current core request types:
 
-- Changing interactive overlay capture
-- Switching monitor, desktop, or region capture to WGC
-- Supporting minimized windows under WGC
-- Solving the yellow-border question in this document
-- Shipping a packaged/MSIX-specific deployment model
-- Copy-to-clipboard WGC support
-- Recording or multi-frame capture
+- `WindowCaptureBackend`
+  - `Auto`
+  - `Gdi`
+  - `Wgc`
+- `CaptureSourceKind`
+  - `ScreenRect`
+  - `Window`
 
-## Current Behavior
+Current `CaptureSaveRequest` carries the fields needed by both backends:
 
-Today, CLI window capture is rect-based and GDI-backed:
+- `source_kind`
+- `window_capture_backend`
+- `source_rect_screen`
+- `source_window`
+- `padding_px`
+- `fill_color`
+- `include_cursor`
+- `preserve_source_extent`
+- `annotations`
 
-- `AppController` resolves an `HWND` and a screen rect
-- the capture service receives a `CaptureSaveRequest` containing only a screen
-  rect and padding/fill metadata
-- the Win32 capture service captures the desktop bitmap and crops the requested
-  rect
+This allows the controller to keep a shared output pipeline while still giving
+the Win32 layer enough information to distinguish:
 
-This means current CLI `--window` behavior inherits desktop-visibility
-limitations:
+- rect-based GDI capture
+- HWND-targeted WGC window capture
 
-- obscured windows may include other windows in the result
-- partially off-desktop windows may clip or require fill
-- minimized windows are rejected before capture
+## Parser And Validation
 
-Relevant current seams:
+Current parser behavior in `cli_options.cpp`:
 
-- [app_controller.cpp](../src/greenflame_core/app_controller.cpp)
-- [app_services.h](../src/greenflame_core/app_services.h)
-- [gdi_capture.cpp](../src/greenflame/win/gdi_capture.cpp)
-- [win32_services.cpp](../src/greenflame/win/win32_services.cpp)
+- `--window-capture` accepts `auto`, `gdi`, or `wgc`
+- parsing is case-insensitive
+- duplicate uses are rejected
+- the option requires `--window` or `--window-hwnd`
+- the default remains `WindowCaptureBackend::Auto`
 
-## Platform Facts
+The parser does not try to choose policy beyond this. Backend selection and
+fallback rules remain controller concerns.
 
-The following platform facts are relevant to the design:
+## Controller Flow
 
-- `IGraphicsCaptureItemInterop::CreateForWindow` is documented for desktop-app
-  `HWND` capture starting with Windows 10 version 1903, build 18362
-- the broader `Windows.Graphics.Capture` API family starts earlier, but the
-  `CreateForWindow` path is the relevant one here
-- Microsoft also documents a system capture border for screen-capture APIs
-- the newer border-control API, `GraphicsCaptureSession::IsBorderRequired`, is
-  newer and tied to separate access/capability requirements
+`AppController::Run_cli_capture_mode(...)` owns backend orchestration.
 
-Reference sources:
+Current high-level order for window capture is:
 
-- [Windows screen capture overview](https://learn.microsoft.com/en-us/windows/uwp/audio-video-camera/screen-capture)
-- [IGraphicsCaptureItemInterop](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nn-windows-graphics-capture-interop-igraphicscaptureiteminterop)
-- [GraphicsCaptureSession::IsBorderRequired](https://learn.microsoft.com/en-us/uwp/api/windows.graphics.capture.graphicscapturesession.isborderrequired?view=winrt-26100)
+1. resolve the target window by title or `HWND`
+2. reject unavailable, minimized, or uncapturable windows before backend save
+3. resolve the canonical window rect
+4. collect window-obscuration state and virtual-desktop bounds
+5. load prepared annotations
+6. resolve and reserve the output path
+7. build `CaptureSaveRequest`
+8. dispatch by backend mode
 
-## User-Facing Behavior
+### Shared pre-backend rejection
 
-### Option grammar
+Current pre-backend hard failures include:
 
-New option:
+- invalid or disappeared window
+- minimized window
+- uncapturable window with `WDA_EXCLUDEFROMCAPTURE`
 
-```bat
---window-capture auto|gdi|wgc
+These are intentionally backend-independent.
+
+### Title-based minimized-match handling
+
+The controller uses a backend-sensitive title-match rule:
+
+- `Uses_wgc_title_match_handling(...)` returns true for `auto` and `wgc`
+- it returns false for `gdi`
+
+Current behavior for `auto` and `wgc` title queries:
+
+- if no visible window matches remain, the controller counts minimized title
+  matches and may return exit code `13` with a minimized-specific message
+- if one visible match is selected while additional matches are minimized, the
+  controller emits a warning that the minimized matches were skipped
+
+Current behavior for `gdi` title queries:
+
+- the older visible-window-only behavior remains
+- minimized matches do not alter the "no visible window matches" result
+
+## Backend Dispatch
+
+### Forced `gdi`
+
+The controller goes directly to the GDI save path and preserves the existing GDI
+warning model:
+
+- fully obscured warning
+- partially obscured warning
+- partially outside visible desktop warning
+- padding fill warning when needed
+
+### Forced `wgc`
+
+The controller sends a window-scoped `CaptureSaveRequest` to the capture
+service:
+
+- `source_kind = Window`
+- `window_capture_backend = Wgc`
+- `source_window = resolved HWND`
+- `source_rect_screen = resolved window rect`
+
+If the save service returns `CaptureSaveStatus::BackendFailed`, the controller
+maps that failure to `CliWindowCaptureBackendFailed` (exit code `15`).
+
+There is no GDI fallback in forced `wgc` mode.
+
+### `auto`
+
+`auto` is implemented as "try WGC first, then maybe fall back to GDI."
+
+Current controller behavior:
+
+1. attempt `Save_capture_to_file(...)` with backend `Wgc`
+2. if status is `Success`, finish successfully
+3. if status is `SaveFailed`, do not fall back; return the normal capture/save
+   failure path
+4. if status is `BackendFailed`, emit:
+
+```text
+Info: WGC window capture failed; falling back to GDI.
 ```
 
-Rules:
+5. if the window rect has no capturable intersection with the virtual desktop,
+   return the outside-the-virtual-desktop error instead of attempting GDI
+6. otherwise, run the normal GDI save path and warnings
 
-- default is `auto`
-- option is valid only when the capture mode is window-based:
-  - `--window`
-  - `--window-hwnd`
-- it is invalid with:
-  - `--region`
-  - `--monitor`
-  - `--desktop`
-  - no capture mode
-- duplicate uses are errors
-- values are case-insensitive for parsing but should normalize internally
+This means only backend failures trigger fallback. Later save failures do not.
 
-### Backend semantics
+It also means the original WGC backend error text is intentionally not surfaced
+in `auto`; the user sees the fallback info line and then either the GDI result
+or the GDI-precheck failure.
 
-`gdi`
+## Win32 Capture-Service Boundary
 
-- use the current desktop-capture-plus-crop path
-- preserve current warnings and current minimized rejection
+`Win32CaptureService::Save_capture_to_file(...)` is the main backend dispatch
+point in the Win32 layer.
 
-`wgc`
+Current WGC branch condition:
 
-- force the WGC window-capture path
-- if WGC cannot be used on the current system or for the current target window,
-  fail loudly rather than silently falling back
-- do not fall back to GDI
-- minimized windows still fail before capture
+- `request.source_kind == CaptureSourceKind::Window`
+- `request.window_capture_backend == WindowCaptureBackend::Wgc`
 
-`auto`
+When that branch is taken, the service:
 
-- prefer WGC when the runtime/platform policy says it is acceptable
-- otherwise use GDI
-- if `auto` resolves to GDI because WGC is unavailable or disallowed by policy,
-  the command may emit an informational stderr line
+1. validates that `source_window` is non-null
+2. calls `Capture_window_with_wgc(...)`
+3. optionally captures a cursor snapshot through Greenflame's own cursor path
+4. passes the captured bitmap into `Save_exact_source_capture_to_file(...)`
 
-Recommended info message shape:
+This is important because WGC does not fork the rest of the save pipeline.
+Padding, cursor composition, annotation rendering, and file encoding still flow
+through the same downstream save helper.
 
-- `Info: WGC window capture unavailable; falling back to GDI.`
+All non-WGC window cases continue through the GDI/virtual-desktop path.
 
-## Resolved Behavior Decisions
+## WGC Capture Pipeline
 
-### Applies to both `--window` and `--window-hwnd`
+The shipped WGC implementation lives in `wgc_window_capture.cpp`.
 
-The backend selector must work for both title-based and handle-based window
-selection.
+Current high-level flow in `Capture_window_with_wgc(...)`:
 
-Reason:
+1. validate the target `HWND` and normalized window rect
+2. ensure the WGC capture-thread apartment exists
+3. ensure WGC support is available for the process and system
+4. create a D3D11 device and context
+5. bridge that device into a WinRT `IDirect3DDevice`
+6. create a `GraphicsCaptureItem` for the target `HWND`
+7. read the capture-item size and validate it
+8. create a free-threaded frame pool
+9. create a capture session
+10. disable WGC-native cursor capture with `IsCursorCaptureEnabled(false)`
+11. start capture and wait for the first frame
+12. convert the returned frame into the GDI bitmap shape used by the rest of the
+    save pipeline
+13. require the returned frame size to match the resolved window rect exactly
 
-- both flows resolve to one `HWND`
-- supporting one but not the other would be artificial and confusing
+If any of these steps fail, the function returns `CaptureSaveStatus::BackendFailed`
+with a concrete error message.
 
-### Minimized windows remain errors
+Representative failure messages include:
 
-Even under WGC, minimized windows remain a hard error in V1.
+- unsupported WGC on the current system
+- timeout waiting for the first frame
+- failure while acquiring or converting the frame
+- returned frame-size mismatch versus the resolved window rect
 
-Reason:
+## Padding, Cursor, And Annotation Semantics
 
-- current CLI behavior already rejects minimized windows
-- minimized WGC capture may produce stale or otherwise ambiguous content
-- minimized windows complicate coordinate semantics for annotations
-- obscured and partially off-desktop windows are the primary value of this
-  feature without introducing those ambiguities
+Because successful WGC capture feeds into `Save_exact_source_capture_to_file(...)`,
+the downstream composition rules are shared with other output paths.
 
-Recommended behavior:
+### Padding
 
-- keep existing exit code `13`
-- adjust the error text only if needed to mention WGC is not used for minimized
-  windows
+Current WGC padding behavior:
 
-### WGC removes current obscuration and out-of-desktop warnings
+- the source image is the full window image returned by WGC
+- padding remains synthetic outer canvas only
+- partially off-screen WGC success does not rely on synthetic fill inside the
+  source image the way the GDI preserved-source-extent path can
 
-When WGC is the resolved backend, the current CLI window warnings about
-obscuration or partially outside visible desktop bounds should not be emitted.
+### Cursor
 
-Reason:
+The current WGC path intentionally disables WGC-native cursor capture.
 
-- those warnings describe limitations of the GDI desktop-crop path
-- they become misleading once the source is the window itself rather than the
-  visible desktop pixels
+If `include_cursor` is enabled:
 
-### Padding remains outer synthetic padding
+- Greenflame captures its own cursor snapshot after the WGC image is acquired
+- that snapshot is composited into the source bitmap
+- annotation rendering still happens later
 
-`--padding` still means synthetic outer canvas around the final captured image.
+This preserves one consistent cursor-composition path and avoids duplicate
+cursor rendering from WGC itself.
 
-With GDI:
+### Annotations
 
-- source holes caused by off-desktop window areas may still be filled using the
-  existing logic
+Current annotation behavior is unchanged by backend choice:
 
-With WGC:
+- local coordinates remain relative to the top-left of the window image
+- global coordinates remain relative to the resolved screen rect
+- annotations render after capture, cursor composition, and padding
 
-- partially off-desktop windows should no longer create source holes that need
-  fill
-- only the requested outer padding should remain
+## Current Policy Decisions
 
-### Annotations remain a final composite step
+Several decisions that were open in the proposal are now settled in code.
 
-The existing CLI annotation flow remains conceptually unchanged:
+### `auto` currently prefers WGC unconditionally
 
-- capture source bitmap
-- build fill/padding canvas if needed
-- composite annotations last
+The shipped `auto` behavior always tries WGC first. There is no extra runtime
+policy gate beyond support and backend success/failure.
 
-For non-minimized WGC window capture:
+### Minimized windows remain unsupported
 
-- local coordinates remain relative to the window capture origin
-- global coordinates remain relative to desktop coordinates using the matched
-  window rect
+Minimized windows are still rejected before backend save work. WGC is not used
+to capture minimized windows.
 
-Because minimized windows remain unsupported, the ambiguous global-coordinate
-case is avoided in V1.
+### GDI warning text remains backend-specific
 
-## Unresolved Decision: Yellow Capture Border
+The current obscuration and off-desktop warning text remains part of the GDI
+path. Successful WGC captures do not emit that warning model.
 
-This point is intentionally not resolved in this document.
+### Yellow-border observations are no longer a design blocker
 
-The open question is:
+The old proposal treated the possible WGC capture border as unresolved. The
+shipped implementation no longer blocks `auto` on that question.
 
-- if WGC causes Windows to draw a system capture border, does that border:
-  - appear only around the live on-screen window
-  - appear inside the captured pixel content
-  - change by OS build, capture path, or deployment model
+Manual coverage still records whether any yellow border appears on screen or in
+saved output, but the controller does not gate backend choice on that result.
 
-This matters because it directly affects the final `auto` policy.
+## Coverage
 
-### Why it is deferred
+Current automated coverage includes:
 
-The feature can still be designed structurally without deciding this yet, but
-the final product default cannot be fully locked until it is tested.
+- `cli_options_tests.cpp`
+  - backend parsing
+  - duplicate rejection
+  - invalid-value rejection
+  - source requirement enforcement
+- `app_controller_tests.cpp`
+  - `auto` defaulting to WGC
+  - explicit `gdi` warning behavior
+  - minimized title-match warning and error behavior for WGC-capable modes
+  - auto fallback info-line behavior
+  - off-screen auto fallback short-circuit
+  - forced-WGC exit code `15`
+  - WGC frame-size mismatch handling
+  - uncapturable-window rejection before backend save
+- `docs/manual_test_plan.md`
+  - case `GF-MAN-CLI-011` for visible, obscured, off-screen, `HWND`, padded,
+    annotated, minimized, and yellow-border observations
 
-### Required follow-up before final implementation sign-off
-
-A manual spike must determine, for the actual `CreateForWindow(HWND)` path used
-by Greenflame:
-
-- whether the border appears on screen
-- whether it appears in the captured bitmap
-- whether it sits outside the returned content bounds or contaminates edge
-  pixels
-- whether behavior differs across tested Windows builds
-
-### Interim design rule
-
-Implementation work must preserve a clear policy seam for deciding whether
-`auto` should choose WGC on systems where the border may appear.
-
-Do not hardcode:
-
-- `auto = always prefer WGC whenever API support exists`
-
-until this question is closed.
-
-## Recommended `auto` Policy Shape
-
-The final policy is deferred, but the implementation shape should support this
-decision table:
-
-1. If user requested `gdi`, use GDI.
-2. If user requested `wgc`, require WGC and fail if unavailable.
-3. If user requested `auto`:
-   - evaluate whether WGC is supported and permitted by policy
-   - if yes, use WGC
-   - if no, use GDI
-
-The “permitted by policy” part is where the unresolved yellow-border decision
-plugs in.
-
-## Architecture Impact
-
-The current save path is not enough for WGC because it only expresses a screen
-rect source.
-
-Current shape:
-
-```cpp
-struct CaptureSaveRequest {
-    RectPx source_rect_screen;
-    InsetsPx padding_px;
-    COLORREF fill_color;
-    bool preserve_source_extent;
-    std::vector<Annotation> annotations;
-};
-```
-
-That is appropriate for:
-
-- desktop capture
-- monitor capture
-- region capture
-- current GDI window capture
-
-It is not a clean fit for:
-
-- WGC capture of a specific `HWND`
-
-### Recommended model change
-
-Introduce an explicit capture-source kind in `CaptureSaveRequest`.
-
-Recommended conceptual shape:
-
-```cpp
-enum class CaptureSourceKind : uint8_t {
-    ScreenRect,
-    WindowHwnd,
-};
-
-enum class WindowCaptureBackend : uint8_t {
-    Auto,
-    Gdi,
-    Wgc,
-};
-```
-
-And then extend the request so the service can distinguish:
-
-- rect-based capture
-- HWND-based window capture
-- desired window backend
-
-The exact C++ layout is an implementation detail, but the request must be able
-to carry:
-
-- requested capture source kind
-- resolved or requested backend
-- target `HWND` for window capture
-- canonical window rect for output geometry and annotation coordinate mapping
-
-### Why this is preferable
-
-- keeps backend selection out of the Win32 service internals alone
-- keeps controller policy explicit and testable
-- avoids shoehorning WGC into a rect-only interface
-
-## Controller Behavior
-
-`AppController` should continue to own:
-
-- CLI parse validation
-- window lookup and ambiguity handling
-- minimized-window rejection
-- output-path policy
-- warning selection
-- annotation parse/preparation sequencing
-
-For window capture specifically, the controller should additionally own:
-
-- resolving the requested backend from `--window-capture`
-- evaluating `auto`
-- deciding whether to emit an info line when `auto` falls back to GDI
-- suppressing GDI-only warnings when WGC is the resolved backend
-
-## Win32 Implementation Behavior
-
-The Win32 layer should own:
-
-- WGC capability probing
-- `HWND` -> `GraphicsCaptureItem` interop
-- device/session/frame acquisition
-- conversion of the captured frame into the bitmap format expected by the save
-  pipeline
-
-The GDI helper code should remain intact as the explicit GDI backend.
-
-## Error Handling
-
-Recommended behavior:
-
-- parse errors for `--window-capture` remain CLI argument failures
-- minimized window remains exit code `13`
-- forced `wgc` on an unavailable/unsupported system should fail with a dedicated
-  backend-failure exit code
-- forced `wgc` runtime failures for the matched window should also fail with that
-  same backend-failure exit code in V1
-- `auto` fallback to GDI is not an error
-
-Recommended stderr wording examples:
-
-- `Error: WGC window capture is not available on this system.`
-- `Error: Forced WGC window capture failed for the matched window.`
-- `Info: WGC window capture unavailable; falling back to GDI.`
-
-Recommended new exit code:
-
-- `15 = CliWindowCaptureBackendFailed`
-
-Reason:
-
-- `wgc` is an explicit strict request rather than a hint
-- silently or generically collapsing this into the normal capture-save failure
-  path would make scripting less reliable
-- callers should be able to distinguish:
-  - generic save/write failures
-  - window unavailability
-  - minimized-window rejection
-  - forced backend unavailability/failure
-
-## Testing Impact
-
-### Automated tests
-
-Tests should cover:
-
-- CLI parse of `--window-capture auto|gdi|wgc`
-- option validity only with `--window` / `--window-hwnd`
-- duplicate rejection
-- controller behavior for:
-  - `gdi`
-  - `wgc`
-  - `auto` resolving to WGC
-  - `auto` falling back to GDI
-- minimized-window rejection regardless of backend
-- warning suppression when WGC is resolved
-
-### Manual verification
-
-Manual cases should cover:
-
-- visible unobscured window, `gdi`
-- visible unobscured window, `wgc`
-- fully obscured window, `gdi`
-- fully obscured window, `wgc`
-- partially off-desktop window with padding, `gdi`
-- partially off-desktop window with padding, `wgc`
-- `--window-hwnd` with `wgc`
-- `auto` on a system where WGC is accepted
-- `auto` on a system where WGC falls back to GDI
-- minimized window under `wgc` still failing with exit `13`
-- yellow-border investigation cases
-
-## Open Questions
-
-These questions remain open for later decision:
-
-1. Yellow border:
-   - does it appear in captured pixels
-   - on which systems/builds
-   - should `auto` avoid WGC if the border is visible on screen but not in
-     captured pixels
-2. Exact `auto` eligibility criteria:
-   - runtime API support only
-   - or runtime API support plus additional product-policy gates
-3. Messaging:
-   - should `auto` fallback always print an info line
-   - or only in verbose/debug-style scenarios
-
-## Recommended Implementation Order
-
-1. Extend CLI parsing with `--window-capture`.
-2. Add a backend-selection enum and controller policy.
-3. Extend the capture request model to represent window-HWND capture explicitly.
-4. Add a WGC-backed Win32 capture path for CLI window capture.
-5. Keep minimized-window rejection unchanged.
-6. Remove GDI-only warnings when WGC is the resolved backend.
-7. Add tests and manual cases.
-8. Resolve the yellow-border policy before finalizing `auto`.
+At this point, the highest remaining drift risk is usually around user-facing
+warning wording or fallback semantics, not missing implementation coverage.

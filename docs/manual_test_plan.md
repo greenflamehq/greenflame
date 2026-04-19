@@ -1016,8 +1016,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - After selecting a font segment, the wheel closes and that font is used by the next
     text draft.  The right-hub `A` updates when the wheel is reopened.
   - `Esc` closes the wheel without changing color or font.
-  - Reopening the wheel opens in the mode last used in the session (font mode if font
-    was the last mode selected).
+  - Reopening the wheel opens in color mode again; mode does not persist across
+    open/close cycles.
   - Right-click while a text draft is active does not open the style wheel.
   - Non-text annotation selection wheels show no hub; only a plain color ring.
 

@@ -1,212 +1,194 @@
 ---
 title: Obfuscate Risk Warning
-summary: Adds a first-use warning gate for the Obfuscate tool and persists explicit acknowledgement.
-audience: contributors
-status: draft
+summary: Current reference for the first-use Obfuscate warning, persisted acknowledgement, and CLI safety gate.
+audience:
+  - contributors
+status: reference
 owners:
   - core-team
-last_updated: 2026-03-27
+last_updated: 2026-04-19
 tags:
   - overlay
-  - annotations
-  - tools
   - obfuscate
+  - warning
   - config
+  - cli
 ---
 
 # Obfuscate Risk Warning
 
-## Overview
+This document describes the current shipped warning and acknowledgement flow for
+the Obfuscate tool.
 
-When a user tries to activate **Obfuscate** for the first time, Greenflame should
-show a modal in-overlay warning before allowing normal use of the tool. The goal is
-to make the risk explicit: blur and pixelation are useful for casual concealment, but
-they are **not** cryptographically safe redaction.
+For the interactive obfuscate tool itself, see [obfuscate_tool.md](obfuscate_tool.md).
 
-This warning is inspired by Flameshot's existing pixelation warning. The Greenflame
-copy should keep the same core message while fitting Greenflame's overlay UI:
+## Current Status
 
-- obfuscation is not a security feature
-- hidden content, especially text, may sometimes be recovered
-- users who need strong redaction should use a solid opaque shape instead
+The warning flow is already implemented for both:
 
-## Config
+- interactive overlay activation of the Obfuscate tool
+- CLI paths that would produce obfuscate annotations
 
-Persist the acknowledgement as:
+The persisted acknowledgement key is:
 
-`tools.obfuscate.risk_acknowledged`
+- `tools.obfuscate.risk_acknowledged`
 
-Why this name:
+Current default behavior:
 
-- it describes a concrete persisted fact, not a vague consent action
-- it stays scoped to the obfuscate tool
-- it reads cleanly as a boolean with a default of `false`
+- default value is `false`
+- the key is serialized only when the value is `true`
+- parse/serialize validation is handled in `app_config_json.*`
 
-Config behavior:
+## Shared Warning Copy
 
-- default: `false`
-- parse/serialize as a boolean under `tools.obfuscate`
-- only write it when the value is `true`, matching the current "write non-defaults"
-  config style
-- rejecting the warning or dismissing it with `Esc` does not persist anything
+Warning strings are centralized in `src/greenflame_core/obfuscate_risk_warning.h`.
 
-## User Experience
+Current values:
 
-Trigger conditions:
+- title: `⚠️ Warning ⚠️`
+- lead text: obfuscation is not a security feature and may be reversible
+- guidance text: use a filled opaque shape for permanent concealment
+- accept button: `I Understand`
+- reject button: `Use Another Tool`
 
-- applies when the user attempts to arm **Obfuscate** from the toolbar button
-- applies when the user attempts to arm **Obfuscate** with the hotkey
-- applies to CLI commands that would create obfuscate annotations
-- does not apply once `tools.obfuscate.risk_acknowledged == true`
+The same lead/guidance text is also reused for the CLI rejection message.
 
-Flow:
+## Interactive Overlay Flow
 
-1. The normal tool-selection path runs, so **Obfuscate** becomes the active tool.
-2. If `tools.obfuscate.risk_acknowledged == false`, a modal warning panel appears on
-   top of the overlay.
-3. While the panel is visible, other overlay interactions are blocked.
-4. If the user accepts, the panel closes, the tool remains armed, and the config is
-   saved immediately.
-5. If the user rejects or presses `Esc`, the panel closes, the Obfuscate tool is
-   cleared, and no config value is saved.
+### Trigger conditions
 
-Dismissal rules:
+The overlay warning is tied to Obfuscate tool activation.
 
-- `Esc` means "reject"
-- clicking outside the panel is ignored; this warning should require an explicit
-  button choice or `Esc`
-- the help overlay must not be shown on top of this warning, and this warning should
-  win `Esc` priority over normal overlay cancellation
+Current behavior:
 
-## CLI Behavior
+- the user can arm Obfuscate from the toolbar or hotkey
+- once Obfuscate becomes the active tool, `OverlayWindow::Maybe_show_obfuscate_warning()`
+  checks the persisted acknowledgement flag
+- if acknowledgement is still false, the warning dialog is shown
+- once acknowledgement is true, later Obfuscate activations do not show the warning
 
-The CLI must remain non-interactive.
+### Visible-dialog behavior
 
-If a CLI invocation would create one or more obfuscate annotations and
-`tools.obfuscate.risk_acknowledged == false`, the command must fail fast instead of
-prompting.
+The dialog is modal within the overlay.
 
-Scope:
+Current behavior while visible:
 
-- applies to `--annotate` payloads that contain `type: "obfuscate"`
-- should also apply to any future CLI obfuscate-producing entry point
+- `Esc` rejects the warning
+- clicking outside the panel does nothing
+- other key handling is suppressed
+- drawing, selection edits, help overlay toggling, selection-wheel input, and tool
+  interactions are blocked
 
-CLI failure behavior:
+This matches the current manual test plan.
 
-- do not open any UI
-- do not prompt on stdin/stdout
-- write a clear stderr message telling the user that obfuscation risk must be
-  acknowledged in config before CLI use
-- mention the same core warning text used by the UI
-- include the config key name: `tools.obfuscate.risk_acknowledged`
-- include the resolved config file path from the existing app-config path logic
-- suggest setting the value to `true` to proceed
+### Accept and reject behavior
 
-Suggested stderr text shape:
+The two button outcomes are intentionally asymmetric.
 
-> Obfuscate is not a security feature. Pixelated or blurred areas can sometimes be
-> reconstructed, especially around text or strong-contrast details. To use obfuscate
-> from the CLI, set `tools.obfuscate.risk_acknowledged` to `true` in:
-> `<resolved config path>`
+Current accept behavior:
 
-If the config path cannot be resolved, the error should still name the required key
-and say that the config file path could not be determined.
+1. hide the warning dialog
+2. set `config_->obfuscate_risk_acknowledged = true`
+3. normalize and save config immediately
+4. leave Obfuscate armed
 
-Recommended new process exit code:
+Current reject behavior:
 
-- enum name: `CliObfuscateRiskUnacknowledged`
+1. hide the warning dialog
+2. route `On_cancel()` through the controller
+3. clear the active Obfuscate tool
+4. keep the current selection state intact
+
+Because `Esc` maps to reject, pressing `Esc` while the warning is visible clears
+Obfuscate but does not clear the capture selection.
+
+## Overlay Presentation And Ownership
+
+### UI object
+
+The visible panel is implemented as `OverlayWarningDialog` in `src/greenflame/win/`.
+
+Current presentation details:
+
+- the panel is shown on the monitor containing the cursor
+- layout is centered within the available overlay rect for that monitor
+- rectangular buttons are used for accept/reject
+- shared panel chrome comes from `overlay_panel_chrome.*`
+- the panel is painted through the existing D2D/DWrite overlay path
+
+### Ownership split
+
+Current ownership is intentionally simple:
+
+- `obfuscate_risk_warning.h`
+  - owns shared strings and config-key constants
+- `OverlayWarningDialog`
+  - owns layout, hover state, pressed state, and D2D paint for the panel
+- `OverlayWindow`
+  - owns visibility state
+  - decides when to show the warning
+  - handles accept/reject side effects
+  - persists config on acceptance
+
+This is already the current architecture; it is no longer a proposal.
+
+## CLI Gate
+
+### Scope
+
+The CLI remains non-interactive.
+
+Current CLI behavior:
+
+- any prepared annotation set containing an obfuscate annotation is rejected when
+  `tools.obfuscate.risk_acknowledged` is still `false`
+- this applies in both:
+  - capture-mode annotation flows
+  - input-image annotation flows
+
+### Gate timing
+
+The gate happens after annotation preparation succeeds, but before output path
+resolution and image save work continue.
+
+That ordering is current behavior and is covered by existing tests.
+
+### Failure result
+
+Current CLI rejection behavior:
+
+- exit code: `ProcessExitCode::CliObfuscateRiskUnacknowledged`
 - numeric value: `18`
+- stderr includes:
+  - the warning lead text
+  - the guidance text
+  - the required config key
+  - the resolved app-config path when available
 
-Implementation note:
+If the config path cannot be determined, the message explicitly says so instead of
+omitting the instruction.
 
-- keep all process exit codes in `src/greenflame_core/process_exit_code.h`
-- update the README exit-code table when this is implemented
+## Existing Coverage
 
-## Warning Panel
+Key automated coverage already exists in:
 
-This should use the same D2D/DWrite presentation path as the help overlay: dimmed
-backdrop, centered panel, monitor-aware placement, and on-overlay rendering rather
-than a native Win32 dialog.
+- `tests/app_config_tests.cpp`
+- `tests/app_controller_tests.cpp`
 
-Title:
+Covered areas include:
 
-`⚠️ Warning ⚠️`
+- parsing and serializing `tools.obfuscate.risk_acknowledged`
+- rejecting non-boolean config values
+- CLI rejection with exit code `18`
+- CLI stderr naming the config key
+- CLI stderr including either the resolved config path or the "path could not be
+  determined" fallback
+- successful CLI obfuscate use once acknowledgement is true
 
-Suggested body copy:
+Key manual coverage already exists in `docs/manual_test_plan.md`, especially:
 
-> Obfuscate is not a security feature. Pixelated or blurred areas can sometimes be
-> reconstructed, especially around text or strong-contrast details. If you need to
-> permanently hide sensitive content, use a filled opaque shape instead.
+- `GF-MAN-UI-003`
 
-Suggested buttons:
-
-- primary: `I Understand`
-- secondary: `Use Another Tool`
-
-Layout:
-
-- two square buttons
-- side by side at the bottom of the panel
-- same fill/outline/pressed color scheme as the round toolbar buttons
-
-Implementation note:
-
-- do not reuse the round `OverlayButton` class directly for this panel
-- extract shared visual styling from `overlay_button.*`, but keep separate hit-test
-  geometry for circular toolbar buttons versus rectangular modal buttons
-
-## Architecture
-
-Keep the policy in the existing Win32 overlay layer, not in `greenflame_core`.
-
-Recommended structure:
-
-- add a new warning-panel object in `src/greenflame/win/` beside the existing help
-  overlay object
-- extract the shared backdrop/panel chrome from `OverlayHelpOverlay` so both help and
-  warning can use the same rendering primitives
-- keep the warning-specific state local to `OverlayWindow`, because it depends on UI
-  modality, button hit-testing, and persisted config save timing
-
-Primary touch points:
-
-- `src/greenflame/win/overlay_window.*`
-  - gate first activation of Obfuscate
-  - route keyboard and mouse input while the warning is visible
-  - save config on acceptance
-- `src/greenflame/win/overlay_help_overlay.*`
-  - extract shared panel rendering code
-- `src/greenflame/win/overlay_button.*`
-  - share button colors/pressed styling with a square-button variant
-- `src/greenflame_core/app_config.*`
-- `src/greenflame_core/app_config_json.*`
-  - add `tools.obfuscate.risk_acknowledged`
-- `src/greenflame_core/process_exit_code.h`
-  - add `CliObfuscateRiskUnacknowledged = 18`
-- `src/greenflame_core/app_controller.*`
-  - fail CLI annotation flows before capture/save when obfuscate is requested without
-    acknowledgement
-- `README.md`
-  - document the new CLI exit code
-
-## Testing Plan
-
-Automated:
-
-- config parse test for `tools.obfuscate.risk_acknowledged`
-- config serialize round-trip test for `tools.obfuscate.risk_acknowledged = true`
-- schema validation test that rejects non-boolean values for the new key
-- CLI test: obfuscate annotation input fails with exit code `18` when the config flag
-  is unset
-- CLI test: the stderr message names the config key and config path
-- CLI test: obfuscate annotation input succeeds once the config flag is `true`
-
-Manual:
-
-- first activation from the toolbar shows the warning
-- first activation from the hotkey shows the warning
-- accepting keeps Obfuscate selected and suppresses the warning on later uses
-- rejecting clears the active tool and does not persist acknowledgement
-- pressing `Esc` while the warning is visible behaves the same as reject
-- while the warning is visible, drawing, selection changes, toolbar interaction, and
-  help-overlay toggling are blocked
+Future changes should keep the warning text constants centralized in
+`obfuscate_risk_warning.h` and keep the tool/raster behavior in
+`obfuscate_tool.md` instead of reintroducing speculative implementation notes here.
