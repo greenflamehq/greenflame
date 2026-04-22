@@ -4061,6 +4061,12 @@ LRESULT OverlayWindow::On_paint() {
         input.monitor_rects_client =
             std::span<const core::RectPx>(monitor_client_rects);
         input.cursor_client_px = cursor;
+        if (s.dragging && !s.live_rect.Is_empty()) {
+            input.selection_drag_corner_guide_px = core::PointPx{
+                cursor.x >= s.start_px.x ? s.live_rect.right : s.live_rect.left,
+                cursor.y >= s.start_px.y ? s.live_rect.bottom : s.live_rect.top,
+            };
+        }
         input.annotations = controller_.Annotations();
         input.annotation_patches = patches;
         input.draft_freehand_points = controller_.Draft_freehand_points();

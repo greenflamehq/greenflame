@@ -259,6 +259,12 @@ unless a real end-to-end bug escapes into the Win32 shell:
   2. Drag out a region.
 - Expected:
   - The desktop is dimmed outside the selection.
+  - The pre-selection magnifier stays visible for the full region-drag gesture and
+    disappears only after mouse-up commits the drag.
+  - During region drag, coordinate tooltip and fullscreen crosshair are hidden; only
+    magnifier remains.
+  - During snapped region drag, magnifier follows committed drag corner/edge position
+    rather than unsnapped mouse position.
   - A border and resize handles appear.
   - After the drag is committed, the stable selection border sits just outside the
     clipped screenshot region instead of being tucked under the dim edge.

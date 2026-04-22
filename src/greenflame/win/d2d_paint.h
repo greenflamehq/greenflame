@@ -60,6 +60,7 @@ struct D2DPaintInput {
     // Ring layout for clamped-nav wheels: the last segment is a phantom (not drawn).
     float selection_wheel_ring_angle_offset = 0.0f;
     core::PointPx cursor_client_px = {};
+    std::optional<core::PointPx> selection_drag_corner_guide_px = std::nullopt;
     std::optional<int32_t> brush_cursor_preview_width_px = std::nullopt;
     std::optional<int32_t> square_cursor_preview_width_px = std::nullopt;
     std::optional<int32_t> arrow_cursor_preview_width_px = std::nullopt;

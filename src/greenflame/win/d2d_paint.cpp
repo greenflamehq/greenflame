@@ -507,7 +507,9 @@ void Draw_draft_text(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 }
 
 // ---------------------------------------------------------------------------
-// Crosshair + coord tooltip (shown when no selection, not dragging)
+// Crosshair + cursor guides before the selection is committed.
+// Crosshair hides during the initial drag, but magnifier/coords stay visible
+// until mouse-up so the drag endpoint can still be placed precisely.
 // ---------------------------------------------------------------------------
 
 void Draw_crosshair(ID2D1RenderTarget *rt, D2DOverlayResources &res,
@@ -2649,18 +2651,28 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                     input.transient_center_label_text);
     }
 
-    // Crosshair + magnifier + coord tooltip (only before selection is made).
-    bool const show_crosshair = input.final_selection.Is_empty() && !input.dragging &&
-                                !input.handle_dragging && !input.move_dragging &&
-                                !input.modifier_preview;
-    if (show_crosshair) {
-        core::PointPx const cur = input.cursor_client_px;
-        if (cur.x >= 0 && cur.x < vd_width && cur.y >= 0 && cur.y < vd_height) {
-            Draw_crosshair(rt, res, cur, vd_width, vd_height);
-            Draw_magnifier(rt, res, cur, input.monitor_rects_client, vd_width,
+    // Cursor guides before the selection is committed.
+    bool const show_cursor_guides = input.final_selection.Is_empty() &&
+                                    !input.handle_dragging && !input.move_dragging &&
+                                    !input.modifier_preview;
+    if (show_cursor_guides) {
+        core::PointPx const raw_guide_point =
+            input.dragging && input.selection_drag_corner_guide_px.has_value()
+                ? *input.selection_drag_corner_guide_px
+                : input.cursor_client_px;
+        core::PointPx const guide_point = {
+            std::clamp(raw_guide_point.x, 0, vd_width - 1),
+            std::clamp(raw_guide_point.y, 0, vd_height - 1),
+        };
+        if (guide_point.x >= 0 && guide_point.x < vd_width && guide_point.y >= 0 &&
+            guide_point.y < vd_height) {
+            if (!input.dragging) {
+                Draw_crosshair(rt, res, input.cursor_client_px, vd_width, vd_height);
+                Draw_coord_tooltip(rt, res, input.cursor_client_px,
+                                   input.monitor_rects_client, vd_width, vd_height);
+            }
+            Draw_magnifier(rt, res, guide_point, input.monitor_rects_client, vd_width,
                            vd_height);
-            Draw_coord_tooltip(rt, res, cur, input.monitor_rects_client, vd_width,
-                               vd_height);
         }
     }
 
