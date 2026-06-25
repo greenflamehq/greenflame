@@ -649,8 +649,7 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
     return true;
 }
 
-[[nodiscard]] bool Try_parse_help_topic(std::wstring_view value,
-                                        CliHelpTopic &topic) {
+[[nodiscard]] bool Try_parse_help_topic(std::wstring_view value, CliHelpTopic &topic) {
     std::wstring_view const trimmed = Trim_wspace(value);
     std::wstring lower;
     lower.reserve(trimmed.size());

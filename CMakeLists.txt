@@ -46,6 +46,11 @@ endif()
 # We control warnings per-target already, so disable it.
 set(CMAKE_COMPILE_WARNING_AS_ERROR OFF)
 
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    include(CheckCXXCompilerFlag)
+    check_cxx_compiler_flag(-Wno-nrvo GREENFLAME_HAS_WNO_NRVO)
+endif()
+
 # Keep the app as a GUI subsystem executable on Windows.
 set(CMAKE_WIN32_EXECUTABLE ON)
 
@@ -302,8 +307,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-switch-default
         -Wno-language-extension-token
         -Wno-padded
-        -Wno-nrvo
     )
+    if(GREENFLAME_HAS_WNO_NRVO)
+        target_compile_options(greenflame_core PRIVATE -Wno-nrvo)
+    endif()
     if(GREENFLAME_ENABLE_TIME_TRACE)
         target_compile_options(greenflame_core PRIVATE -ftime-trace)
     endif()
@@ -446,8 +453,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-switch-default
         -Wno-language-extension-token
         -Wno-padded
-        -Wno-nrvo
     )
+    if(GREENFLAME_HAS_WNO_NRVO)
+        target_compile_options(greenflame PRIVATE -Wno-nrvo)
+    endif()
     if(GREENFLAME_ENABLE_TIME_TRACE)
         target_compile_options(greenflame PRIVATE -ftime-trace)
     endif()

@@ -13,7 +13,7 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     foreach(greenflame_gtest_target gtest gtest_main gmock gmock_main)
-        target_compile_options(${greenflame_gtest_target} PRIVATE -Wno-character-conversion)
+        target_compile_options(${greenflame_gtest_target} PRIVATE /WX-)
     endforeach()
 endif()
 
@@ -83,8 +83,10 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-switch-default
         -Wno-language-extension-token
         -Wno-padded
-        -Wno-nrvo
     )
+    if(GREENFLAME_HAS_WNO_NRVO)
+        target_compile_options(greenflame_tests PRIVATE -Wno-nrvo)
+    endif()
     if(GREENFLAME_ENABLE_TIME_TRACE)
         target_compile_options(greenflame_tests PRIVATE -ftime-trace)
     endif()

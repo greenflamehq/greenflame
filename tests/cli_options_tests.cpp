@@ -622,8 +622,7 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
 }
 
 TEST(cli_options, CLI_help_IncludesLayeredTopicGuidance) {
-    std::wstring const agent_help =
-        Build_cli_help_text(CliHelpTopic::Agent, false);
+    std::wstring const agent_help = Build_cli_help_text(CliHelpTopic::Agent, false);
     EXPECT_NE(agent_help.find(L"Capture to a file"), std::wstring::npos);
     EXPECT_NE(agent_help.find(L"same saved image"), std::wstring::npos);
     EXPECT_NE(agent_help.find(L"greenflame --help annotate"), std::wstring::npos);
@@ -645,13 +644,11 @@ TEST(cli_options, CLI_help_IncludesLayeredTopicGuidance) {
     EXPECT_NE(annotation_types_help.find(L"filled_ellipse"), std::wstring::npos);
     EXPECT_NE(annotation_types_help.find(L"obfuscate"), std::wstring::npos);
 
-    std::wstring const windows_help =
-        Build_cli_help_text(CliHelpTopic::Windows, false);
+    std::wstring const windows_help = Build_cli_help_text(CliHelpTopic::Windows, false);
     EXPECT_NE(windows_help.find(L"hwnd=0x"), std::wstring::npos);
     EXPECT_NE(windows_help.find(L"--window-hwnd"), std::wstring::npos);
 
-    std::wstring const exits_help =
-        Build_cli_help_text(CliHelpTopic::Exits, false);
+    std::wstring const exits_help = Build_cli_help_text(CliHelpTopic::Exits, false);
     EXPECT_NE(exits_help.find(L"7"), std::wstring::npos);
     EXPECT_NE(exits_help.find(L"ambiguous"), std::wstring::npos);
 }

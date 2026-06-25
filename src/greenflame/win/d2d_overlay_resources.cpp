@@ -155,17 +155,16 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height) {
         D3D_FEATURE_LEVEL_10_0,
     }};
     HRESULT hr = D3D11CreateDevice(
-        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, device_flags,
-        feature_levels.data(), static_cast<UINT>(feature_levels.size()),
-        D3D11_SDK_VERSION, d3d_device.ReleaseAndGetAddressOf(), nullptr, nullptr);
+        nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, device_flags, feature_levels.data(),
+        static_cast<UINT>(feature_levels.size()), D3D11_SDK_VERSION,
+        d3d_device.ReleaseAndGetAddressOf(), nullptr, nullptr);
 #if defined(_DEBUG)
     if (FAILED(hr) && (device_flags & D3D11_CREATE_DEVICE_DEBUG) != 0) {
         device_flags &= ~static_cast<UINT>(D3D11_CREATE_DEVICE_DEBUG);
-        hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, device_flags,
-                               feature_levels.data(),
-                               static_cast<UINT>(feature_levels.size()),
-                               D3D11_SDK_VERSION, d3d_device.ReleaseAndGetAddressOf(),
-                               nullptr, nullptr);
+        hr = D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, device_flags,
+            feature_levels.data(), static_cast<UINT>(feature_levels.size()),
+            D3D11_SDK_VERSION, d3d_device.ReleaseAndGetAddressOf(), nullptr, nullptr);
     }
 #endif
     if (FAILED(hr)) {
