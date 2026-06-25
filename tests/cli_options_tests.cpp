@@ -522,6 +522,38 @@ TEST(cli_options, CLI_parser_AcceptsHelp) {
     EXPECT_TRUE(result.ok);
     EXPECT_EQ(result.options.capture_mode, CliCaptureMode::None);
     EXPECT_EQ(result.options.action, CliAction::Help);
+    EXPECT_EQ(result.options.help_topic, CliHelpTopic::Main);
+}
+
+TEST(cli_options, CLI_parser_AcceptsLayeredHelpTopics) {
+    {
+        std::vector<std::wstring> args = {L"--help", L"agent"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.action, CliAction::Help);
+        EXPECT_EQ(result.options.help_topic, CliHelpTopic::Agent);
+    }
+    {
+        std::vector<std::wstring> args = {L"--help", L"annotation-types"};
+        CliParseResult const result = Parse_cli_arguments(args, false);
+        EXPECT_TRUE(result.ok);
+        EXPECT_EQ(result.options.action, CliAction::Help);
+        EXPECT_EQ(result.options.help_topic, CliHelpTopic::AnnotationTypes);
+    }
+}
+
+TEST(cli_options, CLI_parser_RejectsUnknownLayeredHelpTopic) {
+    std::vector<std::wstring> args = {L"--help", L"tray"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"Unknown help topic"), std::wstring::npos);
+}
+
+TEST(cli_options, CLI_parser_RejectsDeprecatedHelpTopicShortcut) {
+    std::vector<std::wstring> args = {L"--help-windows"};
+    CliParseResult const result = Parse_cli_arguments(args, false);
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error_message.find(L"Unknown option"), std::wstring::npos);
 }
 
 TEST(cli_options, CLI_parser_AcceptsVersionLong) {
@@ -574,6 +606,8 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_release.find(L"--cursor"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--no-cursor"), std::wstring::npos);
     EXPECT_NE(help_release.find(L"--overwrite"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"greenflame --help agent"), std::wstring::npos);
+    EXPECT_NE(help_release.find(L"annotation-types"), std::wstring::npos);
     EXPECT_EQ(help_release.find(L"--testing-1-2"), std::wstring::npos);
 
 #ifdef DEBUG
@@ -585,4 +619,39 @@ TEST(cli_options, CLI_help_IncludesDeclaredOptions) {
     EXPECT_NE(help_debug.find(L"--window-capture"), std::wstring::npos);
     EXPECT_EQ(help_debug.find(L"--testing-1-2"), std::wstring::npos);
 #endif
+}
+
+TEST(cli_options, CLI_help_IncludesLayeredTopicGuidance) {
+    std::wstring const agent_help =
+        Build_cli_help_text(CliHelpTopic::Agent, false);
+    EXPECT_NE(agent_help.find(L"Capture to a file"), std::wstring::npos);
+    EXPECT_NE(agent_help.find(L"same saved image"), std::wstring::npos);
+    EXPECT_NE(agent_help.find(L"greenflame --help annotate"), std::wstring::npos);
+    EXPECT_NE(agent_help.find(L"greenflame --help windows"), std::wstring::npos);
+    EXPECT_NE(agent_help.find(L"greenflame --help exits"), std::wstring::npos);
+
+    std::wstring const annotate_help =
+        Build_cli_help_text(CliHelpTopic::Annotate, false);
+    EXPECT_NE(annotate_help.find(L"--input"), std::wstring::npos);
+    EXPECT_NE(annotate_help.find(L"coordinate_space"), std::wstring::npos);
+    EXPECT_NE(annotate_help.find(L"greenflame --help annotation-types"),
+              std::wstring::npos);
+
+    std::wstring const annotation_types_help =
+        Build_cli_help_text(CliHelpTopic::AnnotationTypes, false);
+    EXPECT_NE(annotation_types_help.find(L"brush"), std::wstring::npos);
+    EXPECT_NE(annotation_types_help.find(L"arrow"), std::wstring::npos);
+    EXPECT_NE(annotation_types_help.find(L"filled_rectangle"), std::wstring::npos);
+    EXPECT_NE(annotation_types_help.find(L"filled_ellipse"), std::wstring::npos);
+    EXPECT_NE(annotation_types_help.find(L"obfuscate"), std::wstring::npos);
+
+    std::wstring const windows_help =
+        Build_cli_help_text(CliHelpTopic::Windows, false);
+    EXPECT_NE(windows_help.find(L"hwnd=0x"), std::wstring::npos);
+    EXPECT_NE(windows_help.find(L"--window-hwnd"), std::wstring::npos);
+
+    std::wstring const exits_help =
+        Build_cli_help_text(CliHelpTopic::Exits, false);
+    EXPECT_NE(exits_help.find(L"7"), std::wstring::npos);
+    EXPECT_NE(exits_help.find(L"ambiguous"), std::wstring::npos);
 }

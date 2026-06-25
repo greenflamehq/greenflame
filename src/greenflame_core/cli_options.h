@@ -25,6 +25,15 @@ enum class CliAction : uint8_t {
     Version = 2,
 };
 
+enum class CliHelpTopic : uint8_t {
+    Main = 0,
+    Agent = 1,
+    Annotate = 2,
+    AnnotationTypes = 3,
+    Windows = 4,
+    Exits = 5,
+};
+
 enum class CliCursorOverride : uint8_t {
     UseConfig = 0,
     ForceInclude = 1,
@@ -48,6 +57,7 @@ struct CliOptions final {
     int32_t monitor_id = 0; // 1-based.
     std::optional<CliOutputFormat> output_format = std::nullopt;
     CliAction action = CliAction::None;
+    CliHelpTopic help_topic = CliHelpTopic::Main;
     CliCaptureMode capture_mode = CliCaptureMode::None;
     WindowCaptureBackend window_capture_backend = WindowCaptureBackend::Auto;
     bool window_capture_backend_explicit = false;
@@ -72,5 +82,6 @@ struct CliParseResult final {
                                                  bool debug_build);
 
 [[nodiscard]] std::wstring Build_cli_help_text(bool debug_build);
+[[nodiscard]] std::wstring Build_cli_help_text(CliHelpTopic topic, bool debug_build);
 
 } // namespace greenflame::core

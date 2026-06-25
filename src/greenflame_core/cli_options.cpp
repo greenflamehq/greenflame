@@ -640,6 +640,51 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
     return true;
 }
 
+[[nodiscard]] bool Try_set_help_action(CliOptions &options, CliHelpTopic topic,
+                                       std::wstring &error_message) {
+    if (!Try_set_action(options, CliAction::Help, error_message)) {
+        return false;
+    }
+    options.help_topic = topic;
+    return true;
+}
+
+[[nodiscard]] bool Try_parse_help_topic(std::wstring_view value,
+                                        CliHelpTopic &topic) {
+    std::wstring_view const trimmed = Trim_wspace(value);
+    std::wstring lower;
+    lower.reserve(trimmed.size());
+    for (wchar_t const ch : trimmed) {
+        lower.push_back(static_cast<wchar_t>(std::towlower(ch)));
+    }
+
+    if (lower.empty() || lower == L"main") {
+        topic = CliHelpTopic::Main;
+        return true;
+    }
+    if (lower == L"agent") {
+        topic = CliHelpTopic::Agent;
+        return true;
+    }
+    if (lower == L"annotate" || lower == L"annotations") {
+        topic = CliHelpTopic::Annotate;
+        return true;
+    }
+    if (lower == L"annotation-types" || lower == L"types") {
+        topic = CliHelpTopic::AnnotationTypes;
+        return true;
+    }
+    if (lower == L"windows" || lower == L"window") {
+        topic = CliHelpTopic::Windows;
+        return true;
+    }
+    if (lower == L"exits" || lower == L"exit-codes") {
+        topic = CliHelpTopic::Exits;
+        return true;
+    }
+    return false;
+}
+
 [[nodiscard]] CliParseResult Apply_option(CliOptions &options,
                                           CliOptionSpec const &spec,
                                           std::wstring const &value) {
@@ -704,7 +749,7 @@ Find_option_by_short_name(wchar_t name, bool debug_build) noexcept {
         options.input_path = value;
         return CliParseResult{{}, options, true};
     case CliOptionId::Help:
-        if (!Try_set_action(options, CliAction::Help, error_message)) {
+        if (!Try_set_help_action(options, CliHelpTopic::Main, error_message)) {
             return Make_error(error_message);
         }
         return CliParseResult{{}, options, true};
@@ -1021,6 +1066,16 @@ CliParseResult Parse_cli_arguments(std::vector<std::wstring> const &args,
                 return result;
             }
             options = result.options;
+            if (arg == L"--help" && i + 1 < args.size()) {
+                CliHelpTopic topic = CliHelpTopic::Main;
+                if (!Try_parse_help_topic(args[i + 1], topic)) {
+                    std::wstring message = L"Unknown help topic: ";
+                    message += args[i + 1];
+                    return Make_error(message);
+                }
+                options.help_topic = topic;
+                ++i;
+            }
             continue;
         }
         if (arg.size() >= 2 && arg[0] == L'-') {
@@ -1040,13 +1095,15 @@ CliParseResult Parse_cli_arguments(std::vector<std::wstring> const &args,
     return Validate_cli_options(options);
 }
 
-std::wstring Build_cli_help_text(bool debug_build) {
+[[nodiscard]] static std::wstring Build_main_help_text(bool debug_build) {
     std::wstring help_text;
     help_text += L"Greenflame\n";
     help_text += L"Yet another Windows screenshot tool.\n";
     help_text += L"\n";
     help_text += L"Usage:\n";
     help_text += L"  greenflame [mode] [options]\n";
+    help_text +=
+        L"  greenflame --help [agent|annotate|annotation-types|windows|exits]\n";
     help_text += L"  greenflame --help\n";
     help_text += L"  greenflame --version\n";
     help_text += L"\n";
@@ -1058,8 +1115,161 @@ std::wstring Build_cli_help_text(bool debug_build) {
     help_text += L"Notes:\n";
     help_text += L"  --option=value and --option value are both supported.\n";
     help_text += L"  No capture mode starts the tray app as usual.\n";
+    help_text += L"  For automation workflow guidance, run: greenflame --help agent\n";
     help_text += L"\n";
     return help_text;
+}
+
+[[nodiscard]] static std::wstring Build_agent_help_text() {
+    return L"Greenflame Agent Help\n"
+           L"\n"
+           L"Default annotation workflow:\n"
+           L"  1. Capture to a file with an explicit --output path.\n"
+           L"  2. Inspect that same saved image.\n"
+           L"  3. Write annotation JSON to a file.\n"
+           L"  4. Re-run Greenflame with --input <capture> --annotate <json> "
+           L"--output <annotated>.\n"
+           L"\n"
+           L"Do not take a fresh screenshot for the annotation pass unless the user "
+           L"asks for a new capture.\n"
+           L"\n"
+           L"Prefer:\n"
+           L"  - explicit --output paths\n"
+           L"  - PNG unless the user asks for jpg/jpeg or bmp\n"
+           L"  - annotation JSON files over inline JSON except for trivial payloads\n"
+           L"  - coordinate_space \"local\" for --input annotations\n"
+           L"\n"
+           L"More help:\n"
+           L"  greenflame --help annotate  Annotation JSON and --input rules\n"
+           L"  greenflame --help annotation-types  Per-type annotation fields\n"
+           L"  greenflame --help windows   Window capture and ambiguity recovery\n"
+           L"  greenflame --help exits     Exit codes and retry meaning\n";
+}
+
+[[nodiscard]] static std::wstring Build_annotate_help_text() {
+    return L"Greenflame Annotation Help\n"
+           L"\n"
+           L"--annotate accepts inline JSON or a UTF-8 JSON file path.\n"
+           L"--input <path> loads an existing PNG/JPEG/BMP, applies --annotate, "
+           L"and saves with --output or --overwrite.\n"
+           L"\n"
+           L"Document shape:\n"
+           L"  {\"coordinate_space\":\"local\",\"annotations\":[...]}\n"
+           L"  Optional document defaults: color, size, font, "
+           L"highlighter_opacity_percent.\n"
+           L"\n"
+           L"--input rules:\n"
+           L"  - local image coordinates only\n"
+           L"  - use coordinate_space \"local\"\n"
+           L"  - cannot be combined with live capture modes, --window-capture, "
+           L"--cursor, or --no-cursor\n"
+           L"\n"
+           L"Use --padding when labels need margin space instead of covering source "
+           L"UI text.\n"
+           L"Use obfuscate only when concealment is explicitly requested; CLI use "
+           L"requires tools.obfuscate.risk_acknowledged = true.\n"
+           L"\n"
+           L"Per-type fields: greenflame --help annotation-types\n";
+}
+
+[[nodiscard]] static std::wstring Build_annotation_types_help_text() {
+    return L"Greenflame Annotation Types Help\n"
+           L"\n"
+           L"Common optional fields: color \"#rrggbb\", size integer.\n"
+           L"\n"
+           L"Line and arrow:\n"
+           L"  {\"type\":\"line\",\"start\":{\"x\":10,\"y\":20},"
+           L"\"end\":{\"x\":120,\"y\":80}}\n"
+           L"  {\"type\":\"arrow\",\"start\":{\"x\":10,\"y\":20},"
+           L"\"end\":{\"x\":120,\"y\":80}}\n"
+           L"\n"
+           L"Freehand and highlighter:\n"
+           L"  {\"type\":\"brush\",\"points\":[{\"x\":10,\"y\":20},"
+           L"{\"x\":20,\"y\":25}]}\n"
+           L"  {\"type\":\"highlighter\",\"start\":{\"x\":10,\"y\":20},"
+           L"\"end\":{\"x\":120,\"y\":80},\"opacity_percent\":50}\n"
+           L"\n"
+           L"Rectangles and ellipses:\n"
+           L"  {\"type\":\"rectangle\",\"left\":10,\"top\":20,"
+           L"\"width\":100,\"height\":60}\n"
+           L"  {\"type\":\"filled_rectangle\",\"left\":10,\"top\":20,"
+           L"\"width\":100,\"height\":60}\n"
+           L"  {\"type\":\"ellipse\",\"center\":{\"x\":60,\"y\":50},"
+           L"\"width\":100,\"height\":60}\n"
+           L"  {\"type\":\"filled_ellipse\",\"center\":{\"x\":60,\"y\":50},"
+           L"\"width\":100,\"height\":60}\n"
+           L"\n"
+           L"Text and bubble:\n"
+           L"  {\"type\":\"text\",\"origin\":{\"x\":10,\"y\":20},"
+           L"\"text\":\"Label\",\"font\":{\"preset\":\"sans\"}}\n"
+           L"  {\"type\":\"bubble\",\"center\":{\"x\":60,\"y\":50},"
+           L"\"size\":5}\n"
+           L"\n"
+           L"Obfuscate:\n"
+           L"  {\"type\":\"obfuscate\",\"left\":10,\"top\":20,"
+           L"\"width\":100,\"height\":60,\"size\":8}\n";
+}
+
+[[nodiscard]] static std::wstring Build_windows_help_text() {
+    return L"Greenflame Window Help\n"
+           L"\n"
+           L"--window <title> captures by title. A unique case-insensitive exact "
+           L"title match wins over broader substring matches.\n"
+           L"--window-hwnd 0x... captures one exact window after disambiguation.\n"
+           L"\n"
+           L"--window-capture:\n"
+           L"  auto  Prefer WGC, fall back to GDI when appropriate\n"
+           L"  wgc   Capture the target window itself; fail instead of GDI fallback\n"
+           L"  gdi   Capture visible desktop pixels for the window rectangle\n"
+           L"\n"
+           L"If --window exits ambiguous, stderr lists candidates like:\n"
+           L"  hwnd=0x... class=\"...\" title=\"...\" (x=..., y=..., w=..., h=...)\n"
+           L"\n"
+           L"Retry with --window-hwnd only when one non-uncapturable candidate "
+           L"clearly matches the user's intent.\n"
+           L"Do not replace a failed window capture with --region unless visible "
+           L"desktop pixels are explicitly acceptable.\n";
+}
+
+[[nodiscard]] static std::wstring Build_exits_help_text() {
+    return L"Greenflame Exit Help\n"
+           L"\n"
+           L"Relevant CLI exits:\n"
+           L"  2   argument or validation failure\n"
+           L"  6   no visible window matched\n"
+           L"  7   window match ambiguous; inspect candidates and retry with "
+           L"--window-hwnd if clear\n"
+           L"  10  output path resolution or reservation failed\n"
+           L"  11  capture or save failed\n"
+           L"  12  matched window became unavailable before capture\n"
+           L"  13  matched window is minimized\n"
+           L"  14  --annotate input invalid\n"
+           L"  15  forced --window-capture wgc failed\n"
+           L"  16  input image unreadable or unsupported\n"
+           L"  17  window is excluded from capture\n"
+           L"  18  obfuscate risk not acknowledged\n";
+}
+
+std::wstring Build_cli_help_text(CliHelpTopic topic, bool debug_build) {
+    switch (topic) {
+    case CliHelpTopic::Main:
+        return Build_main_help_text(debug_build);
+    case CliHelpTopic::Agent:
+        return Build_agent_help_text();
+    case CliHelpTopic::Annotate:
+        return Build_annotate_help_text();
+    case CliHelpTopic::AnnotationTypes:
+        return Build_annotation_types_help_text();
+    case CliHelpTopic::Windows:
+        return Build_windows_help_text();
+    case CliHelpTopic::Exits:
+        return Build_exits_help_text();
+    }
+    return Build_main_help_text(debug_build);
+}
+
+std::wstring Build_cli_help_text(bool debug_build) {
+    return Build_cli_help_text(CliHelpTopic::Main, debug_build);
 }
 
 } // namespace greenflame::core

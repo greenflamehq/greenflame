@@ -103,7 +103,9 @@ int WINAPI wWinMain(HINSTANCE h_instance, HINSTANCE, PWSTR, int) {
 
     if (parse_result.options.action == greenflame::core::CliAction::Help) {
         greenflame::Write_console_text(
-            greenflame::core::Build_cli_help_text(kDebugBuild), false);
+            greenflame::core::Build_cli_help_text(parse_result.options.help_topic,
+                                                  kDebugBuild),
+            false);
         return greenflame::To_exit_code(greenflame::ProcessExitCode::Success);
     }
     if (parse_result.options.action == greenflame::core::CliAction::Version) {
