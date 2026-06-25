@@ -11,6 +11,11 @@ FetchContent_Declare(
 # Windows: prevent overriding parent project's compiler/linker settings
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    foreach(greenflame_gtest_target gtest gtest_main gmock gmock_main)
+        target_compile_options(${greenflame_gtest_target} PRIVATE -Wno-character-conversion)
+    endforeach()
+endif()
 
 add_executable(greenflame_tests
     geometry_tests.cpp
@@ -77,6 +82,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-implicit-int-float-conversion
         -Wno-switch-default
         -Wno-language-extension-token
+        -Wno-padded
+        -Wno-nrvo
     )
     if(GREENFLAME_ENABLE_TIME_TRACE)
         target_compile_options(greenflame_tests PRIVATE -ftime-trace)

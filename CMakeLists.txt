@@ -301,6 +301,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-implicit-int-float-conversion
         -Wno-switch-default
         -Wno-language-extension-token
+        -Wno-padded
+        -Wno-nrvo
     )
     if(GREENFLAME_ENABLE_TIME_TRACE)
         target_compile_options(greenflame_core PRIVATE -ftime-trace)
@@ -443,6 +445,8 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
         -Wno-implicit-int-float-conversion
         -Wno-switch-default
         -Wno-language-extension-token
+        -Wno-padded
+        -Wno-nrvo
     )
     if(GREENFLAME_ENABLE_TIME_TRACE)
         target_compile_options(greenflame PRIVATE -ftime-trace)
