@@ -87,7 +87,7 @@ constexpr wchar_t kCaptureLastWindowMenuText[] =
 constexpr wchar_t kIncludeCursorMenuText[] = L"Include captured cursor";
 constexpr wchar_t kStartWithWindowsMenuText[] = L"Start with Windows";
 constexpr wchar_t kOpenConfigMenuText[] = L"Open config file...";
-constexpr wchar_t kAboutMenuText[] = L"About Greenflame...";
+constexpr wchar_t kAboutMenuText[] = L"About greenflame...";
 
 #ifdef DEBUG
 constexpr wchar_t kTestingWarningBalloonMessage[] = L"Testing warning toast (Ctrl+W).";

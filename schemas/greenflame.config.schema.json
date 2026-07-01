@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Greenflame Config",
-  "description": "Strict schema for Greenflame's sparse JSON config file.",
+  "description": "Strict schema for greenflame's sparse JSON config file.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

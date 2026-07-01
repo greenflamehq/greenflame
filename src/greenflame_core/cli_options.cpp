@@ -1126,7 +1126,7 @@ CliParseResult Parse_cli_arguments(std::vector<std::wstring> const &args,
            L"  1. Capture to a file with an explicit --output path.\n"
            L"  2. Inspect that same saved image.\n"
            L"  3. Write annotation JSON to a file.\n"
-           L"  4. Re-run Greenflame with --input <capture> --annotate <json> "
+           L"  4. Re-run greenflame with --input <capture> --annotate <json> "
            L"--output <annotated>.\n"
            L"\n"
            L"Do not take a fresh screenshot for the annotation pass unless the user "

@@ -45,7 +45,7 @@ void AboutDialog::Show(HWND owner) const {
         hinstance_, MAKEINTRESOURCEW(kAboutDialogResourceId), owner,
         &AboutDialog::Dialog_proc, reinterpret_cast<LPARAM>(hinstance_));
     if (dialog_result == -1) {
-        MessageBoxW(owner, L"Failed to open About Greenflame dialog.", L"Greenflame",
+        MessageBoxW(owner, L"Failed to open About greenflame dialog.", L"Greenflame",
                     MB_OK | MB_ICONWARNING);
     }
 }
