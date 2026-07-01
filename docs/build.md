@@ -53,6 +53,18 @@ cmake --preset x64-release
 cmake --build --preset x64-release
 ```
 
+## Installer
+
+The installer target requires NSIS (`makensis.exe`) in `PATH` or in the standard
+`C:\Program Files (x86)\NSIS` install location.
+
+```bat
+cmake --preset x64-release
+cmake --build --preset x64-release --target installer
+```
+
+Output: `build\x64-release\greenflame-<version>-win-x64.exe`.
+
 ## Release build with PDB (MSVC)
 
 Use this preset when you need an optimized MSVC build and a fresh `greenflame.pdb` next

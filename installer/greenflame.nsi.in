@@ -1,0 +1,271 @@
+Unicode true
+ManifestSupportedOS all
+RequestExecutionLevel highest
+
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+!include "nsDialogs.nsh"
+!include "x64.nsh"
+
+!define GREENFLAME_WM_CLOSE 0x0010
+!define GREENFLAME_CLOSE_POLL_COUNT 20
+!define GREENFLAME_CLOSE_POLL_DELAY_MS 250
+
+!ifndef GREENFLAME_EXE_PATH
+    !error "GREENFLAME_EXE_PATH must point to greenflame.exe"
+!endif
+
+Name "greenflame"
+Caption "greenflame setup"
+OutFile "@GREENFLAME_INSTALLER_PATH@"
+InstallDir "$LOCALAPPDATA\Programs\greenflame"
+InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "InstallLocation"
+
+VIProductVersion "@GREENFLAME_FILE_VERSION_DOTTED@"
+VIAddVersionKey "CompanyName" "@GREENFLAME_COMPANY_NAME@"
+VIAddVersionKey "FileDescription" "greenflame setup"
+VIAddVersionKey "FileVersion" "@GREENFLAME_FILE_VERSION_DOTTED@"
+VIAddVersionKey "LegalCopyright" "@GREENFLAME_COPYRIGHT@"
+VIAddVersionKey "OriginalFilename" "greenflame-@GREENFLAME_PRODUCT_VERSION@-win-x64.exe"
+VIAddVersionKey "ProductName" "greenflame"
+VIAddVersionKey "ProductVersion" "@GREENFLAME_PRODUCT_VERSION@"
+
+!define MUI_ABORTWARNING
+!define MUI_ICON "@GREENFLAME_INSTALLER_ICON_PATH@"
+!define MUI_UNICON "@GREENFLAME_INSTALLER_ICON_PATH@"
+!define MUI_WELCOMEPAGE_TITLE "Install greenflame"
+!define MUI_WELCOMEPAGE_TEXT "This wizard installs greenflame @GREENFLAME_PRODUCT_VERSION@."
+!define MUI_FINISHPAGE_TITLE "Greenflame has been installed"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\greenflame.exe"
+!define MUI_FINISHPAGE_RUN_TEXT "Start greenflame now"
+!define MUI_FINISHPAGE_NOREBOOTSUPPORT
+
+Var InstallScope
+Var CanInstallAllUsers
+Var StartOnStartup
+Var InstallModeDialog
+Var GlobalRadio
+Var UserRadio
+Var StartupDialog
+Var StartupCheckbox
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_LICENSE "@GREENFLAME_LICENSE_PATH@"
+Page custom InstallModePageCreate InstallModePageLeave
+!insertmacro MUI_PAGE_DIRECTORY
+Page custom StartupPageCreate StartupPageLeave
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!insertmacro MUI_LANGUAGE "English"
+
+Function .onInit
+    ${IfNot} ${RunningX64}
+        MessageBox MB_ICONSTOP "greenflame requires 64-bit Windows."
+        Abort
+    ${EndIf}
+
+    SetRegView 64
+    StrCpy $InstallScope "user"
+    StrCpy $CanInstallAllUsers "0"
+    StrCpy $StartOnStartup "0"
+    StrCpy $INSTDIR "$LOCALAPPDATA\Programs\greenflame"
+
+    UserInfo::GetAccountType
+    Pop $0
+    ${If} $0 == "Admin"
+        StrCpy $CanInstallAllUsers "1"
+    ${EndIf}
+FunctionEnd
+
+Function InstallModePageCreate
+    nsDialogs::Create 1018
+    Pop $InstallModeDialog
+    ${If} $InstallModeDialog == error
+        Abort
+    ${EndIf}
+
+    ${NSD_CreateLabel} 0 0 100% 24u "Choose how greenflame should be installed."
+    Pop $0
+    ${NSD_CreateRadioButton} 0 34u 100% 12u "Install for all users"
+    Pop $GlobalRadio
+    ${NSD_CreateRadioButton} 0 54u 100% 12u "Install only for me"
+    Pop $UserRadio
+
+    ${If} $CanInstallAllUsers == "1"
+        ${If} $InstallScope == "all"
+            ${NSD_Check} $GlobalRadio
+        ${Else}
+            ${NSD_Check} $UserRadio
+        ${EndIf}
+    ${Else}
+        ${NSD_Check} $UserRadio
+        EnableWindow $GlobalRadio 0
+        ${NSD_CreateLabel} 0 76u 100% 18u "All-users install requires administrator approval."
+        Pop $0
+    ${EndIf}
+
+    nsDialogs::Show
+FunctionEnd
+
+Function InstallModePageLeave
+    ${NSD_GetState} $GlobalRadio $0
+    ${If} $0 == ${BST_CHECKED}
+        ${If} $CanInstallAllUsers == "1"
+            StrCpy $InstallScope "all"
+            StrCpy $INSTDIR "$PROGRAMFILES64\greenflame"
+        ${Else}
+            StrCpy $InstallScope "user"
+            StrCpy $INSTDIR "$LOCALAPPDATA\Programs\greenflame"
+        ${EndIf}
+    ${Else}
+        StrCpy $InstallScope "user"
+        StrCpy $INSTDIR "$LOCALAPPDATA\Programs\greenflame"
+    ${EndIf}
+FunctionEnd
+
+Function StartupPageCreate
+    nsDialogs::Create 1018
+    Pop $StartupDialog
+    ${If} $StartupDialog == error
+        Abort
+    ${EndIf}
+
+    ${NSD_CreateLabel} 0 0 100% 24u "Choose whether greenflame should start when you sign in."
+    Pop $0
+    ${NSD_CreateCheckbox} 0 34u 100% 12u "Start greenflame on startup"
+    Pop $StartupCheckbox
+    ${If} $StartOnStartup == "1"
+        ${NSD_Check} $StartupCheckbox
+    ${EndIf}
+
+    nsDialogs::Show
+FunctionEnd
+
+Function StartupPageLeave
+    ${NSD_GetState} $StartupCheckbox $0
+    ${If} $0 == ${BST_CHECKED}
+        StrCpy $StartOnStartup "1"
+    ${Else}
+        StrCpy $StartOnStartup "0"
+    ${EndIf}
+FunctionEnd
+
+Function SetInstallShellContext
+    ${If} $InstallScope == "all"
+        SetShellVarContext all
+    ${Else}
+        SetShellVarContext current
+    ${EndIf}
+FunctionEnd
+
+Section "greenflame"
+    SetRegView 64
+    SetOutPath "$INSTDIR"
+    File /oname=greenflame.exe "${GREENFLAME_EXE_PATH}"
+    WriteUninstaller "$INSTDIR\uninstall.exe"
+
+    Call SetInstallShellContext
+    CreateDirectory "$SMPROGRAMS\greenflame"
+    CreateShortcut "$SMPROGRAMS\greenflame\greenflame.lnk" "$INSTDIR\greenflame.exe"
+    CreateShortcut "$SMPROGRAMS\greenflame\Uninstall greenflame.lnk" "$INSTDIR\uninstall.exe"
+
+    ${If} $InstallScope == "all"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "DisplayName" "greenflame"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "DisplayVersion" "@GREENFLAME_PRODUCT_VERSION@"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "Publisher" "@GREENFLAME_COMPANY_NAME@"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "InstallLocation" "$INSTDIR"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "DisplayIcon" "$INSTDIR\greenflame.exe"
+        WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "UninstallString" '"$INSTDIR\uninstall.exe"'
+        WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoModify" 1
+        WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoRepair" 1
+        DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
+        ClearErrors
+    ${Else}
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "DisplayName" "greenflame"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "DisplayVersion" "@GREENFLAME_PRODUCT_VERSION@"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "Publisher" "@GREENFLAME_COMPANY_NAME@"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "InstallLocation" "$INSTDIR"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "DisplayIcon" "$INSTDIR\greenflame.exe"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "UninstallString" '"$INSTDIR\uninstall.exe"'
+        WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoModify" 1
+        WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoRepair" 1
+        DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
+        ClearErrors
+    ${EndIf}
+
+    ${If} $StartOnStartup == "1"
+        WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame" '"$INSTDIR\greenflame.exe"'
+    ${Else}
+        DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
+        ClearErrors
+        DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
+        ClearErrors
+    ${EndIf}
+SectionEnd
+
+Function un.onInit
+    SetRegView 64
+FunctionEnd
+
+Function un.CloseRunningGreenflame
+    FindWindow $0 "GreenflameTray" ""
+    ${If} $0 != 0
+        DetailPrint "Closing running greenflame..."
+        SendMessage $0 ${GREENFLAME_WM_CLOSE} 0 0 /TIMEOUT=5000
+        StrCpy $1 ${GREENFLAME_CLOSE_POLL_COUNT}
+        ${Do}
+            Sleep ${GREENFLAME_CLOSE_POLL_DELAY_MS}
+            FindWindow $0 "GreenflameTray" ""
+            ${If} $0 == 0
+                ${Break}
+            ${EndIf}
+            IntOp $1 $1 - 1
+        ${LoopWhile} $1 > 0
+    ${EndIf}
+
+    FindWindow $0 "GreenflameTray" ""
+    ${If} $0 != 0
+        DetailPrint "greenflame is still running; forcing it to close..."
+        nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM greenflame.exe /T /F'
+        ClearErrors
+    ${EndIf}
+FunctionEnd
+
+Section "Uninstall"
+    SetRegView 64
+
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
+    ClearErrors
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
+    ClearErrors
+    SetRegView 32
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
+    ClearErrors
+    DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
+    ClearErrors
+    SetRegView 64
+
+    Call un.CloseRunningGreenflame
+
+    SetShellVarContext current
+    Delete "$SMPROGRAMS\greenflame\greenflame.lnk"
+    Delete "$SMPROGRAMS\greenflame\Uninstall greenflame.lnk"
+    RMDir "$SMPROGRAMS\greenflame"
+    SetShellVarContext all
+    Delete "$SMPROGRAMS\greenflame\greenflame.lnk"
+    Delete "$SMPROGRAMS\greenflame\Uninstall greenflame.lnk"
+    RMDir "$SMPROGRAMS\greenflame"
+
+    Delete /REBOOTOK "$INSTDIR\greenflame.exe"
+    Delete /REBOOTOK "$INSTDIR\uninstall.exe"
+    RMDir "$INSTDIR"
+
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
+    ClearErrors
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
+    ClearErrors
+SectionEnd

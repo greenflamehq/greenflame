@@ -64,10 +64,24 @@ set(GREENFLAME_FILE_VERSION_COMMA
 set(GREENFLAME_FILE_VERSION_DOTTED
     "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}.${GREENFLAME_VERSION_TWEAK}"
 )
-set(GREENFLAME_PRODUCT_VERSION
-    "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}"
-    CACHE STRING "Human-readable product version string (e.g. 0.8.0-rc1); overridden by CI"
-)
+if(DEFINED CACHE{GREENFLAME_PRODUCT_VERSION})
+    message(WARNING
+        "Ignoring stale GREENFLAME_PRODUCT_VERSION cache entry; use "
+        "GREENFLAME_PRODUCT_VERSION_OVERRIDE for release builds."
+    )
+    unset(GREENFLAME_PRODUCT_VERSION CACHE)
+endif()
+set(greenflame_product_version_override "")
+if(DEFINED CACHE{GREENFLAME_PRODUCT_VERSION_OVERRIDE})
+    set(greenflame_product_version_override
+        "${GREENFLAME_PRODUCT_VERSION_OVERRIDE}")
+    unset(GREENFLAME_PRODUCT_VERSION_OVERRIDE CACHE)
+endif()
+if(greenflame_product_version_override STREQUAL "")
+    set(GREENFLAME_PRODUCT_VERSION "${PROJECT_VERSION}")
+else()
+    set(GREENFLAME_PRODUCT_VERSION "${greenflame_product_version_override}")
+endif()
 
 set(GREENFLAME_COMPANY_NAME "Jocelyn Legault" CACHE STRING "Company name in VERSIONINFO")
 set(GREENFLAME_PRODUCT_NAME "Greenflame" CACHE STRING "Product name in VERSIONINFO")
@@ -341,6 +355,30 @@ endif()
 # -----------------------------
 include(CTest)
 if(BUILD_TESTING)
+    set(greenflame_expected_product_version "${PROJECT_VERSION}")
+    if(NOT greenflame_product_version_override STREQUAL "")
+        set(greenflame_expected_product_version
+            "${greenflame_product_version_override}")
+    endif()
+    add_test(
+        NAME greenflame_version_metadata_matches_project
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DGREENFLAME_EXPECTED_PRODUCT_VERSION=${greenflame_expected_product_version}"
+            "-DGREENFLAME_VERSION_HEADER=${CMAKE_CURRENT_BINARY_DIR}/version_string.h"
+            "-DGREENFLAME_RC_FILE=${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_version_metadata.cmake"
+    )
+    add_test(
+        NAME greenflame_installer_contract
+        COMMAND
+            "${CMAKE_COMMAND}"
+            "-DGREENFLAME_CMAKELISTS=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
+            "-DGREENFLAME_INSTALLER_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
+            -P
+            "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_installer_contract.cmake"
+    )
     add_subdirectory(tests)
 endif()
 
@@ -522,3 +560,51 @@ elseif(MSVC)
     set_property(TARGET greenflame_core PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     set_property(TARGET greenflame      PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
 endif()
+
+# -----------------------------
+# Installer
+# -----------------------------
+find_program(MAKENSIS_EXECUTABLE
+    NAMES makensis makensis.exe
+    HINTS
+        "C:/Program Files (x86)/NSIS"
+        "C:/Program Files (x86)/NSIS/Bin"
+        "C:/Program Files/NSIS"
+        "C:/Program Files/NSIS/Bin"
+    REQUIRED
+)
+
+set(greenflame_installer_name
+    "greenflame-${GREENFLAME_PRODUCT_VERSION}-win-x64.exe"
+)
+set(greenflame_installer_path
+    "${CMAKE_CURRENT_BINARY_DIR}/${greenflame_installer_name}"
+)
+file(TO_CMAKE_PATH "${GREENFLAME_ICON_PATH}" GREENFLAME_INSTALLER_ICON_PATH)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" GREENFLAME_LICENSE_PATH)
+file(TO_CMAKE_PATH "${greenflame_installer_path}" GREENFLAME_INSTALLER_PATH)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/greenflame.nsi"
+    @ONLY
+)
+
+add_custom_command(
+    OUTPUT "${greenflame_installer_path}"
+    COMMAND
+        "${MAKENSIS_EXECUTABLE}"
+        "/V2"
+        "/DGREENFLAME_EXE_PATH=$<SHELL_PATH:$<TARGET_FILE:greenflame>>"
+        "${CMAKE_CURRENT_BINARY_DIR}/greenflame.nsi"
+    DEPENDS
+        greenflame
+        "${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+        "${GREENFLAME_ICON_PATH}"
+    VERBATIM
+    COMMENT "Building ${greenflame_installer_name}"
+)
+
+add_custom_target(greenflame_installer DEPENDS "${greenflame_installer_path}")
+add_custom_target(installer DEPENDS greenflame_installer)

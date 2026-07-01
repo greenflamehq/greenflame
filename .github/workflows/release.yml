@@ -80,14 +80,20 @@ jobs:
       - name: Set up MSVC developer environment
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
       - name: Configure
-        run: cmake --preset x64-release -DGREENFLAME_VERSION_TWEAK=${{ env.BUILD_TWEAK }} "-DGREENFLAME_PRODUCT_VERSION=${{ env.PRODUCT_VERSION }}"
+        run: cmake --preset x64-release -DGREENFLAME_VERSION_TWEAK=${{ env.BUILD_TWEAK }} "-DGREENFLAME_PRODUCT_VERSION_OVERRIDE=${{ env.PRODUCT_VERSION }}"
 
       - name: Build
         run: cmake --build --preset x64-release
 
       - name: Test
         run: ctest --test-dir build/x64-release --output-on-failure
+
+      - name: Build installer
+        run: cmake --build --preset x64-release --target installer
 
       - name: Package release assets
         shell: pwsh
@@ -96,6 +102,7 @@ jobs:
           $distRoot = Join-Path $env:GITHUB_WORKSPACE 'dist'
           $skillSourceDir = Join-Path $env:GITHUB_WORKSPACE 'skills\greenflame'
           $skillZipPath = Join-Path $distRoot "greenflame-skill-$tag.zip"
+          $installerPath = Join-Path $env:GITHUB_WORKSPACE "build\x64-release\greenflame-$env:PRODUCT_VERSION-win-x64.exe"
 
           if (Test-Path -LiteralPath $distRoot) {
             Remove-Item -LiteralPath $distRoot -Recurse -Force
@@ -104,11 +111,15 @@ jobs:
           if (-not (Test-Path -LiteralPath $skillSourceDir)) {
             throw "Missing skill directory at $skillSourceDir"
           }
+          if (-not (Test-Path -LiteralPath $installerPath)) {
+            throw "Missing installer at $installerPath"
+          }
 
           New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
           Compress-Archive -LiteralPath $skillSourceDir -DestinationPath $skillZipPath -Force
 
           "SKILL_RELEASE_ASSET=dist/greenflame-skill-$tag.zip" >> $env:GITHUB_ENV
+          "GREENFLAME_INSTALLER_ASSET=build/x64-release/greenflame-$env:PRODUCT_VERSION-win-x64.exe" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
         shell: bash
@@ -130,6 +141,7 @@ jobs:
             $notes_flag \
             $prerelease_flag \
             build/x64-release/greenflame.exe \
+            "${{ env.GREENFLAME_INSTALLER_ASSET }}" \
             "${{ env.SKILL_RELEASE_ASSET }}"
         env:
           GH_TOKEN: ${{ github.token }}
