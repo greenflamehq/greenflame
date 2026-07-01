@@ -54,17 +54,20 @@ jobs:
         with:
           ref: master
 
-      - name: Set up MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Configure
-        run: cmake --preset x64-debug-clang
-
-      - name: Build
-        run: cmake --build --preset x64-debug-clang
-
-      - name: Run clang-tidy
-        shell: bash
+      - name: Build and run clang-tidy
+        shell: cmd
         run: |
-          find src tests -name "*.cpp" -print0 \
-            | xargs -0 clang-tidy -p build/x64-debug-clang
+          call scripts\gha-vs-dev-cmd.cmd
+          if errorlevel 1 exit /b 1
+          cmake --preset x64-debug-clang
+          if errorlevel 1 exit /b 1
+          cmake --build --preset x64-debug-clang
+          if errorlevel 1 exit /b 1
+          for /r src %%f in (*.cpp) do (
+            clang-tidy -p build/x64-debug-clang "%%f"
+            if errorlevel 1 exit /b 1
+          )
+          for /r tests %%f in (*.cpp) do (
+            clang-tidy -p build/x64-debug-clang "%%f"
+            if errorlevel 1 exit /b 1
+          )

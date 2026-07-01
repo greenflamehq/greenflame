@@ -77,23 +77,22 @@ jobs:
           git commit -m "internal: bump version to $SEMVER tweak=$NEW_NEXT_TWEAK after ${{ github.ref_name }}"
           git push origin HEAD:refs/heads/master
 
-      - name: Set up MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Install NSIS
         run: choco install nsis -y --no-progress
 
-      - name: Configure
-        run: cmake --preset x64-release -DGREENFLAME_VERSION_TWEAK=${{ env.BUILD_TWEAK }} "-DGREENFLAME_PRODUCT_VERSION_OVERRIDE=${{ env.PRODUCT_VERSION }}"
-
-      - name: Build
-        run: cmake --build --preset x64-release
-
-      - name: Test
-        run: ctest --test-dir build/x64-release --output-on-failure
-
-      - name: Build installer
-        run: cmake --build --preset x64-release --target installer
+      - name: Build, test, and build installer
+        shell: cmd
+        run: |
+          call scripts\gha-vs-dev-cmd.cmd
+          if errorlevel 1 exit /b 1
+          cmake --preset x64-release -DGREENFLAME_VERSION_TWEAK=${{ env.BUILD_TWEAK }} "-DGREENFLAME_PRODUCT_VERSION_OVERRIDE=${{ env.PRODUCT_VERSION }}"
+          if errorlevel 1 exit /b 1
+          cmake --build --preset x64-release
+          if errorlevel 1 exit /b 1
+          ctest --test-dir build/x64-release --output-on-failure
+          if errorlevel 1 exit /b 1
+          cmake --build --preset x64-release --target installer
+          if errorlevel 1 exit /b 1
 
       - name: Package release assets
         shell: pwsh
