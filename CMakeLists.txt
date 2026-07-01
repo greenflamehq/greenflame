@@ -57,7 +57,7 @@ set(CMAKE_WIN32_EXECUTABLE ON)
 # -----------------------------
 # Version and metadata (single source of truth)
 # -----------------------------
-set(GREENFLAME_VERSION_TWEAK 2 CACHE STRING "Fourth version component for Windows resources")
+set(GREENFLAME_VERSION_TWEAK 3 CACHE STRING "Fourth version component for Windows resources")
 set(GREENFLAME_FILE_VERSION_COMMA
     "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},${GREENFLAME_VERSION_TWEAK}"
 )
