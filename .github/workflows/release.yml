@@ -97,27 +97,12 @@ jobs:
       - name: Package release assets
         shell: pwsh
         run: |
-          $tag = '${{ github.ref_name }}'
-          $distRoot = Join-Path $env:GITHUB_WORKSPACE 'dist'
-          $skillSourceDir = Join-Path $env:GITHUB_WORKSPACE 'skills\greenflame'
-          $skillZipPath = Join-Path $distRoot "greenflame-skill-$tag.zip"
           $installerPath = Join-Path $env:GITHUB_WORKSPACE "build\x64-release\greenflame-$env:PRODUCT_VERSION-win-x64.exe"
 
-          if (Test-Path -LiteralPath $distRoot) {
-            Remove-Item -LiteralPath $distRoot -Recurse -Force
-          }
-
-          if (-not (Test-Path -LiteralPath $skillSourceDir)) {
-            throw "Missing skill directory at $skillSourceDir"
-          }
           if (-not (Test-Path -LiteralPath $installerPath)) {
             throw "Missing installer at $installerPath"
           }
 
-          New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-          Compress-Archive -LiteralPath $skillSourceDir -DestinationPath $skillZipPath -Force
-
-          "SKILL_RELEASE_ASSET=dist/greenflame-skill-$tag.zip" >> $env:GITHUB_ENV
           "GREENFLAME_INSTALLER_ASSET=build/x64-release/greenflame-$env:PRODUCT_VERSION-win-x64.exe" >> $env:GITHUB_ENV
 
       - name: Create GitHub Release
@@ -140,7 +125,6 @@ jobs:
             $notes_flag \
             $prerelease_flag \
             build/x64-release/greenflame.exe \
-            "${{ env.GREENFLAME_INSTALLER_ASSET }}" \
-            "${{ env.SKILL_RELEASE_ASSET }}"
+            "${{ env.GREENFLAME_INSTALLER_ASSET }}"
         env:
           GH_TOKEN: ${{ github.token }}
