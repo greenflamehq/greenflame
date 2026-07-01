@@ -33,6 +33,11 @@ file(READ "${GREENFLAME_INSTALLER_SCRIPT}" installer_text)
 
 require_contains("${cmakelists_text}" "find_program(MAKENSIS_EXECUTABLE"
                  "makensis discovery")
+require_contains("${cmakelists_text}" "if(MAKENSIS_EXECUTABLE)"
+                 "installer target guarded by makensis discovery")
+require_contains("${cmakelists_text}"
+                 "NSIS makensis.exe is required to build the installer target."
+                 "installer-only makensis failure")
 require_contains("${cmakelists_text}"
                  [=[greenflame-${GREENFLAME_PRODUCT_VERSION}-win-x64.exe]=]
                  "versioned Windows x64 installer filename")

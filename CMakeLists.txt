@@ -571,7 +571,6 @@ find_program(MAKENSIS_EXECUTABLE
         "C:/Program Files (x86)/NSIS/Bin"
         "C:/Program Files/NSIS"
         "C:/Program Files/NSIS/Bin"
-    REQUIRED
 )
 
 set(greenflame_installer_name
@@ -590,21 +589,30 @@ configure_file(
     @ONLY
 )
 
-add_custom_command(
-    OUTPUT "${greenflame_installer_path}"
-    COMMAND
-        "${MAKENSIS_EXECUTABLE}"
-        "/V2"
-        "/DGREENFLAME_EXE_PATH=$<SHELL_PATH:$<TARGET_FILE:greenflame>>"
-        "${CMAKE_CURRENT_BINARY_DIR}/greenflame.nsi"
-    DEPENDS
-        greenflame
-        "${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
-        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
-        "${GREENFLAME_ICON_PATH}"
-    VERBATIM
-    COMMENT "Building ${greenflame_installer_name}"
-)
+if(MAKENSIS_EXECUTABLE)
+    add_custom_command(
+        OUTPUT "${greenflame_installer_path}"
+        COMMAND
+            "${MAKENSIS_EXECUTABLE}"
+            "/V2"
+            "/DGREENFLAME_EXE_PATH=$<SHELL_PATH:$<TARGET_FILE:greenflame>>"
+            "${CMAKE_CURRENT_BINARY_DIR}/greenflame.nsi"
+        DEPENDS
+            greenflame
+            "${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
+            "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
+            "${GREENFLAME_ICON_PATH}"
+        VERBATIM
+        COMMENT "Building ${greenflame_installer_name}"
+    )
 
-add_custom_target(greenflame_installer DEPENDS "${greenflame_installer_path}")
+    add_custom_target(greenflame_installer DEPENDS "${greenflame_installer_path}")
+else()
+    add_custom_target(greenflame_installer
+        COMMAND
+            "${CMAKE_COMMAND}" -E echo
+            "NSIS makensis.exe is required to build the installer target."
+        COMMAND "${CMAKE_COMMAND}" -E false
+    )
+endif()
 add_custom_target(installer DEPENDS greenflame_installer)
