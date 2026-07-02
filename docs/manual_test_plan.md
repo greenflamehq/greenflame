@@ -74,14 +74,17 @@ unless a real end-to-end bug escapes into the Win32 shell:
   4. Choose `Install only for me`.
   5. Confirm the default install path is `%LocalAppData%\Programs\greenflame`.
   6. Enable `Start greenflame on startup`.
-  7. Leave `Start greenflame now` enabled on the finish page.
-  8. Finish installation.
+  7. Confirm `Add greenflame to PATH for command-line use` is enabled and the page explains that already-open terminals must be reopened.
+  8. Leave `Start greenflame now` enabled on the finish page.
+  9. Finish installation.
 - Expected:
   - The installer file name includes the full product version.
   - Installer UI uses `greenflame` except where sentence-initial `Greenflame` is required.
   - `greenflame.exe` and `uninstall.exe` are installed under `%LocalAppData%\Programs\greenflame`.
   - The current-user Start menu contains greenflame shortcuts.
   - `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Greenflame` contains the quoted installed executable path.
+  - `HKCU\Environment\Path` includes `%LocalAppData%\Programs\greenflame`.
+  - A new terminal can run `greenflame --version`.
   - greenflame starts after the installer closes.
 
 ### GF-MAN-INSTALL-002 - All-Users Installer Flow
@@ -94,30 +97,35 @@ unless a real end-to-end bug escapes into the Win32 shell:
   3. Choose `Install for all users`.
   4. Confirm the default install path is `%ProgramFiles%\greenflame`.
   5. Leave `Start greenflame on startup` disabled.
-  6. Finish installation without starting greenflame now.
+  6. Leave `Add greenflame to PATH for command-line use` enabled.
+  7. Finish installation without starting greenflame now.
 - Expected:
   - `greenflame.exe` and `uninstall.exe` are installed under `%ProgramFiles%\greenflame`.
   - The all-users Start menu contains greenflame shortcuts.
   - No `Greenflame` startup value is created in `HKCU` or `HKLM`.
+  - `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\Path` includes `%ProgramFiles%\greenflame`.
   - Apps & features lists greenflame and points uninstall to the installed `uninstall.exe`.
 
-### GF-MAN-INSTALL-003 - Uninstaller Startup Cleanup
+### GF-MAN-INSTALL-003 - Uninstaller Startup And PATH Cleanup
 
 - Priority: `P0`
 - Run on: `ENV-C`
 - Steps:
-  1. Install greenflame.
+  1. Install greenflame with `Add greenflame to PATH for command-line use` enabled.
   2. Create or confirm `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Greenflame`.
   3. If running elevated, also create `HKLM\Software\Microsoft\Windows\CurrentVersion\Run\Greenflame`.
   4. Launch greenflame and leave it running.
-  5. Run the installed uninstaller.
-  6. Inspect both registry locations after uninstall completes.
+  5. Confirm the uninstall registry key records `PathAddedByInstaller=1` and `PathEntry=<install path>`.
+  6. Run the installed uninstaller.
+  7. Inspect the startup and PATH registry locations after uninstall completes.
 - Expected:
   - The running greenflame process exits during uninstall.
   - Installed greenflame files are removed.
   - Start menu shortcuts are removed.
   - The `Greenflame` startup value is removed from `HKCU`.
   - The `Greenflame` startup value is removed from `HKLM` when permissions allow it.
+  - The installer-owned greenflame PATH entry is removed from the matching user or machine PATH.
+  - PATH entries not recorded as installer-owned are left unchanged.
 
 ## Smoke And Tray
 

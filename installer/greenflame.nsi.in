@@ -5,11 +5,13 @@ RequestExecutionLevel highest
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
+!include "WinMessages.nsh"
 !include "x64.nsh"
 
 !define GREENFLAME_WM_CLOSE 0x0010
 !define GREENFLAME_CLOSE_POLL_COUNT 20
 !define GREENFLAME_CLOSE_POLL_DELAY_MS 250
+!define GREENFLAME_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
 
 !ifndef GREENFLAME_EXE_PATH
     !error "GREENFLAME_EXE_PATH must point to greenflame.exe"
@@ -35,7 +37,9 @@ VIAddVersionKey "ProductVersion" "@GREENFLAME_PRODUCT_VERSION@"
 !define MUI_UNICON "@GREENFLAME_INSTALLER_ICON_PATH@"
 !define MUI_WELCOMEPAGE_TITLE "Install greenflame"
 !define MUI_WELCOMEPAGE_TEXT "This wizard installs greenflame @GREENFLAME_PRODUCT_VERSION@."
-!define MUI_FINISHPAGE_TITLE "Greenflame has been installed"
+!define MUI_FINISHPAGE_TITLE "greenflame has been installed"
+!define MUI_FINISHPAGE_TEXT "greenflame has been installed on your computer.$\r$\n$\r$\nIf you added greenflame to PATH, new terminal windows will use the updated PATH. Already-open terminals must be reopened."
+!define MUI_FINISHPAGE_TEXT_LARGE
 !define MUI_FINISHPAGE_RUN "$INSTDIR\greenflame.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start greenflame now"
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
@@ -43,11 +47,13 @@ VIAddVersionKey "ProductVersion" "@GREENFLAME_PRODUCT_VERSION@"
 Var InstallScope
 Var CanInstallAllUsers
 Var StartOnStartup
+Var AddToPath
 Var InstallModeDialog
 Var GlobalRadio
 Var UserRadio
 Var StartupDialog
 Var StartupCheckbox
+Var PathCheckbox
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "@GREENFLAME_LICENSE_PATH@"
@@ -72,6 +78,7 @@ Function .onInit
     StrCpy $InstallScope "user"
     StrCpy $CanInstallAllUsers "0"
     StrCpy $StartOnStartup "0"
+    StrCpy $AddToPath "1"
     StrCpy $INSTDIR "$LOCALAPPDATA\Programs\greenflame"
 
     UserInfo::GetAccountType
@@ -134,13 +141,20 @@ Function StartupPageCreate
         Abort
     ${EndIf}
 
-    ${NSD_CreateLabel} 0 0 100% 24u "Choose whether greenflame should start when you sign in."
+    ${NSD_CreateLabel} 0 0 100% 24u "Choose optional greenflame settings."
     Pop $0
     ${NSD_CreateCheckbox} 0 34u 100% 12u "Start greenflame on startup"
     Pop $StartupCheckbox
     ${If} $StartOnStartup == "1"
         ${NSD_Check} $StartupCheckbox
     ${EndIf}
+    ${NSD_CreateCheckbox} 0 58u 100% 12u "Add greenflame to PATH for command-line use"
+    Pop $PathCheckbox
+    ${If} $AddToPath == "1"
+        ${NSD_Check} $PathCheckbox
+    ${EndIf}
+    ${NSD_CreateLabel} 0 82u 100% 24u "New terminal windows will use the updated PATH. Already-open terminals must be reopened."
+    Pop $0
 
     nsDialogs::Show
 FunctionEnd
@@ -152,6 +166,13 @@ Function StartupPageLeave
     ${Else}
         StrCpy $StartOnStartup "0"
     ${EndIf}
+
+    ${NSD_GetState} $PathCheckbox $0
+    ${If} $0 == ${BST_CHECKED}
+        StrCpy $AddToPath "1"
+    ${Else}
+        StrCpy $AddToPath "0"
+    ${EndIf}
 FunctionEnd
 
 Function SetInstallShellContext
@@ -160,6 +181,37 @@ Function SetInstallShellContext
     ${Else}
         SetShellVarContext current
     ${EndIf}
+FunctionEnd
+
+Function ExtractPathHelper
+    InitPluginsDir
+    File "/oname=$PLUGINSDIR\greenflame-path.ps1" "@GREENFLAME_PATH_HELPER_PATH@"
+FunctionEnd
+
+Function BroadcastEnvironmentChange
+    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+FunctionEnd
+
+Function AddInstallDirToUserPath
+    Call ExtractPathHelper
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\greenflame-path.ps1" -Action Add -Scope User -Entry "$INSTDIR"'
+    Pop $0
+    ${If} $0 != 0
+        MessageBox MB_ICONSTOP "greenflame could not add the install directory to PATH."
+        Abort
+    ${EndIf}
+    Call BroadcastEnvironmentChange
+FunctionEnd
+
+Function AddInstallDirToMachinePath
+    Call ExtractPathHelper
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\greenflame-path.ps1" -Action Add -Scope Machine -Entry "$INSTDIR"'
+    Pop $0
+    ${If} $0 != 0
+        MessageBox MB_ICONSTOP "greenflame could not add the install directory to PATH."
+        Abort
+    ${EndIf}
+    Call BroadcastEnvironmentChange
 FunctionEnd
 
 Section "greenflame"
@@ -182,6 +234,9 @@ Section "greenflame"
         WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "UninstallString" '"$INSTDIR\uninstall.exe"'
         WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoModify" 1
         WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoRepair" 1
+        WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "PathAddedByInstaller" 0
+        DeleteRegValue HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "PathEntry"
+        ClearErrors
         DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
         ClearErrors
     ${Else}
@@ -193,8 +248,19 @@ Section "greenflame"
         WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "UninstallString" '"$INSTDIR\uninstall.exe"'
         WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoModify" 1
         WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "NoRepair" 1
+        WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "PathAddedByInstaller" 0
+        DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame" "PathEntry"
+        ClearErrors
         DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
         ClearErrors
+    ${EndIf}
+
+    ${If} $AddToPath == "1"
+        ${If} $InstallScope == "all"
+            Call AddInstallDirToMachinePath
+        ${Else}
+            Call AddInstallDirToUserPath
+        ${EndIf}
     ${EndIf}
 
     ${If} $StartOnStartup == "1"
@@ -235,8 +301,32 @@ Function un.CloseRunningGreenflame
     ${EndIf}
 FunctionEnd
 
+Function un.ExtractPathHelper
+    InitPluginsDir
+    File "/oname=$PLUGINSDIR\greenflame-path.ps1" "@GREENFLAME_PATH_HELPER_PATH@"
+FunctionEnd
+
+Function un.RemoveInstallerPathEntries
+    Call un.ExtractPathHelper
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\greenflame-path.ps1" -Action Remove -Scope User -Entry "$INSTDIR"'
+    Pop $0
+    ${If} $0 != 0
+        DetailPrint "Could not remove the user PATH entry."
+    ${EndIf}
+
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\greenflame-path.ps1" -Action Remove -Scope Machine -Entry "$INSTDIR"'
+    Pop $0
+    ${If} $0 != 0
+        DetailPrint "Could not remove the machine PATH entry."
+    ${EndIf}
+
+    SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
+FunctionEnd
+
 Section "Uninstall"
     SetRegView 64
+
+    Call un.RemoveInstallerPathEntries
 
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Greenflame"
     ClearErrors

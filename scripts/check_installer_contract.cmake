@@ -4,6 +4,9 @@ endif()
 if(NOT DEFINED GREENFLAME_INSTALLER_SCRIPT)
     message(FATAL_ERROR "GREENFLAME_INSTALLER_SCRIPT is required")
 endif()
+if(NOT DEFINED GREENFLAME_PATH_HELPER_SCRIPT)
+    message(FATAL_ERROR "GREENFLAME_PATH_HELPER_SCRIPT is required")
+endif()
 
 function(require_file path description)
     if(NOT EXISTS "${path}")
@@ -27,9 +30,11 @@ endfunction()
 
 require_file("${GREENFLAME_CMAKELISTS}" "CMakeLists.txt")
 require_file("${GREENFLAME_INSTALLER_SCRIPT}" "NSIS installer script")
+require_file("${GREENFLAME_PATH_HELPER_SCRIPT}" "PATH helper script")
 
 file(READ "${GREENFLAME_CMAKELISTS}" cmakelists_text)
 file(READ "${GREENFLAME_INSTALLER_SCRIPT}" installer_text)
+file(READ "${GREENFLAME_PATH_HELPER_SCRIPT}" path_helper_text)
 
 require_contains("${cmakelists_text}" "find_program(MAKENSIS_EXECUTABLE"
                  "makensis discovery")
@@ -61,6 +66,29 @@ require_contains("${installer_text}" "Page custom StartupPageCreate StartupPageL
                  "startup preference page")
 require_contains("${installer_text}" "!define MUI_FINISHPAGE_RUN"
                  "start greenflame now finish option")
+require_contains("${installer_text}" "Add greenflame to PATH for command-line use"
+                 "PATH opt-in checkbox")
+require_contains("${installer_text}" "New terminal windows will use the updated PATH. Already-open terminals must be reopened."
+                 "PATH terminal restart note")
+require_contains("${path_helper_text}" "PathAddedByInstaller"
+                 "PATH ownership tracking")
+require_contains("${path_helper_text}" "Set-PathOwnership $true $Entry"
+                 "installed PATH entry tracking")
+require_contains("${installer_text}" "Function un.RemoveInstallerPathEntries"
+                 "PATH cleanup during uninstall")
+require_contains("${installer_text}"
+                 [=[SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment"]=]
+                 "environment change broadcast")
+require_contains("${installer_text}" "greenflame-path.ps1"
+                 "bundled PATH helper")
+require_contains("${path_helper_text}" "HKCU:\\Environment"
+                 "current-user PATH key")
+require_contains("${path_helper_text}" "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"
+                 "machine PATH key")
+require_contains("${path_helper_text}" "New-ItemProperty -Path $env_key -Name Path"
+                 "PATH registry update")
+require_contains("${path_helper_text}" "Remove-ItemProperty -Path $uninstall_key -Name PathEntry"
+                 "PATH ownership cleanup")
 require_contains("${installer_text}" "WriteUninstaller"
                  "uninstaller generation")
 require_contains("${installer_text}" "WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\" \"Greenflame\""

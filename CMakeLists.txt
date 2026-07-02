@@ -376,6 +376,7 @@ if(BUILD_TESTING)
             "${CMAKE_COMMAND}"
             "-DGREENFLAME_CMAKELISTS=${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt"
             "-DGREENFLAME_INSTALLER_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
+            "-DGREENFLAME_PATH_HELPER_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/installer/update_path.ps1"
             -P
             "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check_installer_contract.cmake"
     )
@@ -581,6 +582,8 @@ set(greenflame_installer_path
 )
 file(TO_CMAKE_PATH "${GREENFLAME_ICON_PATH}" GREENFLAME_INSTALLER_ICON_PATH)
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" GREENFLAME_LICENSE_PATH)
+file(TO_NATIVE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/installer/update_path.ps1"
+     GREENFLAME_PATH_HELPER_PATH)
 file(TO_CMAKE_PATH "${greenflame_installer_path}" GREENFLAME_INSTALLER_PATH)
 
 configure_file(
@@ -600,6 +603,7 @@ if(MAKENSIS_EXECUTABLE)
         DEPENDS
             greenflame
             "${CMAKE_CURRENT_SOURCE_DIR}/installer/greenflame.nsi.in"
+            "${CMAKE_CURRENT_SOURCE_DIR}/installer/update_path.ps1"
             "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
             "${GREENFLAME_ICON_PATH}"
         VERBATIM
