@@ -137,3 +137,17 @@ Breaking these rules is a correctness bug.
 - Keep process/CLI exit codes in a single enum with globally unique numeric values. If codes change, update the README exit-code table.
 - Debug root causes first; avoid adding new abstractions or code paths without clear need.
 - Clang warning hygiene guidance lives in `docs/build.md`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the five default canonical labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain documentation uses a single-context layout. See `docs/agents/domain.md`.
