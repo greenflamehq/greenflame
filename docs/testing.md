@@ -141,3 +141,18 @@ build\x64-debug\greenflame_tests.exe --gtest_filter="RectPx*"
 ```
 
 Prefer `ctest` for standard runs; use direct execution for local filtering.
+
+## Freehand CPU performance check (opt-in)
+
+The disabled `freehand_smoothing.LongStrokePerformance` test times the production
+smoother on a fixed 8,192-point stroke. It reports microseconds per call and output
+point count, with no machine-dependent timing assertion:
+
+```bat
+build\x64-release\bin\greenflame_tests.exe --gtest_filter=freehand_smoothing.DISABLED_LongStrokePerformance --gtest_also_run_disabled_tests --gtest_repeat=5
+```
+
+Compare the median of repeated optimized runs on the same machine, after builds
+finish. This measures CPU smoothing cost only, not input-to-display latency or GPU
+frame pacing. Interactive coverage is `GF-MAN-ANN-002C` in
+[manual_test_plan.md](manual_test_plan.md).

@@ -2,6 +2,66 @@
 
 using namespace greenflame::core;
 
+// Opt-in CPU benchmark; timings are reported, never used as pass/fail thresholds.
+TEST(freehand_smoothing, DISABLED_LongStrokePerformance) {
+    constexpr int32_t point_count = 8192;
+    constexpr int32_t row_width = 512;
+    constexpr int32_t point_spacing_px = 3;
+    constexpr int32_t wave_height_px = 16;
+    constexpr int32_t wave_period = 32;
+    constexpr int32_t stroke_width_px = 2;
+    constexpr int32_t iterations = 100;
+    std::vector<PointPx> points;
+    points.reserve(point_count);
+    for (int32_t index = 0; index < point_count; ++index) {
+        points.push_back({(index % row_width) * point_spacing_px,
+                          (index / row_width) * wave_height_px +
+                              static_cast<int32_t>(
+                                  wave_height_px *
+                                  std::sin(static_cast<double>(index) / wave_period))});
+    }
+    size_t output_point_count = 0;
+    auto const start = std::chrono::steady_clock::now();
+    for (int32_t iteration = 0; iteration < iterations; ++iteration) {
+        auto const smoothed = Smooth_freehand_points(
+            points, FreehandSmoothingMode::Smooth, stroke_width_px);
+        output_point_count += smoothed.size();
+    }
+    auto const elapsed = std::chrono::duration<double, std::micro>(
+        std::chrono::steady_clock::now() - start);
+    std::cout << "Smoothing " << point_count
+              << " points: " << elapsed.count() / iterations
+              << " us/call; output points: " << output_point_count / iterations << '\n';
+    EXPECT_GT(output_point_count, points.size());
+}
+
+TEST(freehand_smoothing, SmoothMode_GoldenCurve) {
+    std::vector<PointPx> const points = {{-8, -4}, {-3, -3}, {0, 0}, {4, 2},
+                                         {4, 2},   {8, 1},   {12, 5}};
+    auto const smoothed =
+        Smooth_freehand_points(points, FreehandSmoothingMode::Smooth, 8);
+    std::vector<PointPx> const expected = {
+        {-8, -4}, {-6, -4}, {-5, -4}, {-3, -3}, {-2, -2}, {-1, -1}, {0, 0},  {1, 1},
+        {3, 2},   {4, 2},   {5, 2},   {7, 1},   {8, 1},   {9, 2},   {11, 3}, {12, 5}};
+    EXPECT_EQ(smoothed, expected);
+}
+
+TEST(freehand_smoothing, SmoothMode_DeduplicatesStationaryAndJoinedSubpaths) {
+    constexpr int32_t stroke_width_px = 8;
+    std::vector<PointPx> const stationary = {{0, 0}, {0, 0}, {0, 0}};
+    EXPECT_EQ(Smooth_freehand_points(stationary, FreehandSmoothingMode::Smooth,
+                                     stroke_width_px),
+              (std::vector<PointPx>{{0, 0}}));
+
+    std::vector<PointPx> const corners = {{-4, 0}, {0, 0}, {0, 0},
+                                          {4, 0},  {0, 0}, {0, 4}};
+    std::vector<PointPx> const expected = {{-4, 0}, {-2, 0}, {0, 0}, {2, 0},
+                                           {4, 0},  {0, 0},  {0, 4}};
+    EXPECT_EQ(
+        Smooth_freehand_points(corners, FreehandSmoothingMode::Smooth, stroke_width_px),
+        expected);
+}
+
 TEST(freehand_smoothing, OffMode_PreservesInputExactly) {
     std::vector<PointPx> const points = {{10, 10}, {20, 11}, {30, 13}, {30, 13}};
 

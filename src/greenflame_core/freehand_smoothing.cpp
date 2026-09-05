@@ -125,34 +125,6 @@ struct PointF final {
     };
 }
 
-[[nodiscard]] PointF Catmull_rom_point(PointF p0, PointF p1, PointF p2, PointF p3,
-                                       float t) noexcept {
-    auto const advance = [](float t_prev, PointF a, PointF b) noexcept {
-        float const dx = b.x - a.x;
-        float const dy = b.y - a.y;
-        float const distance = std::sqrt((dx * dx) + (dy * dy));
-        return t_prev +
-               std::pow(std::max(distance, kMinSplineSegmentLength), kCentripetalAlpha);
-    };
-
-    float const t0 = 0.0F;
-    float const t1 = advance(t0, p0, p1);
-    float const t2 = advance(t1, p1, p2);
-    float const t3 = advance(t2, p2, p3);
-    if ((t1 - t0) < kMinSplineSegmentLength || (t2 - t1) < kMinSplineSegmentLength ||
-        (t3 - t2) < kMinSplineSegmentLength) {
-        return Lerp(p1, p2, t);
-    }
-
-    float const sample_t = t1 + ((t2 - t1) * t);
-    PointF const a1 = Lerp(p0, p1, (sample_t - t0) / (t1 - t0));
-    PointF const a2 = Lerp(p1, p2, (sample_t - t1) / (t2 - t1));
-    PointF const a3 = Lerp(p2, p3, (sample_t - t2) / (t3 - t2));
-    PointF const b1 = Lerp(a1, a2, (sample_t - t0) / (t2 - t0));
-    PointF const b2 = Lerp(a2, a3, (sample_t - t1) / (t3 - t1));
-    return Lerp(b1, b2, (sample_t - t1) / (t2 - t1));
-}
-
 void Append_polyline(std::span<const PointPx> points, std::vector<PointPx> &out) {
     for (PointPx point : points) {
         if (!out.empty() && out.back() == point) {
@@ -189,12 +161,41 @@ void Append_catmull_subpath(std::span<const PointPx> points, float spacing_px,
         int32_t const subdivision_count =
             std::max(1, static_cast<int32_t>(std::ceil(segment_length / spacing_px)));
 
-        for (int32_t step = 1; step < subdivision_count; ++step) {
-            float const t =
-                static_cast<float>(step) / static_cast<float>(subdivision_count);
-            PointPx const point = To_point_px(Catmull_rom_point(p0, p1, p2, p3, t));
-            if (out.back() != point) {
-                out.push_back(point);
+        if (subdivision_count > 1) {
+            // Knot distances depend on the segment, not on its resampled points.
+            auto const advance = [](float t_prev, PointF a, PointF b) noexcept {
+                float const dx = b.x - a.x;
+                float const dy = b.y - a.y;
+                float const distance = std::sqrt((dx * dx) + (dy * dy));
+                return t_prev + std::pow(std::max(distance, kMinSplineSegmentLength),
+                                         kCentripetalAlpha);
+            };
+            float const t0 = 0.0F;
+            float const t1 = advance(t0, p0, p1);
+            float const t2 = advance(t1, p1, p2);
+            float const t3 = advance(t2, p2, p3);
+            auto const sample_point = [=](float t) noexcept {
+                if ((t1 - t0) < kMinSplineSegmentLength ||
+                    (t2 - t1) < kMinSplineSegmentLength ||
+                    (t3 - t2) < kMinSplineSegmentLength) {
+                    return Lerp(p1, p2, t);
+                }
+                float const sample_t = t1 + ((t2 - t1) * t);
+                PointF const a1 = Lerp(p0, p1, (sample_t - t0) / (t1 - t0));
+                PointF const a2 = Lerp(p1, p2, (sample_t - t1) / (t2 - t1));
+                PointF const a3 = Lerp(p2, p3, (sample_t - t2) / (t3 - t2));
+                PointF const b1 = Lerp(a1, a2, (sample_t - t0) / (t2 - t0));
+                PointF const b2 = Lerp(a2, a3, (sample_t - t1) / (t3 - t1));
+                return Lerp(b1, b2, (sample_t - t1) / (t2 - t1));
+            };
+
+            for (int32_t step = 1; step < subdivision_count; ++step) {
+                float const t =
+                    static_cast<float>(step) / static_cast<float>(subdivision_count);
+                PointPx const point = To_point_px(sample_point(t));
+                if (out.back() != point) {
+                    out.push_back(point);
+                }
             }
         }
         if (out.back() != points[index + 1]) {
@@ -226,7 +227,8 @@ void Append_catmull_subpath(std::span<const PointPx> points, float spacing_px,
         subpath_start = index;
     }
 
-    return Deduplicate_points(smoothed);
+    // Both append paths already suppress adjacent duplicate pixels.
+    return smoothed;
 }
 
 [[nodiscard]] int32_t Preview_tail_length_px(int32_t stroke_width_px) noexcept {

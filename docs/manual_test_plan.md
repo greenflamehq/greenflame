@@ -748,6 +748,57 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - A straightened highlighter stroke exposes draggable start and end handles in default mode, and dragging either handle reshapes only that endpoint.
   - Both strokes can be moved in default mode.
 
+### GF-MAN-ANN-002C - Freehand Draft Work And Long-Stroke Responsiveness
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`
+- Steps:
+  1. Select a region. With Brush, click once, draw a short two-point stroke, then
+     draw a continuous looping stroke for at least 15 seconds without releasing.
+  2. Repeat with Highlighter, including a pause to straighten it, and with each
+     tool's smoothing set to `off` and `smooth`. Change size and color between
+     strokes; cancel a stroke with Escape and start another at the same point.
+  3. Commit strokes, undo/redo, then copy or save and compare the rendered result.
+  4. Create an Obfuscate rectangle over a stroke, move/resize it, then move a lower
+     overlapping annotation. Verify its live pixels refresh throughout each edit.
+  5. When profiling, inspect pointer movement and paint stacks during the long
+     stroke. Compare equal stroke lengths and input rates before/after the change.
+- Expected:
+  - Single-point marks, short strokes, raw live tails, highlighter straightening,
+    style changes, cancellation, and saved/clipboard output retain their behavior.
+  - A growing freehand stroke is not smoothed to build an unused draft annotation
+    from `Should_force_obfuscate_repaint` or `On_paint`. Smoothing for the actual
+    preview body and for the final committed stroke still occurs.
+  - Obfuscate creation, dragging, resizing, and reactive previews remain current.
+  - Record observed responsiveness and any input-to-display timings separately from
+    the CPU-only benchmark; do not interpret its result as a frame-rate measurement.
+
+### GF-MAN-ANN-002D - Selection Dimming On Large Desktops
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`; include triple-1080p and 1080p plus dual-4K layouts.
+- Steps:
+  1. Select, move, and resize a region over detailed content. Cover each edge of the
+     virtual desktop, a one-pixel selection, full-desktop selection, and a selection
+     extending beyond a monitor. Include negative monitor origins and mixed DPI.
+  2. Draw opaque and translucent arrows, brush strokes and square highlighters
+     across the selection border. Compare the live draft, committed/frozen frame,
+     and annotation move/resize preview. Include overlapping highlighters, text and
+     obfuscation. Check dimming on all four sides and at their corners.
+  3. Exercise lifted-window capture and window movement, including partially
+     off-screen windows; compare against regular region selection.
+  4. Compare equal gestures before/after with the same physical desktop extent.
+     Record GPU rendering time separately from capture startup and compositor waits.
+- Expected:
+  - The selected pixels remain undimmed; all outside pixels and annotations receive
+    the same dim exactly once, without seams, flashing or annotation opacity changes.
+  - Fine screenshot details inside a selection retain nearest-neighbor sampling,
+    including on virtual desktops wider than 8192 physical pixels.
+  - Committed annotations are composited once in regular selection frames. Live
+    drafts and lifted-window replacement retain their existing restore composition.
+  - Cursor, toolbar and selection handles remain above the dim. Clipboard/save
+    output, capture-first timing, and physical-pixel geometry remain unchanged.
+
 ### GF-MAN-ANN-002B - Highlighter Composes Over Prior Annotations
 
 - Priority: `P1`

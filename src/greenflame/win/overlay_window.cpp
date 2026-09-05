@@ -2403,7 +2403,10 @@ bool OverlayWindow::Should_show_square_cursor_preview() const {
 }
 
 bool OverlayWindow::Should_force_obfuscate_repaint() const {
-    core::Annotation const *const draft = controller_.Draft_annotation();
+    core::Annotation const *const draft =
+        controller_.Active_annotation_tool() == core::AnnotationToolId::Obfuscate
+            ? controller_.Draft_annotation()
+            : nullptr;
     return (draft != nullptr &&
             std::holds_alternative<core::ObfuscateAnnotation>(draft->data)) ||
            !controller_.Active_obfuscate_preview_indices().empty();
@@ -3928,7 +3931,16 @@ LRESULT OverlayWindow::On_paint() {
         std::optional<core::TextDraftView> draft_text_view = std::nullopt;
         std::optional<core::Annotation> draft_obfuscate_preview = std::nullopt;
         std::vector<AnnotationPreviewPatch> patches;
-        core::Annotation const *paint_draft_annotation = controller_.Draft_annotation();
+        input.draft_freehand_points = controller_.Draft_freehand_points();
+        input.draft_freehand_style = controller_.Draft_freehand_style();
+        // Multi-point freehand drafts render from the split-tail preview below.
+        // Materializing their committed-form annotation would smooth the entire
+        // stroke again, only to discard it.
+        core::Annotation const *paint_draft_annotation =
+            !input.draft_freehand_style.has_value() ||
+                    input.draft_freehand_points.size() <= 1
+                ? controller_.Draft_annotation()
+                : nullptr;
         bool has_live_obfuscate_preview = false;
         {
             GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Prepare_input");
@@ -4069,8 +4081,6 @@ LRESULT OverlayWindow::On_paint() {
         }
         input.annotations = controller_.Annotations();
         input.annotation_patches = patches;
-        input.draft_freehand_points = controller_.Draft_freehand_points();
-        input.draft_freehand_style = controller_.Draft_freehand_style();
         input.draft_freehand_smoothing_mode =
             controller_.Draft_freehand_smoothing_mode();
         input.draft_freehand_tip_shape =

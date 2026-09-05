@@ -42,6 +42,31 @@ constexpr float kSpellSquiggleHalfPeriodPx = 2.0f;
 constexpr float kSpellSquiggleStrokeWidthPx = 1.0f;
 constexpr UINT32 kSpellSquiggleHitTestInitialCapacity = 8u;
 
+void Draw_selection_dim(ID2D1RenderTarget *rt, ID2D1SolidColorBrush *brush,
+                        core::RectPx selection, int vd_width, int vd_height) {
+    core::RectPx const bounds = core::RectPx::From_ltrb(0, 0, vd_width, vd_height);
+    std::optional<core::RectPx> const visible = core::RectPx::Clip(selection, bounds);
+    brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
+    if (!visible.has_value()) {
+        rt->FillRectangle(Rect(bounds), brush);
+        return;
+    }
+
+    // Non-overlapping physical-pixel bands leave the selection untouched. This
+    // avoids dimming and then recompositing its annotations.
+    core::RectPx const &inside = *visible;
+    std::array<core::RectPx, 4> const bands = {
+        core::RectPx::From_ltrb(0, 0, vd_width, inside.top),
+        core::RectPx::From_ltrb(0, inside.bottom, vd_width, vd_height),
+        core::RectPx::From_ltrb(0, inside.top, inside.left, inside.bottom),
+        core::RectPx::From_ltrb(inside.right, inside.top, vd_width, inside.bottom)};
+    for (core::RectPx const &band : bands) {
+        if (!band.Is_empty()) {
+            rt->FillRectangle(Rect(band), brush);
+        }
+    }
+}
+
 void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot,
                                   core::RectPx restore_rect, int vd_width,
                                   int vd_height) {
@@ -2937,29 +2962,16 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
         return;
     }
 
-    D2D1_RECT_F const full = D2D1::RectF(0.f, 0.f, static_cast<float>(vd_width),
-                                         static_cast<float>(vd_height));
-
     res.frozen_rt->BeginDraw();
     res.frozen_rt->DrawBitmap(res.screenshot.Get());
+    Draw_clipped_screenshot_rect(res.frozen_rt.Get(), res.screenshot.Get(), selection,
+                                 vd_width, vd_height);
 
     // Composite committed annotations before dimming so the dim sits on top of them.
     res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
 
-    // Dim the entire capture (on top of screenshot and all annotations).
-    res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
-    res.frozen_rt->FillRectangle(full, res.solid_brush.Get());
-
-    // Restore the selection area undimmed: screenshot then annotations, both
-    // clipped so nothing outside the selection punches through the dim.
-    if (!selection.Is_empty()) {
-        Draw_clipped_screenshot_rect(res.frozen_rt.Get(), res.screenshot.Get(),
-                                     selection, vd_width, vd_height);
-        res.frozen_rt->PushAxisAlignedClip(Rect(selection),
-                                           D2D1_ANTIALIAS_MODE_ALIASED);
-        res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
-        res.frozen_rt->PopAxisAlignedClip();
-    }
+    Draw_selection_dim(res.frozen_rt.Get(), res.solid_brush.Get(), selection, vd_width,
+                       vd_height);
 
     HRESULT const hr = res.frozen_rt->EndDraw();
     if (SUCCEEDED(hr)) {
@@ -3031,12 +3043,20 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         }
     } else {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Dynamic_frame");
-        // Dynamic path: rebuild per frame from screenshot + annotations + dim +
-        // selection restore.
-        D2D1_RECT_F const full = D2D1::RectF(0.f, 0.f, static_cast<float>(vd_width),
-                                             static_cast<float>(vd_height));
+        // Dynamic path: composite content once, then dim outside the selection.
+        // Use live_rect while dragging; annotation gestures use final_selection.
+        core::RectPx const restore_rect =
+            !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+        bool const needs_selection_restore =
+            input.lifted_window_bitmap != nullptr || has_live_annotation_draft;
         if (res.screenshot) {
             res.hwnd_rt->DrawBitmap(res.screenshot.Get());
+            if (!needs_selection_restore) {
+                // Retain the selection's pixel-exact sampling. The full-surface
+                // linear blit can round differently on very wide desktops.
+                Draw_clipped_screenshot_rect(res.hwnd_rt.Get(), res.screenshot.Get(),
+                                             restore_rect, vd_width, vd_height);
+            }
         }
 
         // Composite annotations before dimming so the dim sits on top of them.
@@ -3049,17 +3069,12 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
             Draw_live_annotation_draft(res.hwnd_rt.Get(), res, input);
         }
 
-        // Dim the entire canvas (on top of screenshot and all annotations).
-        res.solid_brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
-        res.hwnd_rt->FillRectangle(full, res.solid_brush.Get());
-
-        // Restore selection area undimmed: screenshot, annotations, and live draft
-        // visuals — all clipped to the selection rect.
-        // Use live_rect while dragging the selection; fall back to final_selection
-        // when an annotation tool gesture is active (live_rect is empty then).
-        core::RectPx const restore_rect =
-            !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
-        if (!restore_rect.Is_empty()) {
+        // Live drafts and lifted windows have distinct blend/background passes.
+        // Retain their clipped restore, including large-surface sampling behavior.
+        Draw_selection_dim(res.hwnd_rt.Get(), res.solid_brush.Get(),
+                           needs_selection_restore ? core::RectPx{} : restore_rect,
+                           vd_width, vd_height);
+        if (needs_selection_restore && !restore_rect.Is_empty()) {
             if (input.lifted_window_bitmap != nullptr &&
                 !input.lifted_window_dest_rect.Is_empty() &&
                 !input.lifted_window_source_rect.Is_empty()) {
@@ -3071,7 +3086,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
                                              restore_rect, vd_width, vd_height);
             }
         }
-        if (!restore_rect.Is_empty()) {
+        if (needs_selection_restore && !restore_rect.Is_empty()) {
             res.hwnd_rt->PushAxisAlignedClip(Rect(restore_rect),
                                              D2D1_ANTIALIAS_MODE_ALIASED);
             if (res.annotations_bitmap) {
