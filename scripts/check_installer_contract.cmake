@@ -97,8 +97,18 @@ require_contains("${installer_text}" "DeleteRegValue HKCU \"Software\\Microsoft\
                  "current-user startup cleanup")
 require_contains("${installer_text}" "DeleteRegValue HKLM \"Software\\Microsoft\\Windows\\CurrentVersion\\Run\" \"Greenflame\""
                  "machine startup cleanup")
-require_contains("${installer_text}" "Function un.CloseRunningGreenflame"
-                 "running app close before uninstall file removal")
+require_contains("${installer_text}" [=[!insertmacro DefineCloseRunningGreenflame ""]=]
+                 "installer shutdown routine")
+require_contains("${installer_text}" [=[!insertmacro DefineCloseRunningGreenflame "un."]=]
+                 "uninstaller shutdown routine")
+string(REGEX MATCH "Section \"greenflame\"[^\n]*\n([^\n]*\n)*SectionEnd" install_section "${installer_text}")
+string(FIND "${install_section}" "Call CloseRunningGreenflame" close_at)
+string(FIND "${install_section}" "File /oname=greenflame.exe" copy_at)
+if(close_at EQUAL -1 OR copy_at EQUAL -1 OR NOT close_at LESS copy_at)
+    message(FATAL_ERROR "Installation must close greenflame before replacing the executable")
+endif()
+require_contains("${installer_text}" "kernel32::WaitForSingleObject"
+                 "process exit wait before executable replacement")
 require_contains("${installer_text}" "FindWindow $0 \"GreenflameTray\""
                  "tray window close request during uninstall")
 require_contains("${installer_text}" "taskkill.exe"

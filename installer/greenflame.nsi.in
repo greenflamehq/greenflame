@@ -9,8 +9,9 @@ RequestExecutionLevel highest
 !include "x64.nsh"
 
 !define GREENFLAME_WM_CLOSE 0x0010
-!define GREENFLAME_CLOSE_POLL_COUNT 20
-!define GREENFLAME_CLOSE_POLL_DELAY_MS 250
+!define GREENFLAME_CLOSE_TIMEOUT_MS 5000
+!define GREENFLAME_SYNCHRONIZE 0x00100000
+!define GREENFLAME_WAIT_TIMEOUT 258
 !define GREENFLAME_UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\greenflame"
 
 !ifndef GREENFLAME_EXE_PATH
@@ -216,6 +217,7 @@ FunctionEnd
 
 Section "greenflame"
     SetRegView 64
+    Call CloseRunningGreenflame
     SetOutPath "$INSTDIR"
     File /oname=greenflame.exe "${GREENFLAME_EXE_PATH}"
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -277,29 +279,38 @@ Function un.onInit
     SetRegView 64
 FunctionEnd
 
-Function un.CloseRunningGreenflame
+!macro DefineCloseRunningGreenflame Prefix
+Function ${Prefix}CloseRunningGreenflame
     FindWindow $0 "GreenflameTray" ""
     ${If} $0 != 0
+        System::Call 'user32::GetWindowThreadProcessId(p r0, *i .r2)'
+        System::Call 'kernel32::OpenProcess(i ${GREENFLAME_SYNCHRONIZE}, i 0, i r2) p.r3'
+        ${If} $3 == 0
+            MessageBox MB_ICONSTOP "greenflame could not be accessed. Close it and run setup again." /SD IDOK
+            Abort
+        ${EndIf}
         DetailPrint "Closing running greenflame..."
-        SendMessage $0 ${GREENFLAME_WM_CLOSE} 0 0 /TIMEOUT=5000
-        StrCpy $1 ${GREENFLAME_CLOSE_POLL_COUNT}
-        ${Do}
-            Sleep ${GREENFLAME_CLOSE_POLL_DELAY_MS}
-            FindWindow $0 "GreenflameTray" ""
-            ${If} $0 == 0
-                ${Break}
-            ${EndIf}
-            IntOp $1 $1 - 1
-        ${LoopWhile} $1 > 0
+        SendMessage $0 ${GREENFLAME_WM_CLOSE} 0 0 /TIMEOUT=${GREENFLAME_CLOSE_TIMEOUT_MS}
+        ; The tray window can disappear before the process releases its executable.
+        System::Call 'kernel32::WaitForSingleObject(p r3, i ${GREENFLAME_CLOSE_TIMEOUT_MS}) i.r1'
+        ${If} $1 == ${GREENFLAME_WAIT_TIMEOUT}
+            DetailPrint "greenflame is still running; forcing it to close..."
+            nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /PID $2 /T /F'
+            Pop $0
+            System::Call 'kernel32::WaitForSingleObject(p r3, i ${GREENFLAME_CLOSE_TIMEOUT_MS}) i.r1'
+        ${EndIf}
+        System::Call 'kernel32::CloseHandle(p r3)'
+        ${If} $1 != 0
+            MessageBox MB_ICONSTOP "greenflame could not be stopped. Close it and run setup again." /SD IDOK
+            Abort
+        ${EndIf}
     ${EndIf}
-
-    FindWindow $0 "GreenflameTray" ""
-    ${If} $0 != 0
-        DetailPrint "greenflame is still running; forcing it to close..."
-        nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /IM greenflame.exe /T /F'
-        ClearErrors
-    ${EndIf}
+    ClearErrors
 FunctionEnd
+!macroend
+
+!insertmacro DefineCloseRunningGreenflame ""
+!insertmacro DefineCloseRunningGreenflame "un."
 
 Function un.ExtractPathHelper
     InitPluginsDir

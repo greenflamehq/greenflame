@@ -127,6 +127,24 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The installer-owned greenflame PATH entry is removed from the matching user or machine PATH.
   - PATH entries not recorded as installer-owned are left unchanged.
 
+### GF-MAN-INSTALL-004 - Upgrade While Running
+
+- Priority: `P0`
+- Run on: `ENV-C`, for both user-only and all-users installations.
+- Steps:
+  1. Install greenflame and leave the installed executable running in the tray.
+  2. Run a newer installer and select the same scope and install directory.
+  3. Finish installation with `Start greenflame now` enabled.
+  4. Repeat with no greenflame process running, then with an active capture overlay.
+  5. In the disposable session, suspend greenflame and repeat to exercise forced shutdown.
+- Expected:
+  - The running instance exits before the executable is replaced.
+  - No file-in-use or error-opening-file popup appears.
+  - The finish option starts the newly installed version.
+  - Installation also succeeds when greenflame is already stopped.
+  - An unresponsive instance is terminated after the shutdown timeout. If permissions
+    prevent shutdown, setup stops with a clear message before replacing the executable.
+
 ## Smoke And Tray
 
 ### GF-MAN-SMOKE-001 - Launch To Tray
