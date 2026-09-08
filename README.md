@@ -201,6 +201,9 @@ All hotkeys use the **Print Screen** key with modifier combinations. They are al
 
 The last two hotkeys require a previous capture in the current session. If no previous capture exists, or if the previously captured window has been closed or minimized, a warning toast is shown.
 
+Dismiss a toast with its top-right **×** button, or click its body and press **Esc**.
+Clicking a file path still opens the file or reveals it in Explorer.
+
 These direct clipboard captures honor the persisted `capture.include_cursor` setting.
 They do not open the overlay, so there is no post-capture cursor toggle in those flows.
 
