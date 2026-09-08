@@ -109,7 +109,8 @@ void CALLBACK Foreground_changed_hook(HWINEVENTHOOK, DWORD, HWND hwnd, LONG id_o
     GetClassNameW(hwnd, cls, 256);
     std::wstring_view const cls_sv(cls);
     if (cls_sv == L"NotifyIconOverflowWindow" || cls_sv == L"Shell_TrayWnd" ||
-        cls_sv == L"Shell_SecondaryTrayWnd" || cls_sv == kTrayWindowClass) {
+        cls_sv == L"Shell_SecondaryTrayWnd" || cls_sv == kTrayWindowClass ||
+        cls_sv == kToastWindowClass) {
         return;
     }
     s_last_foreground_hwnd = hwnd;
@@ -436,6 +437,8 @@ class TrayWindow::ToastPopup final {
         footer_message_ = footer_message ? footer_message : L"";
         link_rect_ = {};
         mouse_over_link_ = false;
+        close_click_started_ = false;
+        Reset_close_interaction();
 
         if (thumbnail_ != nullptr) {
             DeleteObject(thumbnail_);
@@ -456,6 +459,24 @@ class TrayWindow::ToastPopup final {
             return;
         }
 
+        POINT cursor{};
+        GetCursorPos(&cursor);
+        RECT work_area{};
+        HMONITOR const monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitor_info{};
+        monitor_info.cbSize = sizeof(monitor_info);
+        if (monitor != nullptr && GetMonitorInfoW(monitor, &monitor_info) != 0) {
+            work_area = monitor_info.rcWork;
+        } else if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0) == 0) {
+            work_area.left = 0;
+            work_area.top = 0;
+            work_area.right = GetSystemMetrics(SM_CXSCREEN);
+            work_area.bottom = GetSystemMetrics(SM_CYSCREEN);
+        }
+
+        // Move onto the destination monitor before querying the window DPI.
+        SetWindowPos(hwnd_, nullptr, work_area.left, work_area.top, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
         UINT dpi = GetDpiForWindow(hwnd_);
         if (dpi == 0) {
             dpi = kDefaultDpi;
@@ -474,21 +495,7 @@ class TrayWindow::ToastPopup final {
             ReleaseDC(nullptr, measure_dc);
         }
         link_rect_ = layout.link_rect;
-
-        POINT cursor{};
-        GetCursorPos(&cursor);
-        RECT work_area{};
-        HMONITOR const monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
-        MONITORINFO monitor_info{};
-        monitor_info.cbSize = sizeof(monitor_info);
-        if (monitor != nullptr && GetMonitorInfoW(monitor, &monitor_info) != 0) {
-            work_area = monitor_info.rcWork;
-        } else if (SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0) == 0) {
-            work_area.left = 0;
-            work_area.top = 0;
-            work_area.right = GetSystemMetrics(SM_CXSCREEN);
-            work_area.bottom = GetSystemMetrics(SM_CYSCREEN);
-        }
+        close_rect_px_ = layout.close_rect_px;
 
         int const x = work_area.right - layout.width - margin;
         int const y = work_area.bottom - layout.total_height - margin;
@@ -540,6 +547,7 @@ class TrayWindow::ToastPopup final {
         int footer_height;
         int total_height;
         RECT link_rect; // zeroed when file_path_ is empty
+        RECT close_rect_px;
     };
 
     [[nodiscard]] ToastLayout Compute_layout(UINT dpi, HDC hdc) const;
@@ -557,6 +565,10 @@ class TrayWindow::ToastPopup final {
     static constexpr int kTitleIconTextGapDip =
         kTitleAppIconDip; // gap intentionally matches icon width
     static constexpr int kTitleFontDip = 12;
+    static constexpr int kCloseButtonDip = 28;
+    // Match the checkmark's half-icon span while retaining the larger hit target.
+    static constexpr int kCloseInsetDip = (kCloseButtonDip - kIconDip / 2) / 2;
+    static constexpr int kCloseStrokeDip = 2;
     static constexpr int kBodyFontDip = 13;
     static constexpr int kMinHeightDip = 56;
     static constexpr int kMaxHeightDip = 280;
@@ -603,8 +615,21 @@ class TrayWindow::ToastPopup final {
         body_font_dpi_ = dpi;
     }
 
+    void Reset_close_interaction() {
+        close_pressed_ = false;
+        mouse_over_close_ = false;
+        if (hwnd_ != nullptr && GetCapture() == hwnd_) {
+            ReleaseCapture();
+        }
+    }
+
     void Hide() {
         if (Is_open()) {
+            close_click_started_ = false;
+            Reset_close_interaction();
+            KillTimer(hwnd_, kTimerId);
+            mouse_inside_ = false;
+            mouse_over_link_ = false;
             ShowWindow(hwnd_, SW_HIDE);
         }
     }
@@ -613,9 +638,9 @@ class TrayWindow::ToastPopup final {
         if (Is_open()) {
             return;
         }
-        hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                                kToastWindowClass, L"", WS_POPUP, 0, 0, 0, 0, nullptr,
-                                nullptr, hinstance_, this);
+        hwnd_ =
+            CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW, kToastWindowClass, L"",
+                            WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, hinstance_, this);
     }
 
     static LRESULT CALLBACK Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam,
@@ -648,9 +673,45 @@ class TrayWindow::ToastPopup final {
     LRESULT Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
         switch (msg) {
         case WM_MOUSEACTIVATE:
-            return MA_NOACTIVATE;
+            return MA_ACTIVATE;
+        case WM_LBUTTONDOWN: {
+            SetFocus(hwnd_);
+            POINT const pt{static_cast<int>(static_cast<short>(LOWORD(lparam))),
+                           static_cast<int>(static_cast<short>(HIWORD(lparam)))};
+            close_click_started_ = PtInRect(&close_rect_px_, pt) != 0;
+            if (close_click_started_) {
+                close_pressed_ = true;
+                mouse_over_close_ = true;
+                KillTimer(hwnd_, kTimerId);
+                SetCapture(hwnd_);
+                InvalidateRect(hwnd_, &close_rect_px_, FALSE);
+                UpdateWindow(hwnd_);
+            }
+            return 0;
+        }
+        case WM_CANCELMODE:
+            Reset_close_interaction();
+            InvalidateRect(hwnd_, &close_rect_px_, FALSE);
+            return 0;
+        case WM_CAPTURECHANGED:
+            close_pressed_ = false;
+            InvalidateRect(hwnd_, &close_rect_px_, FALSE);
+            if (!mouse_inside_ && IsWindowVisible(hwnd_)) {
+                SetTimer(hwnd_, kTimerId, kDurationMs, nullptr);
+            }
+            return 0;
+        case WM_KEYDOWN:
+            if (wparam == VK_ESCAPE) {
+                Hide();
+                return 0;
+            }
+            return DefWindowProcW(hwnd_, msg, wparam, lparam);
         case WM_MOUSEMOVE: {
-            if (!mouse_inside_) {
+            POINT const pt{static_cast<int>(static_cast<short>(LOWORD(lparam))),
+                           static_cast<int>(static_cast<short>(HIWORD(lparam)))};
+            RECT client_px{};
+            GetClientRect(hwnd_, &client_px);
+            if (!mouse_inside_ && PtInRect(&client_px, pt)) {
                 mouse_inside_ = true;
                 KillTimer(hwnd_, kTimerId);
                 TRACKMOUSEEVENT tme{};
@@ -659,9 +720,12 @@ class TrayWindow::ToastPopup final {
                 tme.hwndTrack = hwnd_;
                 TrackMouseEvent(&tme);
             }
+            bool const over_close = PtInRect(&close_rect_px_, pt) != 0;
+            if (over_close != mouse_over_close_) {
+                mouse_over_close_ = over_close;
+                InvalidateRect(hwnd_, &close_rect_px_, FALSE);
+            }
             if (!file_path_.empty() && !IsRectEmpty(&link_rect_)) {
-                POINT const pt{static_cast<int>(static_cast<short>(LOWORD(lparam))),
-                               static_cast<int>(static_cast<short>(HIWORD(lparam)))};
                 bool const over_link = PtInRect(&link_rect_, pt) != 0;
                 if (over_link != mouse_over_link_) {
                     mouse_over_link_ = over_link;
@@ -672,16 +736,37 @@ class TrayWindow::ToastPopup final {
         }
         case WM_MOUSELEAVE:
             mouse_inside_ = false;
+            if (mouse_over_close_) {
+                mouse_over_close_ = false;
+                InvalidateRect(hwnd_, &close_rect_px_, FALSE);
+            }
             if (mouse_over_link_) {
                 mouse_over_link_ = false;
                 InvalidateRect(hwnd_, &link_rect_, FALSE);
             }
-            SetTimer(hwnd_, kTimerId, kDurationMs, nullptr);
+            if (!close_pressed_ && IsWindowVisible(hwnd_)) {
+                SetTimer(hwnd_, kTimerId, kDurationMs, nullptr);
+            }
             return 0;
         case WM_LBUTTONUP: {
+            POINT const pt{static_cast<int>(static_cast<short>(LOWORD(lparam))),
+                           static_cast<int>(static_cast<short>(HIWORD(lparam)))};
+            if (close_click_started_) {
+                bool const dismiss = close_pressed_ && PtInRect(&close_rect_px_, pt);
+                close_click_started_ = false;
+                close_pressed_ = false;
+                if (GetCapture() == hwnd_) {
+                    ReleaseCapture();
+                }
+                if (dismiss) {
+                    Hide();
+                }
+                return 0;
+            }
+            if (PtInRect(&close_rect_px_, pt)) {
+                return 0;
+            }
             if (!file_path_.empty() && !IsRectEmpty(&link_rect_)) {
-                POINT const pt{static_cast<int>(static_cast<short>(LOWORD(lparam))),
-                               static_cast<int>(static_cast<short>(HIWORD(lparam)))};
                 if (PtInRect(&link_rect_, pt)) {
                     KillTimer(hwnd_, kTimerId);
                     Hide();
@@ -707,7 +792,7 @@ class TrayWindow::ToastPopup final {
             }
             return DefWindowProcW(hwnd_, msg, wparam, lparam);
         case WM_TIMER:
-            if (wparam == kTimerId) {
+            if (wparam == kTimerId && !close_pressed_) {
                 KillTimer(hwnd_, kTimerId);
                 Hide();
             }
@@ -730,6 +815,7 @@ class TrayWindow::ToastPopup final {
 
                 ToastLayout const layout = Compute_layout(dpi, hdc);
                 link_rect_ = layout.link_rect;
+                close_rect_px_ = layout.close_rect_px;
 
                 COLORREF const background_color = kToastBackground;
                 COLORREF const border_color = kToastBorder;
@@ -786,6 +872,30 @@ class TrayWindow::ToastPopup final {
                 DrawTextW(hdc, kTitleText, -1, &title_rect,
                           DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX |
                               DT_END_ELLIPSIS);
+                if (mouse_over_close_) {
+                    HBRUSH const close_brush = CreateSolidBrush(
+                        close_pressed_ ? kToastClosePressed : kToastCloseHover);
+                    if (close_brush != nullptr) {
+                        FillRect(hdc, &layout.close_rect_px, close_brush);
+                        DeleteObject(close_brush);
+                    }
+                }
+                RECT close_draw_rect_px = layout.close_rect_px;
+                int const close_inset_px = Scale_for_dpi(kCloseInsetDip, dpi);
+                InflateRect(&close_draw_rect_px, -close_inset_px, -close_inset_px);
+                HPEN const close_pen = CreatePen(
+                    PS_SOLID, Scale_for_dpi(kCloseStrokeDip, dpi), title_color);
+                if (close_pen != nullptr) {
+                    HGDIOBJ const old_pen = SelectObject(hdc, close_pen);
+                    MoveToEx(hdc, close_draw_rect_px.left, close_draw_rect_px.top,
+                             nullptr);
+                    LineTo(hdc, close_draw_rect_px.right, close_draw_rect_px.bottom);
+                    MoveToEx(hdc, close_draw_rect_px.right, close_draw_rect_px.top,
+                             nullptr);
+                    LineTo(hdc, close_draw_rect_px.left, close_draw_rect_px.bottom);
+                    SelectObject(hdc, old_pen);
+                    DeleteObject(close_pen);
+                }
 
                 Draw_severity_icon(hdc, layout.content_left, layout.body_top,
                                    layout.icon_size, icon_);
@@ -934,6 +1044,10 @@ class TrayWindow::ToastPopup final {
     int thumbnail_width_ = 0;
     int thumbnail_height_ = 0;
     RECT link_rect_ = {};
+    RECT close_rect_px_ = {};
+    bool mouse_over_close_ = false;
+    bool close_pressed_ = false;
+    bool close_click_started_ = false;
     bool mouse_inside_ = false;
     bool mouse_over_link_ = false;
 };
@@ -959,7 +1073,11 @@ TrayWindow::ToastPopup::Compute_layout(UINT dpi, HDC hdc) const {
     l.content_width = l.content_right - l.content_left;
     l.title_left = l.content_left;
     l.title_text_left = l.title_left + l.title_app_icon_size + l.title_icon_text_gap;
-    l.title_right = l.content_right;
+    int const close_size_px = Scale_for_dpi(kCloseButtonDip, dpi);
+    int const close_top_px = l.padding + (l.title_app_icon_size - close_size_px) / 2;
+    l.close_rect_px = {l.content_right - close_size_px, close_top_px, l.content_right,
+                       close_top_px + close_size_px};
+    l.title_right = l.close_rect_px.left - l.title_icon_text_gap;
     if (l.title_right <= l.title_text_left) {
         l.title_right = l.title_text_left + 1;
     }

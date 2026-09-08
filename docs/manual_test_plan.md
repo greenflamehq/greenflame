@@ -1637,6 +1637,43 @@ unless a real end-to-end bug escapes into the Win32 shell:
 
 ## Config And Persistence
 
+### GF-MAN-TOAST-001 - Close Button and Escape Dismissal
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B` (repeat on each monitor at its configured DPI).
+- Steps:
+  1. Focus another application, then trigger a success, warning, or error toast.
+  2. Verify the toast does not steal keyboard focus; click its top-right ×.
+  3. Trigger another toast, click its body or title, and press Esc.
+  4. Trigger another toast, click it, then click another application and press Esc.
+  5. Hover a toast for more than five seconds, leave it, and wait five seconds.
+  6. Dismiss while hovering, then trigger another toast with the pointer elsewhere.
+  7. Repeat with a saved-image thumbnail and file link, then a config-error file link.
+     Click each link and verify its existing Explorer/open-file action.
+  8. After selecting a toast, invoke the tray menu's current-window capture.
+  9. Move the pointer between monitors of different DPI between consecutive toasts,
+     both while the previous toast is visible and after dismissal. Repeat × and Esc.
+  10. Hover the X, hold the left button, drag outside the button, drag back inside,
+      then release. Repeat but release outside, including over the file link.
+  11. Hold the X and press Esc; show another toast. Also cancel a press by switching
+      applications while holding the button, return to the toast, and release over
+      its file link; verify that the cancelled click does not open the link.
+- Expected:
+  - Every severity has a visible × clear of the title, with aligned hit bounds.
+    The X is painted with two diagonal lines (no font glyph), matching the
+    checkmark's 10-DIP span and 2-DIP stroke inside a 28-DIP click target.
+  - × and Esc dismiss the toast without launching its file action or exiting the app.
+  - Esc only dismisses the toast when it has keyboard focus.
+  - Hover pauses timeout; leaving restarts it. Reused toasts time out normally.
+  - Links and thumbnails retain their layout and existing behavior.
+  - Current-window capture targets the previous application, never the toast.
+  - The whole popup and × remain visible and correctly scaled after monitor changes.
+  - The X gets a light gray background on hover and a darker one while pressed.
+    Dragging outside removes the highlight; dragging back restores the pressed state.
+  - Only a press started on the X and released on it dismisses the toast. Releasing
+    outside cancels without triggering a file link; holding never times out the toast.
+  - Escape, capture loss, and reuse leave no stuck pressed state or mouse capture.
+
 ### GF-MAN-CFG-001 - Success Toast Suppression
 
 - Priority: `P1`
