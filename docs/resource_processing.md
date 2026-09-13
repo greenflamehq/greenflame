@@ -24,6 +24,26 @@ embedded into `greenflame.exe`.
 - Check in the derived runtime asset that the executable actually embeds.
 - Do not introduce build-time image conversion steps for these assets.
 
+## Application icon (#7B)
+
+The approved #7B artwork lives in `resources/greenflame.svg` with its beige
+(`#eeecdf`) background. Keep `resources/greenflame-transparent.svg` alongside it
+for future website use; both contain the same flame and selection brackets.
+
+To regenerate the checked-in assets with Node.js and ImageMagick 7:
+
+```powershell
+node scripts/generate_app_icon.mjs
+node scripts/generate_app_icon.mjs --check
+```
+
+This produces the application/installer `resources/greenflame.ico` at 16, 20,
+24, 32, 40, 48, 64, 96, 128, and 256 pixels, the README image
+`images/greenflame_256.png`, and a 16/32/48-pixel `images/favicon.ico` ready for
+the website. The beige SVG can also be used directly as an SVG favicon.
+The generator verifies opacity, size coverage, source agreement, and clear beige
+margins (including one whole pixel at 16 × 16). It is not part of normal builds.
+
 ## Alpha-mask toolbar glyph workflow
 
 Use this when an icon should be treated purely as transparency and tinted at draw
