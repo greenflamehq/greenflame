@@ -177,6 +177,8 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc"
     @ONLY
 )
+set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc" APPEND PROPERTY
+    OBJECT_DEPENDS "${GREENFLAME_ICON_PATH}")
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/version_string.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/version_string.h"

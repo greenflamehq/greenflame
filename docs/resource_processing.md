@@ -45,6 +45,10 @@ the website. The beige SVG can also be used directly as an SVG favicon.
 The generator verifies opacity, size coverage, source agreement, and clear beige
 margins (including one whole pixel at 16 × 16). It is not part of normal builds.
 
+The resource compiler explicitly depends on the ICO. When changing the icon,
+verify that an incremental build recompiles `greenflame.rc` and relinks the app;
+compare the embedded icon frames with the new ICO, not just the source images.
+
 ## Alpha-mask toolbar glyph workflow
 
 Use this when an icon should be treated purely as transparency and tinted at draw
