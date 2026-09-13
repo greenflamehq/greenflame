@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+    <title id="title">greenflame — icon 7B</title>
+    <desc id="desc">A filled green flame inside charcoal selection corners. Outer bracket bounds are exactly 16 to 240 on both axes, leaving sixteen pixels of clearance on a 256-pixel canvas.</desc>
+    <g id="selection-brackets" fill="#30312e">
+        <path id="top-left" d="M22 16H110Q113 16 113 19V27Q113 30 110 30H34Q31 30 31 33V105Q31 108 28 108H19Q16 108 16 105V22Q16 16 22 16Z"/>
+        <path id="bottom-right" d="M234 240H146Q143 240 143 237V229Q143 226 146 226H222Q225 226 225 223V151Q225 148 228 148H237Q240 148 240 151V234Q240 240 234 240Z"/>
+    </g>
+    <g transform="translate(12.8 12.8) scale(.9)">
+        <path id="flame" fill="#78d600" transform="scale(.2041467305)" d="M648 122C747 212 796 311 794 426C794 516 767 568 746 621C724 676 737 691 758 721C800 685 826 638 826 585C876 646 897 706 897 770C897 932 767 1052 609 1052C449 1052 319 931 319 775C319 640 410 552 504 461C614 357 684 239 648 122Z"/>
+    </g>
+</svg>
