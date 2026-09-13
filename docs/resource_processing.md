@@ -26,7 +26,8 @@ embedded into `greenflame.exe`.
 
 ## Application icon (#7B)
 
-The approved #7B artwork lives in `resources/greenflame.svg` with its beige
+The approved #7B/E artwork lives in `resources/greenflame.svg`: light-gray
+brackets (`#98998a`), the original bright-green flame (`#78d600`), and its beige
 (`#eeecdf`) background. Keep `resources/greenflame-transparent.svg` alongside it
 for future website use; both contain the same flame and selection brackets.
 

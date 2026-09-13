@@ -2,7 +2,7 @@
     <title id="title">greenflame — icon 7B</title>
     <desc id="desc">A filled green flame inside charcoal selection corners. Outer bracket bounds are exactly 16 to 240 on both axes, leaving sixteen pixels of clearance on a 256-pixel canvas.</desc>
     <rect id="background" width="256" height="256" fill="#eeecdf"/>
-    <g id="selection-brackets" fill="#30312e">
+    <g id="selection-brackets" fill="#98998a">
         <path id="top-left" d="M22 16H110Q113 16 113 19V27Q113 30 110 30H34Q31 30 31 33V105Q31 108 28 108H19Q16 108 16 105V22Q16 16 22 16Z"/>
         <path id="bottom-right" d="M234 240H146Q143 240 143 237V229Q143 226 146 226H222Q225 226 225 223V151Q225 148 228 148H237Q240 148 240 151V234Q240 240 234 240Z"/>
     </g>
