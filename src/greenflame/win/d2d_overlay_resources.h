@@ -138,8 +138,21 @@ struct D2DOverlayResources final {
     void Set_target_dpi(float dpi) noexcept;
     [[nodiscard]] float Target_dpi() const noexcept;
 
-    // Create (or recreate) the HwndRenderTarget. Call after Initialize_factory.
-    [[nodiscard]] bool Create_hwnd_rt(HWND hwnd, int width, int height);
+    // Create (or recreate) the D3D11 device, the D2D device context (hwnd_rt) and
+    // the shared effects. Call after Initialize_factory. Pass a null adapter with
+    // HARDWARE or WARP, or a real adapter with UNKNOWN.
+    [[nodiscard]] bool Create_device(IDXGIAdapter *adapter,
+                                     D3D_DRIVER_TYPE driver_type);
+
+    // Create (or recreate) the device and a swap chain on hwnd. A null adapter means
+    // the default hardware adapter (the app always passes null). Call after
+    // Initialize_factory.
+    [[nodiscard]] bool Create_hwnd_rt(HWND hwnd, int width, int height,
+                                      IDXGIAdapter *adapter = nullptr);
+
+    // Target an offscreen bitmap the size of the virtual desktop instead of a swap
+    // chain (render benchmark). Call after Create_device.
+    [[nodiscard]] bool Create_offscreen_target(int width, int height);
 
     // Upload the GDI capture as a D2D bitmap.
     [[nodiscard]] bool Upload_screenshot(GdiCaptureResult const &cap);

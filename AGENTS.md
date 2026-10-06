@@ -77,6 +77,9 @@ When asked to commit, the build rules do not apply
   - output path and save policy logic
   - CLI/application orchestration via injected service interfaces
 
+- `bench/`
+  `greenflame_render_bench`: offscreen overlay render benchmark and present-floor probe. It links `greenflame_render`, the Direct2D paint code shared with the app (see `docs/testing.md`, "Overlay performance")
+
 - `tests/`
   GoogleTest unit coverage for `greenflame_core` behavior using mocks/fakes for service interfaces
 
@@ -111,9 +114,9 @@ Greenflame is controller-centric rather than strict MVC.
 Capture/overlay stack (current):
 
 - Capture: GDI virtual-desktop capture before overlay display (capture-first)
-- Overlay rendering: Direct2D/DirectWrite in a fullscreen borderless topmost window
+- Overlay rendering: Direct2D/DirectWrite in a fullscreen borderless topmost window, through a D2D device context on a D3D11 device and a flip-discard DXGI swap chain with a frame-latency waitable
 - Tray toast rendering: GDI/GDI+ (intentional small Win32 UI path)
-- No Direct3D/DirectComposition in the current path
+- No DirectComposition in the current path
 
 Breaking these rules is a correctness bug.
 
@@ -124,7 +127,7 @@ Breaking these rules is a correctness bug.
 - Do not use `goto`.
 - Indent with 4 spaces (no tabs).
 - Prefer forward declarations in headers when possible; include full definitions in `.cpp`.
-- Do not include standard library or Windows headers directly in non-PCH files. Add needed headers to the relevant PCH (`src/greenflame/pch.h`, `src/greenflame_core/pch.h`, or `tests/pch.h`).
+- Do not include standard library or Windows headers directly in non-PCH files. Add needed headers to the relevant PCH (`src/greenflame/pch.h`, `src/greenflame_core/pch.h`, `tests/pch.h`, or `bench/pch.h`).
 - Do not introduce third-party libraries without explicit justification.
 - Do not bypass or simplify DPI logic.
 - Do not move testable orchestration/policy logic into the GUI executable.

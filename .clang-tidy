@@ -36,7 +36,7 @@ Checks: >
     -clang-analyzer-optin.core.EnumCastOutOfRange,
     -clang-analyzer-core.CallAndMessage
 WarningsAsErrors: "*"
-HeaderFilterRegex: '^.*greenflame[/\\](src|tests)[/\\].*'
+HeaderFilterRegex: '^.*greenflame[/\\](src|tests|bench)[/\\].*'
 SystemHeaders: false
 
 CheckOptions:

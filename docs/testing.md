@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-03-14
+last_updated: 2026-10-06
 tags:
   - tests
   - ctest
@@ -77,6 +77,7 @@ Test must be run and must pass before any task is considered complete. This is a
 - Add new test files under `tests/`
 - Register them in `tests/CMakeLists.txt` as sources of `greenflame_tests`
 - Tests must only link against `greenflame_core` and the testable logic library — never against `greenflame` directly
+- `ctest` also runs two non-unit smoke tests of `greenflame_render_bench` on WARP (see [Overlay performance](#overlay-performance-opt-in)). That tool links `greenflame_render`; the rule above is about `greenflame_tests`
 
 ## Source coverage
 
@@ -131,13 +132,13 @@ TEST(AppControllerTest, CopiesDesktopBounds)
 You can run the test executable (useful for filters):
 
 ```bat
-build\x64-debug\greenflame_tests.exe
+build\x64-debug\bin\greenflame_tests.exe
 ```
 
 Run a subset via GoogleTest filters:
 
 ```bat
-build\x64-debug\greenflame_tests.exe --gtest_filter="RectPx*"
+build\x64-debug\bin\greenflame_tests.exe --gtest_filter="RectPx*"
 ```
 
 Prefer `ctest` for standard runs; use direct execution for local filtering.
@@ -156,3 +157,78 @@ Compare the median of repeated optimized runs on the same machine, after builds
 finish. This measures CPU smoothing cost only, not input-to-display latency or GPU
 frame pacing. Interactive coverage is `GF-MAN-ANN-002C` in
 [manual_test_plan.md](manual_test_plan.md).
+
+## Overlay performance (opt-in)
+
+`greenflame_render_bench` drives the real overlay paint code (`Paint_d2d_frame`,
+linked from `greenflame_render`) with synthetic input. It is built by default
+(`GREENFLAME_BUILD_BENCH=ON`), except in the `x64-release` preset. Measure with the
+`x64-release-pdb` build; debug builds turn on the D3D debug layer and their numbers
+mean nothing.
+
+```bat
+cmake --preset x64-release-pdb
+cmake --build --preset x64-release-pdb
+build\x64-release-pdb\bin\greenflame_render_bench.exe --layout jocelyn-desk --scenario all
+```
+
+### Render bench (offscreen)
+
+No window and no present: each frame paints into an offscreen bitmap the size of the
+virtual desktop.
+
+- `--layout`: `jocelyn-desk` (1920x1200 laptop left of two 2560x1440 panels, 7040x1440),
+  `4k-desk` (same with 3840x2160 panels, 9600x2160), `single-1080`, or `current`
+  (the real monitors).
+- `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
+  prints the indexes.
+- `--scenario hover|select|brush|highlighter|steady|all`: crosshair sweep, live
+  selection drag, freehand strokes growing by one point per frame (`--step`,
+  `--smooth on|off`), idle selection, or all of them.
+- `--frames N` (default 300, after 5 warm-up frames), `--repeat N`, `--csv FILE`.
+
+Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 ms and
+16.7 ms for:
+
+- `cpu`: QPC around the cache rebuild and `Paint_d2d_frame`;
+- `gpu`: D3D11 timestamp queries (`n/a` when the GPU reports them disjoint);
+- `frame`: from frame start until the GPU has finished it. The bench sets a 1 ms
+  timer resolution; at the default 15.6 ms tick the wait for the GPU rounds every
+  frame up to a tick multiple.
+
+It also prints the pixels shaded per frame (`PSInvocations`, compared with the desktop
+area; WARP reports 0), and for freehand the cost by stroke length. The verdict uses the
+`frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
+
+The bench does not see presentation, the compositor or input coalescing. A `PASS`
+here does not mean the screen keeps up; see the present probe.
+
+### Present probe (real windows)
+
+```bat
+build\x64-release-pdb\bin\greenflame_render_bench.exe --probe-present --passes 3
+```
+
+It puts topmost windows over every monitor for a few seconds (no capture, no input).
+It reports the frame interval p50/p95 and fps of steady frames for two arrangements:
+
+- `span`: one window over the whole desktop, through the app's `Create_hwnd_rt`;
+- `per-monitor`: one window and swap chain per monitor, each on the adapter that drives
+  that monitor.
+
+`--passes N` adds N-1 full-surface blits per frame.
+
+### Comparing two builds
+
+1. Build `x64-release-pdb` in both trees (base and change).
+2. Run the same command in each, alternating A, B, A, B in one session, for example
+   `--layout jocelyn-desk --scenario all --repeat 5`. Compare the
+   `median of 5 frame p95s` lines. Note the power source, power plan and GPU state
+   (`nvidia-smi -q -d PERFORMANCE`); numbers from different sessions do not compare.
+3. Check pixels: `--scenario <s> --dump-frame 150 base.bmp` in one tree and
+   `--dump-frame 150 new.bmp` in the other, then
+   `--diff base.bmp new.bmp [--tolerance T]`. It exits non-zero when any channel of
+   any pixel differs by more than T (default 0).
+4. Run the present probe once per session.
+
+Interactive coverage is `GF-MAN-PERF-001` in [manual_test_plan.md](manual_test_plan.md).
