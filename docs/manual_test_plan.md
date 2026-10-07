@@ -803,10 +803,13 @@ unless a real end-to-end bug escapes into the Win32 shell:
      the monitor with negative coordinates, then one stroke crossing every monitor.
   3. Draw the same loops with a brush opacity below 100, and once with smoothing
      `off`.
-  4. Mid-stroke, turn the mouse wheel, press `Ctrl` `+`/`-`, press a tool hotkey and
-     open the color wheel. Release, then repeat them.
-  5. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
-  6. Capture a region across two monitors and the whole desktop; save and copy.
+  4. Mid-stroke, turn the mouse wheel, press `Ctrl` `+`/`-`, a tool hotkey,
+     `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+S`, `Ctrl+C`, `Ctrl+P`, `Ctrl+K`, `Ctrl+H`,
+     `Delete` and `Tab`, and right-click. Release, then repeat them.
+  5. Place a Text annotation and type. While typing, press `Ctrl+Z`, `Ctrl+Shift+Z`,
+     `Delete` and `Tab`, and try to change color or font.
+  6. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
+  7. Capture a region across two monitors and the whole desktop; save and copy.
 - Expected:
   - Loops come out round, not as polygons; the stroke follows the cursor without
     spikes at its start, its end or where a modifier key was pressed.
@@ -815,8 +818,12 @@ unless a real end-to-end bug escapes into the Win32 shell:
     near it.
   - A translucent stroke shows no darker dots or seams along it while drawing; the
     committed stroke looks like the preview.
-  - Size, color, opacity, smoothing and tool do not change while the button is held;
-    they change normally after release.
+  - While the button is held, none of the keys in step 4 act: size, color, opacity,
+    smoothing and tool stay; nothing is undone, saved, copied, pinned or deleted; no
+    help, wheel or captured-cursor toggle. After release they all work. Shift
+    (straighten) and Escape (cancel) work mid-stroke.
+  - While typing, undo/redo and Delete edit the text and Tab inserts a tab; color and
+    font changes do not apply to the text being typed.
   - Escape leaves no stroke pixels behind; the new stroke draws normally.
   - Cross-monitor and whole-desktop captures save and copy as before.
 

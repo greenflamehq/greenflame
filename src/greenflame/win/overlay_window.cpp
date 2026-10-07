@@ -2095,7 +2095,7 @@ bool OverlayWindow::Can_show_selection_wheel() const noexcept {
            !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview &&
            !controller_.Has_active_annotation_gesture() &&
-           !obfuscate_warning_dialog_.Is_visible() &&
+           !controller_.Is_manipulating() && !obfuscate_warning_dialog_.Is_visible() &&
            !hotkey_help_overlay_.Is_visible();
 }
 
@@ -2508,7 +2508,8 @@ bool OverlayWindow::Is_selection_stable_for_help() const {
     auto const &s = controller_.State();
     return !s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
            !s.move_dragging && !s.modifier_preview &&
-           !controller_.Has_active_annotation_gesture();
+           !controller_.Has_active_annotation_gesture() &&
+           !controller_.Is_manipulating();
 }
 
 std::wstring_view OverlayWindow::Hovered_toolbar_tooltip_text() const noexcept {
@@ -2854,7 +2855,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     if (eff_ctrl && wparam == L'H') {
-        if (!is_repeat) {
+        if (!is_repeat && !controller_.Is_manipulating()) {
             if (hotkey_help_overlay_.Is_visible()) {
                 Hide_help_overlay(false);
             } else {
@@ -2873,16 +2874,15 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     if (eff_ctrl && wparam == L'K') {
-        if (!is_repeat) {
+        if (!is_repeat && !controller_.Is_manipulating()) {
             Toggle_captured_cursor_visibility();
         }
         return 0;
     }
     if (eff_ctrl && wparam == L'Z') {
-        if (eff_shift) {
-            controller_.Redo();
-        } else {
-            controller_.Undo();
+        bool const applied = eff_shift ? controller_.Redo() : controller_.Undo();
+        if (!applied) {
+            return 0;
         }
         if (d2d_resources_) {
             d2d_resources_->Invalidate_annotations();

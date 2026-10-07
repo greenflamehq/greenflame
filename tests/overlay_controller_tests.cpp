@@ -1660,6 +1660,96 @@ TEST(overlay_controller, ToolChanges_AreNoOpsDuringAGesture) {
     EXPECT_EQ(c.Active_annotation_tool(), AnnotationToolId::Highlighter);
 }
 
+TEST(overlay_controller, DocumentCommands_AreNoOpsDuringAGesture) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::Repaint);
+    (void)Press(c, {150, 150});
+    (void)Move(c, {200, 200});
+    (void)Release(c, {200, 200});
+    ASSERT_EQ(c.Annotations().size(), 1u);
+    // Leave the tool and select the rectangle by its edge.
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::Repaint);
+    ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
+    (void)Press(c, {150, 175});
+    (void)Release(c, {150, 175});
+    ASSERT_EQ(c.Selected_annotation_count(), 1u);
+
+    // Dragging the rectangle: nothing else may act.
+    (void)Press(c, {150, 175});
+    (void)Move(c, {170, 195});
+    ASSERT_TRUE(c.Is_manipulating());
+    EXPECT_FALSE(c.Undo());
+    EXPECT_FALSE(c.Redo());
+    EXPECT_EQ(c.On_save_requested(false, false), OverlayAction::None);
+    EXPECT_EQ(c.On_save_requested(true, true), OverlayAction::None);
+    EXPECT_EQ(c.On_copy_to_clipboard_requested(), OverlayAction::None);
+    EXPECT_EQ(c.On_pin_requested(), OverlayAction::None);
+    EXPECT_EQ(c.On_delete_selected_annotation(), OverlayAction::None);
+    EXPECT_EQ(c.Annotations().size(), 1u);
+
+    (void)Release(c, {170, 195});
+    ASSERT_FALSE(c.Is_manipulating());
+    ASSERT_EQ(c.Annotations().size(), 1u);
+    EXPECT_EQ(c.On_save_requested(false, false), OverlayAction::SaveDirect);
+    EXPECT_EQ(c.On_copy_to_clipboard_requested(), OverlayAction::CopyToClipboard);
+    EXPECT_EQ(c.On_pin_requested(), OverlayAction::PinToDesktop);
+    ASSERT_EQ(c.Selected_annotation_count(), 1u);
+    EXPECT_NE(c.On_delete_selected_annotation(), OverlayAction::None);
+    EXPECT_EQ(c.Annotations().size(), 0u);
+    EXPECT_TRUE(c.Undo());
+    EXPECT_EQ(c.Annotations().size(), 1u);
+    EXPECT_TRUE(c.Redo());
+    EXPECT_EQ(c.Annotations().size(), 0u);
+}
+
+TEST(overlay_controller, IsManipulating_CoversDrawingAndSelectionDrags) {
+    auto c = Make_controller();
+    EXPECT_FALSE(c.Is_manipulating());
+    Press(c, {100, 100});
+    (void)Move(c, {300, 300});
+    EXPECT_TRUE(c.Is_manipulating()); // selection drag
+    Release(c, {600, 600});
+    EXPECT_FALSE(c.Is_manipulating());
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+    (void)Press(c, {200, 200});
+    EXPECT_TRUE(c.Is_manipulating()); // drawing
+    (void)Release(c, {200, 200});
+    EXPECT_FALSE(c.Is_manipulating());
+}
+
+TEST(overlay_controller, TextEditSession_BlocksColorAndFontButIsNotAManipulation) {
+    auto c = Make_controller();
+    FakeTextLayoutEngine engine;
+    c.Set_text_layout_engine(&engine);
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'T'), OverlayAction::Repaint);
+    COLORREF const color = c.Annotation_color();
+    COLORREF const other_color = RGB(0x13, 0x57, 0x9B);
+    ASSERT_NE(color, other_color);
+    ASSERT_TRUE(c.Set_text_current_font(TextFontChoice::Sans));
+
+    ASSERT_EQ(Press(c, {150, 150}), OverlayAction::Repaint);
+    ASSERT_TRUE(c.Has_active_text_edit());
+    // Typing is not a manipulation: text keys and document commands still route.
+    EXPECT_FALSE(c.Is_manipulating());
+    EXPECT_FALSE(c.Set_annotation_color(other_color));
+    EXPECT_FALSE(c.Set_brush_annotation_color(other_color));
+    EXPECT_FALSE(c.Set_text_current_font(TextFontChoice::Mono));
+    EXPECT_FALSE(c.Set_bubble_current_font(TextFontChoice::Art));
+    EXPECT_EQ(c.Annotation_color(), color);
+    EXPECT_EQ(c.Text_current_font(), TextFontChoice::Sans);
+
+    c.Cancel_text_draft();
+    ASSERT_FALSE(c.Has_active_text_edit());
+    EXPECT_TRUE(c.Set_annotation_color(other_color));
+    EXPECT_TRUE(c.Set_text_current_font(TextFontChoice::Mono));
+    EXPECT_EQ(c.Annotation_color(), other_color);
+    EXPECT_EQ(c.Text_current_font(), TextFontChoice::Mono);
+}
+
 TEST(overlay_controller, StyleSetters_AreNoOpsDuringASelectionDrag) {
     auto c = Make_controller();
     COLORREF const before = c.Brush_annotation_color();

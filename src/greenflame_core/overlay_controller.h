@@ -145,8 +145,9 @@ class OverlayController final {
     void Restore_selection_state(OverlaySelectionState const &state);
 
     void Push_command(std::unique_ptr<ICommand> cmd);
-    void Undo();
-    void Redo();
+    // Undo and redo do nothing (return false) while a manipulation is in progress.
+    bool Undo();
+    bool Redo();
 
     [[nodiscard]] OverlayAction On_annotation_tool_hotkey(wchar_t hotkey,
                                                           bool shift = false);
@@ -174,7 +175,8 @@ class OverlayController final {
     [[nodiscard]] int32_t Text_point_size() const noexcept;
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
     // Style and tool setters return false, changing nothing, while a manipulation
-    // is in progress (see Is_manipulating).
+    // is in progress (see Is_manipulating). Color and font setters also refuse during
+    // a text edit session: they must not restyle the text being typed.
     [[nodiscard]] bool Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
     [[nodiscard]] bool Set_bubble_current_font(TextFontChoice choice) noexcept;
@@ -210,11 +212,15 @@ class OverlayController final {
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
 
-  private:
     // True while the pointer is down on a drawing, an annotation edit, a selection
-    // drag or a marquee. Style and tool changes wait until it ends. A text edit
-    // session is not a manipulation: its style changes apply to the text.
+    // drag or a marquee. Style, tool and document commands (undo, redo, save, copy,
+    // pin, delete) wait until it ends. Gesture modifiers (Shift, Ctrl, Alt) and
+    // Escape still act. A text edit session is not a manipulation: its own keys
+    // (text undo, Delete, Tab) keep working.
     [[nodiscard]] bool Is_manipulating() const noexcept;
+
+  private:
+    [[nodiscard]] bool Blocks_style_change() const noexcept;
     void Reset_window_selection_metadata(bool reset_source) noexcept;
     [[nodiscard]] bool Restricts_annotation_edits_to_visible_selection() const noexcept;
     [[nodiscard]] PointPx

@@ -215,9 +215,21 @@ void OverlayController::Push_command(std::unique_ptr<ICommand> cmd) {
     undo_stack_.Push(std::move(cmd));
 }
 
-void OverlayController::Undo() { undo_stack_.Undo(); }
+bool OverlayController::Undo() {
+    if (Is_manipulating()) {
+        return false;
+    }
+    undo_stack_.Undo();
+    return true;
+}
 
-void OverlayController::Redo() { undo_stack_.Redo(); }
+bool OverlayController::Redo() {
+    if (Is_manipulating()) {
+        return false;
+    }
+    undo_stack_.Redo();
+    return true;
+}
 
 OverlayAction OverlayController::On_annotation_tool_hotkey(wchar_t hotkey, bool shift) {
     if (state_.final_selection.Is_empty() || Is_manipulating()) {
@@ -237,6 +249,9 @@ OverlayAction OverlayController::On_select_annotation_tool(AnnotationToolId id) 
 }
 
 OverlayAction OverlayController::On_delete_selected_annotation() {
+    if (Is_manipulating()) {
+        return OverlayAction::None;
+    }
     if (annotation_controller_.Delete_selected_annotation(undo_stack_)) {
         return OverlayAction::InvalidateFrozenCache;
     }
@@ -328,7 +343,7 @@ TextFontChoice OverlayController::Text_current_font() const noexcept {
 }
 
 bool OverlayController::Set_text_current_font(TextFontChoice choice) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     annotation_controller_.Set_text_current_font(choice);
@@ -340,7 +355,7 @@ TextFontChoice OverlayController::Bubble_current_font() const noexcept {
 }
 
 bool OverlayController::Set_bubble_current_font(TextFontChoice choice) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     annotation_controller_.Set_bubble_current_font(choice);
@@ -433,7 +448,7 @@ int32_t OverlayController::Tool_physical_size(AnnotationToolId tool) const noexc
 }
 
 bool OverlayController::Set_annotation_color(COLORREF color) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     (void)annotation_controller_.Set_annotation_color(color);
@@ -441,7 +456,7 @@ bool OverlayController::Set_annotation_color(COLORREF color) noexcept {
 }
 
 bool OverlayController::Set_brush_annotation_color(COLORREF color) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     (void)annotation_controller_.Set_brush_annotation_color(color);
@@ -457,7 +472,7 @@ bool OverlayController::Set_brush_smoothing_mode(FreehandSmoothingMode mode) noe
 }
 
 bool OverlayController::Set_highlighter_color(COLORREF color) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     (void)annotation_controller_.Set_highlighter_color(color);
@@ -532,6 +547,10 @@ bool OverlayController::Can_interact_with_annotation_toolbar() const noexcept {
 
 bool OverlayController::Should_show_selected_annotation_handles() const noexcept {
     return annotation_controller_.Selected_annotation_count() == 1;
+}
+
+bool OverlayController::Blocks_style_change() const noexcept {
+    return Is_manipulating() || annotation_controller_.Has_active_text_edit();
 }
 
 bool OverlayController::Is_manipulating() const noexcept {
@@ -676,7 +695,7 @@ OverlayAction OverlayController::On_cancel() {
 }
 
 OverlayAction OverlayController::On_save_requested(bool save_as, bool copy_file_also) {
-    if (state_.final_selection.Is_empty()) {
+    if (state_.final_selection.Is_empty() || Is_manipulating()) {
         return OverlayAction::None;
     }
     if (save_as) {
@@ -688,14 +707,14 @@ OverlayAction OverlayController::On_save_requested(bool save_as, bool copy_file_
 }
 
 OverlayAction OverlayController::On_copy_to_clipboard_requested() {
-    if (state_.final_selection.Is_empty()) {
+    if (state_.final_selection.Is_empty() || Is_manipulating()) {
         return OverlayAction::None;
     }
     return OverlayAction::CopyToClipboard;
 }
 
 OverlayAction OverlayController::On_pin_requested() {
-    if (state_.final_selection.Is_empty()) {
+    if (state_.final_selection.Is_empty() || Is_manipulating()) {
         return OverlayAction::None;
     }
     return OverlayAction::PinToDesktop;
