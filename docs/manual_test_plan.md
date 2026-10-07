@@ -453,7 +453,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 
 - Priority: `P2`
 - Run on: `ENV-A`, `ENV-B`
-- Prerequisite: Build Greenflame with `GREENFLAME_LOG` enabled.
+- Prerequisite: a diagnostic log build (`GREENFLAME_ENABLE_DEBUG_LOG=ON`; see "Diagnostic log build" in [testing.md](testing.md)).
 - Steps:
   1. Delete `%TEMP%\greenflame-debug.log` if it exists.
   2. Start interactive capture and exercise `Ctrl` window preview on a normal window, a partially obscured window, and a partially off-screen window.
@@ -796,7 +796,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Priority: `P1`
 - Run on: `ENV-A`, `ENV-B`; include a monitor left of or above the primary
   (negative virtual-desktop coordinates).
-- Prerequisite: an `x64-release-pdb` build with `GREENFLAME_LOG` enabled.
+- Prerequisite: an `x64-release-pdb` diagnostic log build (`GREENFLAME_ENABLE_DEBUG_LOG=ON`; see "Diagnostic log build" in [testing.md](testing.md)).
 - Steps:
   1. Delete `%TEMP%\greenflame-debug.log` if it exists.
   2. Select the whole desktop. With Brush, draw fast loops for about 10 seconds on

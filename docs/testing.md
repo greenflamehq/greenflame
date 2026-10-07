@@ -95,6 +95,22 @@ Some Win32 overlay behaviors cannot be exercised in the unit-test binary because
 must not depend on the GUI executable. For those cases, add or update the detailed case coverage in
 [manual_test_plan.md](manual_test_plan.md) and run the applicable cases when the affected feature changes.
 
+### Diagnostic log build
+
+Manual cases that read `%TEMP%\greenflame-debug.log` (for example `GF-MAN-SEL-007`
+and `GF-MAN-ANN-002E`, brush stroke point counts) need a build with
+`GREENFLAME_ENABLE_DEBUG_LOG` (default `OFF`, set by no preset). Use a separate build
+directory so the option does not stick in a preset's cache:
+
+```bat
+cmake --preset x64-release-pdb -B build\x64-release-pdb-log -DGREENFLAME_ENABLE_DEBUG_LOG=ON
+cmake --build build\x64-release-pdb-log --target greenflame
+```
+
+Each brush stroke writes one `freehand` line: `raw_points`, `history_points` (points
+recovered from the mouse history), `gaps` (history overflowed, movement lost) and
+`fallbacks` (no history, message point only).
+
 ## Writing a test
 
 Use GoogleTest macros for plain logic tests:

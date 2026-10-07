@@ -19,6 +19,10 @@ option(GREENFLAME_BUILD_BENCH
     "Build greenflame_render_bench (overlay render benchmark, see docs/testing.md)"
     ON
 )
+option(GREENFLAME_ENABLE_DEBUG_LOG
+    "Write diagnostic logs to %TEMP%/greenflame-debug.log (defines GREENFLAME_LOG)"
+    OFF
+)
 option(GREENFLAME_ENABLE_SUPERLUMINAL
     "Enable Superluminal Performance API instrumentation"
     OFF
@@ -515,9 +519,11 @@ target_include_directories(greenflame PRIVATE
     ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-# Optional temp-file debug/crash logging for local investigation.
-# Uncomment to write diagnostic logs to %TEMP%\greenflame-debug.log.
-# target_compile_definitions(greenflame PRIVATE GREENFLAME_LOG)
+# Optional temp-file debug/crash logging for local investigation
+# (-DGREENFLAME_ENABLE_DEBUG_LOG=ON; see docs/testing.md).
+if(GREENFLAME_ENABLE_DEBUG_LOG)
+    target_compile_definitions(greenflame PRIVATE GREENFLAME_LOG)
+endif()
 target_compile_definitions(greenflame PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
