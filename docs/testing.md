@@ -201,8 +201,8 @@ virtual desktop.
 - `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
   prints the indexes.
 - `--scenario hover|select|brush|highlighter|steady|all`: crosshair sweep, live
-  selection drag, freehand strokes growing by one point per frame (`--step`,
-  `--smooth on|off`), idle selection, or all of them.
+  selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
+  `--points-per-frame`), idle selection, or all of them.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.

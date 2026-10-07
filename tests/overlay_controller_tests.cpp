@@ -1719,6 +1719,112 @@ TEST(overlay_controller, IsManipulating_CoversDrawingAndSelectionDrags) {
     EXPECT_FALSE(c.Is_manipulating());
 }
 
+TEST(overlay_controller, IsManipulating_CoversMarqueeMoveAndResize) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
+
+    // Ctrl-drag inside the selection: annotation marquee.
+    (void)Press(c, {300, 300}, Ctrl_only());
+    ASSERT_TRUE(c.State().annotation_selection_pending);
+    (void)Move(c, {350, 350}, Ctrl_only());
+    EXPECT_TRUE(c.Is_manipulating());
+    EXPECT_FALSE(c.Undo());
+    (void)Release(c, {350, 350}, Ctrl_only());
+    EXPECT_FALSE(c.Is_manipulating());
+
+    // Drag inside the selection: selection move.
+    (void)Press(c, {300, 300});
+    ASSERT_TRUE(c.State().move_dragging);
+    (void)Move(c, {320, 320});
+    EXPECT_TRUE(c.Is_manipulating());
+    EXPECT_FALSE(c.Undo());
+    (void)Release(c, {320, 320});
+    EXPECT_FALSE(c.Is_manipulating());
+
+    // Drag a selection corner: selection resize.
+    RectPx const selection = c.State().final_selection;
+    (void)Press(c, selection.Top_left());
+    ASSERT_TRUE(c.State().handle_dragging);
+    (void)Move(c, {selection.left - 10, selection.top - 10});
+    EXPECT_TRUE(c.Is_manipulating());
+    EXPECT_FALSE(c.Undo());
+    (void)Release(c, {selection.left - 10, selection.top - 10});
+    EXPECT_FALSE(c.Is_manipulating());
+    EXPECT_TRUE(c.Undo());
+}
+
+TEST(overlay_controller, DoublePress_ActsAsAPressWhenAToolIsArmed) {
+    auto c = Make_controller();
+    EXPECT_FALSE(c.Double_press_is_press()); // no selection yet
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    EXPECT_FALSE(c.Double_press_is_press()); // no tool: double-click keeps its role
+
+    for (wchar_t const hotkey : {L'B', L'R', L'L'}) {
+        ASSERT_EQ(c.On_annotation_tool_hotkey(hotkey), OverlayAction::Repaint);
+        ASSERT_TRUE(c.Active_annotation_tool().has_value());
+        size_t const count = c.Annotations().size();
+        // First click: a press and release at one point.
+        (void)Press(c, {200, 200});
+        (void)Release(c, {200, 200});
+        // The fast second click arrives as a double-click and must start a gesture.
+        ASSERT_TRUE(c.Double_press_is_press());
+        ASSERT_EQ(Press(c, {300, 300}), OverlayAction::Repaint);
+        EXPECT_TRUE(c.Has_active_annotation_gesture());
+        (void)Move(c, {340, 330});
+        (void)Release(c, {340, 330});
+        EXPECT_GT(c.Annotations().size(), count);
+        ASSERT_EQ(c.On_annotation_tool_hotkey(hotkey), OverlayAction::Repaint);
+        ASSERT_EQ(c.Active_annotation_tool(), std::nullopt);
+    }
+}
+
+TEST(overlay_controller, DoublePress_WhileTypingIsNotAPress) {
+    auto c = Make_controller();
+    FakeTextLayoutEngine engine;
+    c.Set_text_layout_engine(&engine);
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'T'), OverlayAction::Repaint);
+    EXPECT_TRUE(c.Double_press_is_press());
+    ASSERT_EQ(Press(c, {150, 150}), OverlayAction::Repaint);
+    ASSERT_TRUE(c.Has_active_text_edit());
+    EXPECT_FALSE(c.Double_press_is_press());
+}
+
+TEST(overlay_controller, BrushRelease_AtTheLastStrokePointAddsNoPoint) {
+    // The window releases a brush stroke at the release message's point, which the
+    // mouse history already fed as the last stroke point. The release must not add
+    // another point; a release elsewhere would.
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+    ASSERT_TRUE(c.Set_brush_smoothing_mode(FreehandSmoothingMode::Off));
+    std::vector<PointPx> const stroke = {{200, 200}, {210, 205}, {220, 215}};
+
+    (void)Press(c, stroke[0]);
+    (void)Move(c, stroke[1]);
+    (void)Move(c, stroke[2]);
+    (void)Release(c, stroke[2]);
+    ASSERT_FALSE(c.Annotations().empty());
+    auto const *const at_last =
+        std::get_if<FreehandStrokeAnnotation>(&c.Annotations().back().data);
+    ASSERT_NE(at_last, nullptr);
+    EXPECT_EQ(at_last->points, stroke);
+
+    (void)Press(c, stroke[0]);
+    (void)Move(c, stroke[1]);
+    (void)Move(c, stroke[2]);
+    (void)Release(c, {260, 240});
+    auto const *const past_last =
+        std::get_if<FreehandStrokeAnnotation>(&c.Annotations().back().data);
+    ASSERT_NE(past_last, nullptr);
+    EXPECT_EQ(past_last->points.size(), stroke.size() + 1);
+}
+
 TEST(overlay_controller, TextEditSession_BlocksEveryStyleChangeButIsNotAManipulation) {
     auto c = Make_controller();
     FakeTextLayoutEngine engine;

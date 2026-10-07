@@ -805,25 +805,36 @@ unless a real end-to-end bug escapes into the Win32 shell:
      `off`.
   4. Mid-stroke, turn the mouse wheel, press `Ctrl` `+`/`-`, a tool hotkey,
      `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+S`, `Ctrl+C`, `Ctrl+P`, `Ctrl+K`, `Ctrl+H`,
-     `Delete` and `Tab`, and right-click. Release, then repeat them.
+     `Delete` and `Tab`, and right-click; press and release `Shift`, `Ctrl` and
+     `Alt`. Release the button, then repeat the keys.
   5. Place a Text annotation and type. While typing, press `Ctrl+Z`, `Ctrl+Shift+Z`,
-     `Delete` and `Tab`, and try to change color, font, size, opacity or smoothing.
+     `Delete`, `Tab`, `Ctrl+C`/`X`/`V` and `Ctrl+B`/`I`/`U`, and try to change
+     color, font, size, opacity or smoothing.
   6. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
-  7. Capture a region across two monitors and the whole desktop; save and copy.
+  7. Click once with Brush, then click again quickly (a double-click) and drag: the
+     second click starts a stroke. Repeat with Rectangle and Line.
+  8. Capture a region across two monitors and the whole desktop; save and copy.
 - Expected:
   - Loops come out round, not as polygons; the stroke follows the cursor without
     spikes at its start, its end or where a modifier key was pressed.
   - Each brush stroke writes one `freehand` line to the log: `raw_points` is close to
-    the mouse report rate times the stroke duration, `gaps` and `fallbacks` are 0 or
-    near it.
+    the mouse report rate times the stroke duration, `gaps` is 0 or near it.
+    `fallbacks` counts messages whose point the mouse history did not hold. The
+    release adds one when Windows does not record the button-up point in that
+    history, so `fallbacks=1` on a stroke is expected; more than a few means the
+    history is unavailable (pen, touch or a remote session).
   - A translucent stroke shows no darker dots or seams along it while drawing; the
     committed stroke looks like the preview.
   - While the button is held, none of the keys in step 4 act: size, color, opacity,
     smoothing and tool stay; nothing is undone, saved, copied, pinned or deleted; no
-    help, wheel or captured-cursor toggle. After release they all work. Shift
-    (straighten) and Escape (cancel) work mid-stroke.
-  - While typing, undo/redo and Delete edit the text and Tab inserts a tab; no style
-    change applies (color, font, size, opacity, smoothing).
+    help, wheel or captured-cursor toggle; no size label appears. After release they
+    all work. `Shift`, `Ctrl` and `Alt` add no stroke point and change nothing;
+    `Escape` cancels the stroke.
+  - While typing, undo/redo, Delete and `Ctrl+C`/`X`/`V` edit the text, Tab inserts a
+    tab and `Ctrl+B`/`I`/`U` toggle bold, italic and underline; no other style change
+    applies (color, font, size, opacity, smoothing) and no size label appears.
+  - A fast second click with an armed tool starts a stroke or shape. With no tool
+    armed, double-clicking a text annotation still opens it for editing.
   - Escape leaves no stroke pixels behind; the new stroke draws normally.
   - Cross-monitor and whole-desktop captures save and copy as before.
 
@@ -843,11 +854,18 @@ unless a real end-to-end bug escapes into the Win32 shell:
      off-screen windows; compare against regular region selection.
   4. Compare equal gestures before/after with the same physical desktop extent.
      Record GPU rendering time separately from capture startup and compositor waits.
+  5. Offscreen pixel check, before and after a paint change: run
+     `greenflame_render_bench --layout jocelyn-desk --scenario steady --annotated
+     --dump-frame 120 FILE.bmp` from both builds, then `--diff` the two dumps. Repeat
+     with `--scenario brush` and `--scenario highlighter`.
 - Expected:
   - The selected pixels remain undimmed; all outside pixels and annotations receive
     the same dim exactly once, without seams, flashing or annotation opacity changes.
   - Fine screenshot details inside a selection retain nearest-neighbor sampling,
-    including on virtual desktops wider than 8192 physical pixels.
+    including on virtual desktops wider than 8192 physical pixels. So do dimmed
+    pixels outside it and committed annotations: every desktop-sized bitmap is
+    copied 1:1, with no linear-filter shift of 1 in a channel on wide desktops. In
+    step 5, a change that does not touch rendering shows 0 differing pixels.
   - Committed annotations are composited once in regular selection frames. Live
     drafts and lifted-window replacement retain their existing restore composition.
   - Cursor, toolbar and selection handles remain above the dim. Clipboard/save

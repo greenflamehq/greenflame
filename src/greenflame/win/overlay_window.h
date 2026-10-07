@@ -131,6 +131,9 @@ class OverlayWindow final {
     // Brush strokes take every mouse position Windows recorded, not one per handled
     // WM_MOUSEMOVE (GetMouseMovePointsEx). True while a brush stroke is drawing.
     [[nodiscard]] bool Is_brush_stroke_active() const;
+    // Pointer refresh for a Shift, Ctrl or Alt change. During a brush stroke it adds
+    // no stroke point. Returns the cursor in client pixels.
+    core::PointPx Refresh_pointer_for_modifier_keys(core::OverlayModifierState mods);
     // Feeds the positions recorded since the last one consumed, up to the current
     // message's, to the controller. Returns the newest point in client pixels.
     core::PointPx Feed_brush_stroke_history(core::OverlayModifierState mods);

@@ -93,6 +93,10 @@ class OverlayController final {
 
     // WM_LBUTTONDBLCLK
     [[nodiscard]] OverlayAction On_primary_double_press(PointPx cursor_client);
+    // True when a double-click must act as a plain press: an annotation tool is armed
+    // (and no text is being typed), so a fast second click starts a new stroke or
+    // shape. Otherwise the double-click goes to On_primary_double_press.
+    [[nodiscard]] bool Double_press_is_press() const noexcept;
 
     // WM_LBUTTONDOWN: all Win32 queries are pre-resolved by caller.
     [[nodiscard]] OverlayAction

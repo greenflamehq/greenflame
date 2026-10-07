@@ -1646,6 +1646,22 @@ core::SnapEdges OverlayWindow::Collect_visible_snap_edges() const {
     return snap_edges;
 }
 
+core::PointPx
+OverlayWindow::Refresh_pointer_for_modifier_keys(core::OverlayModifierState mods) {
+    if (!Is_brush_stroke_active()) {
+        return Update_pointer_state_from_current_input(mods);
+    }
+    // Mid-stroke, a modifier key adds no stroke point: the cursor position now is
+    // newer than mouse history not yet consumed, so it would land out of order.
+    // Re-send the last consumed point with the new modifiers.
+    core::PointPx const origin = Client_origin_screen(hwnd_);
+    core::PointPx const screen = brush_input_.last_consumed.screen;
+    core::PointPx const cursor_client = {screen.x - origin.x, screen.y - origin.y};
+    Apply_action(controller_.On_pointer_move(mods, cursor_client, screen, std::nullopt,
+                                             {}, std::nullopt, 0, 0));
+    return cursor_client;
+}
+
 bool OverlayWindow::Is_brush_stroke_active() const {
     return controller_.Active_annotation_tool() == core::AnnotationToolId::Freehand &&
            !controller_.Draft_freehand_points().empty();
@@ -1723,11 +1739,11 @@ bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
         return false;
     }
     int32_t const step = controller_.Tool_size_step(*active_tool);
-    // step == 0 means this tool does not have a size.
-    // Also skip when there's no selection or a text edit is blocking input.
+    // step == 0 means this tool does not have a size. Also skip, with no size label,
+    // when there's no selection, a manipulation is in progress or text is being typed:
+    // the controller refuses size changes then.
     if (step == 0 || controller_.State().final_selection.Is_empty() ||
-        (*active_tool == core::AnnotationToolId::Text &&
-         controller_.Has_active_text_edit())) {
+        controller_.Is_manipulating() || controller_.Has_active_text_edit()) {
         return false;
     }
     bool const changed = controller_.Adjust_tool_size(delta_steps).has_value();
@@ -2927,19 +2943,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
     if (wparam == VK_SHIFT || wparam == VK_CONTROL || wparam == VK_MENU) {
         bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
         core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt, primary_down};
-        core::PointPx cursor_client{};
-        if (Is_brush_stroke_active()) {
-            // Mid-stroke, a modifier key adds no stroke point: the cursor position now
-            // is newer than mouse history not yet consumed, so it would land out of
-            // order. Re-send the last consumed point with the new modifiers.
-            core::PointPx const origin = Client_origin_screen(hwnd_);
-            core::PointPx const screen = brush_input_.last_consumed.screen;
-            cursor_client = {screen.x - origin.x, screen.y - origin.y};
-            Apply_action(controller_.On_pointer_move(
-                new_mods, cursor_client, screen, std::nullopt, {}, std::nullopt, 0, 0));
-        } else {
-            cursor_client = Update_pointer_state_from_current_input(new_mods);
-        }
+        core::PointPx const cursor_client = Refresh_pointer_for_modifier_keys(new_mods);
         Refresh_pointer_visual_overlays(cursor_client);
         Refresh_cursor();
         return 0;
@@ -2972,19 +2976,7 @@ LRESULT OverlayWindow::On_key_up(WPARAM wparam, LPARAM lparam) {
     if (wparam == VK_SHIFT || wparam == VK_CONTROL || wparam == VK_MENU) {
         bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
         core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt, primary_down};
-        core::PointPx cursor_client{};
-        if (Is_brush_stroke_active()) {
-            // Mid-stroke, a modifier key adds no stroke point: the cursor position now
-            // is newer than mouse history not yet consumed, so it would land out of
-            // order. Re-send the last consumed point with the new modifiers.
-            core::PointPx const origin = Client_origin_screen(hwnd_);
-            core::PointPx const screen = brush_input_.last_consumed.screen;
-            cursor_client = {screen.x - origin.x, screen.y - origin.y};
-            Apply_action(controller_.On_pointer_move(
-                new_mods, cursor_client, screen, std::nullopt, {}, std::nullopt, 0, 0));
-        } else {
-            cursor_client = Update_pointer_state_from_current_input(new_mods);
-        }
+        core::PointPx const cursor_client = Refresh_pointer_for_modifier_keys(new_mods);
         Refresh_pointer_visual_overlays(cursor_client);
         Refresh_cursor();
         return 0;
@@ -3355,6 +3347,11 @@ LRESULT OverlayWindow::On_mouse_wheel(WPARAM wparam) {
 }
 
 LRESULT OverlayWindow::On_l_button_dbl_clk() {
+    // The window class has CS_DBLCLKS, so a fast second click arrives here. With a
+    // tool armed it starts a new stroke or shape like any press.
+    if (controller_.Double_press_is_press()) {
+        return On_l_button_down();
+    }
     core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
     Apply_action(controller_.On_primary_double_press(cursor_client));
     if (controller_.Has_active_text_edit()) {
@@ -3445,13 +3442,16 @@ LRESULT OverlayWindow::On_l_button_up() {
     Cancel_highlighter_straighten_pending();
     core::OverlayModifierState mods{};
     mods.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    // A brush stroke ends at the release message's point: the cursor may already
+    // have moved on, and a point past it would land after the stroke's history.
+    core::PointPx release_client = Get_client_cursor_pos_px(hwnd_);
     if (Is_brush_stroke_active()) {
         core::OverlayModifierState stroke_mods = mods;
         stroke_mods.primary_down = true;
-        (void)Feed_brush_stroke_history(stroke_mods);
+        release_client = Feed_brush_stroke_history(stroke_mods);
         Log_brush_stroke_input();
     }
-    Apply_action(controller_.On_primary_release(mods, Get_client_cursor_pos_px(hwnd_)));
+    Apply_action(controller_.On_primary_release(mods, release_client));
     if (controller_.Has_active_text_edit()) {
         Reset_caret_blink();
     } else if (had_text_edit && hwnd_ != nullptr) {

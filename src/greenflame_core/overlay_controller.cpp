@@ -379,6 +379,12 @@ bool OverlayController::Commit_active_text_edit() {
     return true;
 }
 
+bool OverlayController::Double_press_is_press() const noexcept {
+    return !state_.final_selection.Is_empty() &&
+           annotation_controller_.Active_tool().has_value() &&
+           !annotation_controller_.Has_active_text_edit();
+}
+
 OverlayAction OverlayController::On_primary_double_press(PointPx cursor_client) {
     if (state_.final_selection.Is_empty() ||
         annotation_controller_.Has_active_text_edit() ||
