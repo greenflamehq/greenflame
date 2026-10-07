@@ -86,6 +86,18 @@ void Draw_bitmap_pixels_1to1(ID2D1RenderTarget *rt, ID2D1Bitmap *bitmap,
                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, visible_f);
 }
 
+// Copies a whole bitmap 1:1, nearest-neighbor. A default (linear) DrawBitmap of a
+// desktop-sized bitmap shifts channel values by 1 on wide desktops.
+void Draw_full_bitmap_1to1(ID2D1RenderTarget *rt, ID2D1Bitmap *bitmap) {
+    if (rt == nullptr || bitmap == nullptr) {
+        return;
+    }
+    D2D1_SIZE_F const size = bitmap->GetSize();
+    D2D1_RECT_F const rect = D2D1::RectF(0.f, 0.f, size.width, size.height);
+    rt->DrawBitmap(bitmap, rect, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR,
+                   rect);
+}
+
 void Draw_bitmap_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *bitmap,
                       core::RectPx dest_rect, core::RectPx source_rect) {
     if (rt == nullptr || bitmap == nullptr || dest_rect.Is_empty() ||
@@ -2399,7 +2411,8 @@ void Store_draft_stroke_metadata(D2DOverlayResources &res,
 
     res.draft_stroke_rt->BeginDraw();
     res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
-    res.draft_stroke_rt->DrawBitmap(res.draft_stroke_body_bitmap.Get());
+    Draw_full_bitmap_1to1(res.draft_stroke_rt.Get(),
+                          res.draft_stroke_body_bitmap.Get());
     Draw_preview_segments(res.draft_stroke_rt.Get(), res, plan.tail_points,
                           Preview_draw_style(style, tip_shape), tip_shape);
 
@@ -2647,7 +2660,7 @@ void Draw_round_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                   nullptr);
     dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_MAX);
     if (res.draft_stroke_body_bitmap) {
-        dc->DrawBitmap(res.draft_stroke_body_bitmap.Get());
+        Draw_full_bitmap_1to1(dc.Get(), res.draft_stroke_body_bitmap.Get());
     } else {
         Draw_freehand_points(dc.Get(), res, res.round_draft.smoother.Final_points(),
                              opaque_style, core::FreehandTipShape::Round);
@@ -2680,10 +2693,10 @@ void Composite_round_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &re
     rt->PushAxisAlignedClip(Rect(clip), D2D1_ANTIALIAS_MODE_ALIASED);
     rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f));
     if (res.screenshot) {
-        rt->DrawBitmap(res.screenshot.Get());
+        Draw_full_bitmap_1to1(rt, res.screenshot.Get());
     }
     if (res.annotations_bitmap) {
-        rt->DrawBitmap(res.annotations_bitmap.Get());
+        Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
     }
     Draw_round_draft_stroke(rt, res, style, input.draft_freehand_blit_opacity, clip,
                             live);
@@ -2701,7 +2714,7 @@ void Composite_round_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &re
         }
         rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
         if (res.annotations_bitmap) {
-            rt->DrawBitmap(res.annotations_bitmap.Get());
+            Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
         }
         Draw_round_draft_stroke(rt, res, style, input.draft_freehand_blit_opacity, clip,
                                 live);
@@ -3248,12 +3261,12 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
     }
 
     res.frozen_rt->BeginDraw();
-    res.frozen_rt->DrawBitmap(res.screenshot.Get());
+    Draw_full_bitmap_1to1(res.frozen_rt.Get(), res.screenshot.Get());
     Draw_bitmap_pixels_1to1(res.frozen_rt.Get(), res.screenshot.Get(), selection,
                             vd_width, vd_height);
 
     // Composite committed annotations before dimming so the dim sits on top of them.
-    res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
+    Draw_full_bitmap_1to1(res.frozen_rt.Get(), res.annotations_bitmap.Get());
 
     Draw_selection_dim(res.frozen_rt.Get(), res.solid_brush.Get(), selection, vd_width,
                        vd_height);
@@ -3368,7 +3381,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         bool const needs_selection_restore =
             input.lifted_window_bitmap != nullptr || has_live_annotation_draft;
         if (res.screenshot) {
-            res.hwnd_rt->DrawBitmap(res.screenshot.Get());
+            Draw_full_bitmap_1to1(res.hwnd_rt.Get(), res.screenshot.Get());
             if (!needs_selection_restore) {
                 // Retain the selection's pixel-exact sampling. The full-surface
                 // linear blit can round differently on very wide desktops.
@@ -3379,7 +3392,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
 
         // Composite annotations before dimming so the dim sits on top of them.
         if (res.annotations_bitmap) {
-            res.hwnd_rt->DrawBitmap(res.annotations_bitmap.Get());
+            Draw_full_bitmap_1to1(res.hwnd_rt.Get(), res.annotations_bitmap.Get());
         }
 
         // Draft annotations also draw before the dim for the same reason.
@@ -3408,7 +3421,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
             res.hwnd_rt->PushAxisAlignedClip(Rect(restore_rect),
                                              D2D1_ANTIALIAS_MODE_ALIASED);
             if (res.annotations_bitmap) {
-                res.hwnd_rt->DrawBitmap(res.annotations_bitmap.Get());
+                Draw_full_bitmap_1to1(res.hwnd_rt.Get(), res.annotations_bitmap.Get());
             }
             if (has_live_annotation_draft) {
                 Draw_live_annotation_draft(res.hwnd_rt.Get(), res, input);
