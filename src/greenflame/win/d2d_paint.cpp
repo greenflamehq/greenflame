@@ -2445,16 +2445,16 @@ void Store_draft_stroke_metadata(D2DOverlayResources &res,
 }
 
 // Rebuilds the highlighter (square-tip) draft bitmap, or clears the draft surfaces when
-// no stroke is live. Brush (round-tip) strokes use Prepare_round_draft instead.
+// no stroke is live (empty points). Brush (round-tip) strokes use Prepare_round_draft.
 // The stable body may be smoothed while the newest tail stays raw so the cursor tip
 // remains visually attached during live drawing.
 // Must be called BEFORE hwnd_rt->BeginDraw.
-void Update_draft_stroke_bitmap(D2DOverlayResources &res,
-                                std::span<const core::PointPx> points,
-                                std::optional<core::StrokeStyle> const &style,
-                                core::FreehandTipShape tip_shape,
-                                core::FreehandSmoothingMode smoothing_mode) {
+void Update_square_draft_stroke_bitmap(D2DOverlayResources &res,
+                                       std::span<const core::PointPx> points,
+                                       std::optional<core::StrokeStyle> const &style,
+                                       core::FreehandSmoothingMode smoothing_mode) {
     GREENFLAME_PROFILE_FUNCTION();
+    constexpr core::FreehandTipShape tip_shape = core::FreehandTipShape::Square;
 
     if (points.empty() || !style.has_value() || res.round_draft.active) {
         // Also drops a brush draft's state: it shares both draft surfaces.
@@ -2484,23 +2484,10 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
         }
         bool drew_from_cached_body = false;
         if (preview_plan->stable_raw_point_count != 0) {
-            bool body_ready = false;
-            if (tip_shape == core::FreehandTipShape::Square) {
-                body_ready = Update_incremental_square_draft_stroke_body_bitmap(
-                    res, points, *style, smoothing_mode, *preview_plan);
-            } else {
-                body_ready = Rebuild_draft_stroke_body_bitmap(
-                    res,
-                    core::Smooth_freehand_points(
-                        points.first(preview_plan->stable_raw_point_count),
-                        smoothing_mode, style->width_px),
-                    *style, tip_shape, smoothing_mode,
-                    preview_plan->stable_raw_point_count,
-                    preview_plan->tail_start_index);
-            }
+            bool const body_ready = Update_incremental_square_draft_stroke_body_bitmap(
+                res, points, *style, smoothing_mode, *preview_plan);
             if (body_ready) {
-                if (tip_shape == core::FreehandTipShape::Square &&
-                    res.draft_stroke_composite_effect) {
+                if (res.draft_stroke_composite_effect) {
                     drew_from_cached_body = Rebuild_square_draft_stroke_tail_bitmap(
                         res, points, *style, smoothing_mode, *preview_plan);
                 } else {
@@ -3295,9 +3282,9 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
                 Prepare_round_draft(res, input, round_live, vd_width, vd_height);
         } else if (input.draft_freehand_points.empty() ||
                    input.draft_freehand_tip_shape == core::FreehandTipShape::Square) {
-            Update_draft_stroke_bitmap(
-                res, input.draft_freehand_points, input.draft_freehand_style,
-                input.draft_freehand_tip_shape, input.draft_freehand_smoothing_mode);
+            Update_square_draft_stroke_bitmap(res, input.draft_freehand_points,
+                                              input.draft_freehand_style,
+                                              input.draft_freehand_smoothing_mode);
         }
         // A one-point brush stroke draws from its draft annotation; nothing to cache.
     }
