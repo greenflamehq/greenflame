@@ -67,10 +67,11 @@ void Draw_selection_dim(ID2D1RenderTarget *rt, ID2D1SolidColorBrush *brush,
     }
 }
 
-void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot,
-                                  core::RectPx restore_rect, int vd_width,
-                                  int vd_height) {
-    if (rt == nullptr || screenshot == nullptr || restore_rect.Is_empty()) {
+// Copies the desktop-sized bitmap's pixels inside rect, 1:1 and nearest-neighbor, so
+// they land unchanged at any desktop width.
+void Draw_bitmap_pixels_1to1(ID2D1RenderTarget *rt, ID2D1Bitmap *bitmap,
+                             core::RectPx restore_rect, int vd_width, int vd_height) {
+    if (rt == nullptr || bitmap == nullptr || restore_rect.Is_empty()) {
         return;
     }
 
@@ -81,7 +82,7 @@ void Draw_clipped_screenshot_rect(ID2D1RenderTarget *rt, ID2D1Bitmap *screenshot
     }
 
     D2D1_RECT_F const visible_f = Rect(*clipped);
-    rt->DrawBitmap(screenshot, visible_f, 1.f,
+    rt->DrawBitmap(bitmap, visible_f, 1.f,
                    D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, visible_f);
 }
 
@@ -2695,8 +2696,8 @@ void Composite_round_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &re
                              input.lifted_window_dest_rect,
                              input.lifted_window_source_rect);
         } else if (res.screenshot) {
-            Draw_clipped_screenshot_rect(rt, res.screenshot.Get(), restore_rect,
-                                         vd_width, vd_height);
+            Draw_bitmap_pixels_1to1(rt, res.screenshot.Get(), restore_rect, vd_width,
+                                    vd_height);
         }
         rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
         if (res.annotations_bitmap) {
@@ -3248,8 +3249,8 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
 
     res.frozen_rt->BeginDraw();
     res.frozen_rt->DrawBitmap(res.screenshot.Get());
-    Draw_clipped_screenshot_rect(res.frozen_rt.Get(), res.screenshot.Get(), selection,
-                                 vd_width, vd_height);
+    Draw_bitmap_pixels_1to1(res.frozen_rt.Get(), res.screenshot.Get(), selection,
+                            vd_width, vd_height);
 
     // Composite committed annotations before dimming so the dim sits on top of them.
     res.frozen_rt->DrawBitmap(res.annotations_bitmap.Get());
@@ -3336,9 +3337,9 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         if (res.round_draft.live_base_valid && res.draft_stroke_bitmap) {
             // Nearest-neighbor 1:1 copy: a full-surface linear blit rounds differently
             // on very wide desktops.
-            Draw_clipped_screenshot_rect(
-                res.hwnd_rt.Get(), res.draft_stroke_bitmap.Get(),
-                Desktop_rect(vd_width, vd_height), vd_width, vd_height);
+            Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.draft_stroke_bitmap.Get(),
+                                    Desktop_rect(vd_width, vd_height), vd_width,
+                                    vd_height);
             if (!round_live_clip.Is_empty()) {
                 Composite_round_draft_region(res.hwnd_rt.Get(), res, input,
                                              round_live_clip, &round_live, vd_width,
@@ -3351,9 +3352,12 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         }
     } else if (is_steady_state) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Steady_state");
-        // Fastest path: one GPU blit of the frozen composite.
+        // Fastest path: one GPU blit of the frozen composite, nearest-neighbor 1:1:
+        // a full-surface linear blit shifts channel values by 1 on wide desktops.
         if (res.frozen_bitmap) {
-            res.hwnd_rt->DrawBitmap(res.frozen_bitmap.Get());
+            Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.frozen_bitmap.Get(),
+                                    Desktop_rect(vd_width, vd_height), vd_width,
+                                    vd_height);
         }
     } else {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Dynamic_frame");
@@ -3368,8 +3372,8 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
             if (!needs_selection_restore) {
                 // Retain the selection's pixel-exact sampling. The full-surface
                 // linear blit can round differently on very wide desktops.
-                Draw_clipped_screenshot_rect(res.hwnd_rt.Get(), res.screenshot.Get(),
-                                             restore_rect, vd_width, vd_height);
+                Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.screenshot.Get(),
+                                        restore_rect, vd_width, vd_height);
             }
         }
 
@@ -3396,8 +3400,8 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
                                  input.lifted_window_dest_rect,
                                  input.lifted_window_source_rect);
             } else if (res.screenshot) {
-                Draw_clipped_screenshot_rect(res.hwnd_rt.Get(), res.screenshot.Get(),
-                                             restore_rect, vd_width, vd_height);
+                Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.screenshot.Get(),
+                                        restore_rect, vd_width, vd_height);
             }
         }
         if (needs_selection_restore && !restore_rect.Is_empty()) {
