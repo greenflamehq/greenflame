@@ -807,7 +807,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
      `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+S`, `Ctrl+C`, `Ctrl+P`, `Ctrl+K`, `Ctrl+H`,
      `Delete` and `Tab`, and right-click. Release, then repeat them.
   5. Place a Text annotation and type. While typing, press `Ctrl+Z`, `Ctrl+Shift+Z`,
-     `Delete` and `Tab`, and try to change color or font.
+     `Delete` and `Tab`, and try to change color, font, size, opacity or smoothing.
   6. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
   7. Capture a region across two monitors and the whole desktop; save and copy.
 - Expected:
@@ -822,8 +822,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
     smoothing and tool stay; nothing is undone, saved, copied, pinned or deleted; no
     help, wheel or captured-cursor toggle. After release they all work. Shift
     (straighten) and Escape (cancel) work mid-stroke.
-  - While typing, undo/redo and Delete edit the text and Tab inserts a tab; color and
-    font changes do not apply to the text being typed.
+  - While typing, undo/redo and Delete edit the text and Tab inserts a tab; no style
+    change applies (color, font, size, opacity, smoothing).
   - Escape leaves no stroke pixels behind; the new stroke draws normally.
   - Cross-monitor and whole-desktop captures save and copy as before.
 

@@ -464,7 +464,7 @@ bool OverlayController::Set_brush_annotation_color(COLORREF color) noexcept {
 }
 
 bool OverlayController::Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     (void)annotation_controller_.Set_brush_smoothing_mode(mode);
@@ -481,7 +481,7 @@ bool OverlayController::Set_highlighter_color(COLORREF color) noexcept {
 
 bool OverlayController::Set_highlighter_smoothing_mode(
     FreehandSmoothingMode mode) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     (void)annotation_controller_.Set_highlighter_smoothing_mode(mode);
@@ -490,7 +490,7 @@ bool OverlayController::Set_highlighter_smoothing_mode(
 
 bool OverlayController::Set_highlighter_opacity_percent(
     int32_t opacity_percent) noexcept {
-    if (Is_manipulating()) {
+    if (Blocks_style_change()) {
         return false;
     }
     (void)annotation_controller_.Set_highlighter_opacity_percent(opacity_percent);
@@ -500,9 +500,10 @@ bool OverlayController::Set_highlighter_opacity_percent(
 std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) {
     std::optional<AnnotationToolId> const active_tool =
         annotation_controller_.Active_tool();
-    // Every size-change input (wheel, Ctrl+/-) routes through here.
+    // Every size-change input (wheel, Ctrl+/-) routes through here. No size change
+    // during a manipulation or while typing.
     if (delta_steps == 0 || state_.final_selection.Is_empty() ||
-        !active_tool.has_value() || Is_manipulating()) {
+        !active_tool.has_value() || Blocks_style_change()) {
         return std::nullopt;
     }
     switch (*active_tool) {
@@ -514,11 +515,7 @@ std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) 
     case AnnotationToolId::Ellipse:
     case AnnotationToolId::Bubble:
     case AnnotationToolId::Obfuscate:
-        break;
     case AnnotationToolId::Text:
-        if (annotation_controller_.Has_active_text_edit()) {
-            return std::nullopt;
-        }
         break;
     case AnnotationToolId::FilledRectangle:
     case AnnotationToolId::FilledEllipse:

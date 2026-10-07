@@ -174,9 +174,10 @@ class OverlayController final {
     [[nodiscard]] TextEditController *Active_text_edit() noexcept;
     [[nodiscard]] int32_t Text_point_size() const noexcept;
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
-    // Style and tool setters return false, changing nothing, while a manipulation
-    // is in progress (see Is_manipulating). Color and font setters also refuse during
-    // a text edit session: they must not restyle the text being typed.
+    // No style changes during a manipulation (see Is_manipulating) or while typing
+    // in a text edit session: style setters and Adjust_tool_size refuse, change
+    // nothing and return false (nullopt). Tool changes refuse only during a
+    // manipulation.
     [[nodiscard]] bool Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
     [[nodiscard]] bool Set_bubble_current_font(TextFontChoice choice) noexcept;

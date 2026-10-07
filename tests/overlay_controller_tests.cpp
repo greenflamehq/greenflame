@@ -1719,7 +1719,7 @@ TEST(overlay_controller, IsManipulating_CoversDrawingAndSelectionDrags) {
     EXPECT_FALSE(c.Is_manipulating());
 }
 
-TEST(overlay_controller, TextEditSession_BlocksColorAndFontButIsNotAManipulation) {
+TEST(overlay_controller, TextEditSession_BlocksEveryStyleChangeButIsNotAManipulation) {
     auto c = Make_controller();
     FakeTextLayoutEngine engine;
     c.Set_text_layout_engine(&engine);
@@ -1730,6 +1730,10 @@ TEST(overlay_controller, TextEditSession_BlocksColorAndFontButIsNotAManipulation
     COLORREF const other_color = RGB(0x13, 0x57, 0x9B);
     ASSERT_NE(color, other_color);
     ASSERT_TRUE(c.Set_text_current_font(TextFontChoice::Sans));
+    int32_t const opacity = c.Highlighter_opacity_percent();
+    int32_t const other_opacity = 30;
+    ASSERT_NE(opacity, other_opacity);
+    int32_t const text_size = c.Text_point_size();
 
     ASSERT_EQ(Press(c, {150, 150}), OverlayAction::Repaint);
     ASSERT_TRUE(c.Has_active_text_edit());
@@ -1739,15 +1743,28 @@ TEST(overlay_controller, TextEditSession_BlocksColorAndFontButIsNotAManipulation
     EXPECT_FALSE(c.Set_brush_annotation_color(other_color));
     EXPECT_FALSE(c.Set_text_current_font(TextFontChoice::Mono));
     EXPECT_FALSE(c.Set_bubble_current_font(TextFontChoice::Art));
+    EXPECT_FALSE(c.Set_highlighter_color(other_color));
+    EXPECT_FALSE(c.Set_highlighter_opacity_percent(other_opacity));
+    EXPECT_FALSE(c.Set_brush_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_FALSE(c.Set_highlighter_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
     EXPECT_EQ(c.Annotation_color(), color);
     EXPECT_EQ(c.Text_current_font(), TextFontChoice::Sans);
+    EXPECT_EQ(c.Highlighter_opacity_percent(), opacity);
+    EXPECT_EQ(c.Text_point_size(), text_size);
 
     c.Cancel_text_draft();
     ASSERT_FALSE(c.Has_active_text_edit());
     EXPECT_TRUE(c.Set_annotation_color(other_color));
     EXPECT_TRUE(c.Set_text_current_font(TextFontChoice::Mono));
+    EXPECT_TRUE(c.Set_highlighter_opacity_percent(other_opacity));
+    EXPECT_TRUE(c.Set_brush_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_TRUE(c.Set_highlighter_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_TRUE(c.Adjust_tool_size(1).has_value());
     EXPECT_EQ(c.Annotation_color(), other_color);
     EXPECT_EQ(c.Text_current_font(), TextFontChoice::Mono);
+    EXPECT_EQ(c.Highlighter_opacity_percent(), other_opacity);
+    EXPECT_GT(c.Text_point_size(), text_size);
 }
 
 TEST(overlay_controller, StyleSetters_AreNoOpsDuringASelectionDrag) {
