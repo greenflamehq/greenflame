@@ -11,7 +11,10 @@
       "name": "x64-release",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/x64-release",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "GREENFLAME_BUILD_BENCH": "OFF"
+      }
     },
     {
       "name": "x64-release-pdb",

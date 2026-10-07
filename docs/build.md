@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-04-10
+last_updated: 2026-10-06
 tags:
   - build
   - cmake
@@ -76,6 +76,12 @@ cmake --build --preset x64-release-pdb
 ```
 
 Output: `build\x64-release-pdb\greenflame.exe` and `build\x64-release-pdb\greenflame.pdb`.
+
+## Overlay render benchmark
+
+`GREENFLAME_BUILD_BENCH` (default `ON`, `OFF` in the `x64-release` preset) builds
+`build\<preset>\bin\greenflame_render_bench.exe` and its WARP smoke tests. Use it from
+`x64-release-pdb`; see "Overlay performance" in [testing.md](testing.md).
 
 ## Superluminal instrumentation (optional)
 

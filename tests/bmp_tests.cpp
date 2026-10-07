@@ -41,3 +41,100 @@ TEST(bmp, Build_bmp_bytes_InvalidInput_ReturnsEmpty) {
     EXPECT_TRUE(Build_bmp_bytes(small, 1, 1, 0).empty());
     EXPECT_TRUE(Build_bmp_bytes(small, 10, 10, 40).empty()); // buffer too small
 }
+
+namespace {
+
+constexpr int kDiffWidth = 3;
+constexpr int kDiffHeight = 2;
+constexpr int kDiffRowBytes = kDiffWidth * 4;
+constexpr uint8_t kGrey = 0x80;
+constexpr int kChangedDelta = 7;
+
+std::vector<uint8_t> Grey_pixels() {
+    return std::vector<uint8_t>(static_cast<size_t>(kDiffRowBytes) * kDiffHeight,
+                                kGrey);
+}
+
+std::vector<uint8_t> Bmp_of(std::vector<uint8_t> const &pixels) {
+    return Build_bmp_bytes(pixels, kDiffWidth, kDiffHeight, kDiffRowBytes);
+}
+
+} // namespace
+
+TEST(bmp, Parse_bmp_bytes_RoundTripsBuild) {
+    std::vector<uint8_t> pixels = Grey_pixels();
+    pixels[5] = 0x11;
+    std::optional<BmpImage> const image = Parse_bmp_bytes(Bmp_of(pixels));
+    ASSERT_TRUE(image.has_value());
+    if (!image.has_value()) {
+        return;
+    }
+    EXPECT_EQ(image->width, kDiffWidth);
+    EXPECT_EQ(image->height, kDiffHeight);
+    EXPECT_EQ(image->pixels, pixels);
+}
+
+TEST(bmp, Parse_bmp_bytes_RejectsGarbageAndTruncated) {
+    std::vector<uint8_t> const garbage(64, 0x42);
+    EXPECT_FALSE(Parse_bmp_bytes(garbage).has_value());
+    std::vector<uint8_t> truncated = Bmp_of(Grey_pixels());
+    truncated.pop_back();
+    EXPECT_FALSE(Parse_bmp_bytes(truncated).has_value());
+}
+
+TEST(bmp, Diff_bmp_bytes_Identical_IsZero) {
+    std::vector<uint8_t> const bmp = Bmp_of(Grey_pixels());
+    std::optional<BmpDiff> const diff = Diff_bmp_bytes(bmp, bmp, 0);
+    ASSERT_TRUE(diff.has_value());
+    if (!diff.has_value()) {
+        return;
+    }
+    EXPECT_EQ(diff->differing_pixels, 0u);
+    EXPECT_EQ(diff->pixels_over_tolerance, 0u);
+    EXPECT_EQ(diff->max_channel_delta, 0);
+}
+
+TEST(bmp, Diff_bmp_bytes_OneChangedPixel_CountsOneWithItsDelta) {
+    std::vector<uint8_t> changed = Grey_pixels();
+    changed[4 + 2] = static_cast<uint8_t>(kGrey + kChangedDelta); // pixel 1, red
+    std::optional<BmpDiff> const diff =
+        Diff_bmp_bytes(Bmp_of(Grey_pixels()), Bmp_of(changed), 0);
+    ASSERT_TRUE(diff.has_value());
+    if (!diff.has_value()) {
+        return;
+    }
+    EXPECT_EQ(diff->differing_pixels, 1u);
+    EXPECT_EQ(diff->pixels_over_tolerance, 1u);
+    EXPECT_EQ(diff->max_channel_delta, kChangedDelta);
+}
+
+TEST(bmp, Diff_bmp_bytes_ToleranceEdge) {
+    std::vector<uint8_t> changed = Grey_pixels();
+    changed[0] = static_cast<uint8_t>(kGrey - kChangedDelta);
+    std::vector<uint8_t> const base = Bmp_of(Grey_pixels());
+    std::vector<uint8_t> const other = Bmp_of(changed);
+    std::optional<BmpDiff> const at = Diff_bmp_bytes(base, other, kChangedDelta);
+    ASSERT_TRUE(at.has_value());
+    if (!at.has_value()) {
+        return;
+    }
+    EXPECT_EQ(at->differing_pixels, 1u);
+    EXPECT_EQ(at->pixels_over_tolerance, 0u);
+    std::optional<BmpDiff> const under = Diff_bmp_bytes(base, other, kChangedDelta - 1);
+    ASSERT_TRUE(under.has_value());
+    if (!under.has_value()) {
+        return;
+    }
+    EXPECT_EQ(under->pixels_over_tolerance, 1u);
+}
+
+TEST(bmp, Diff_bmp_bytes_SizeMismatchOrGarbage_IsNullopt) {
+    std::vector<uint8_t> const base = Bmp_of(Grey_pixels());
+    std::vector<uint8_t> const wider(
+        static_cast<size_t>(kDiffRowBytes + 4) * kDiffHeight, kGrey);
+    std::vector<uint8_t> const other =
+        Build_bmp_bytes(wider, kDiffWidth + 1, kDiffHeight, kDiffRowBytes + 4);
+    EXPECT_FALSE(Diff_bmp_bytes(base, other, 0).has_value());
+    std::vector<uint8_t> const garbage(64, 0x42);
+    EXPECT_FALSE(Diff_bmp_bytes(base, garbage, 0).has_value());
+}

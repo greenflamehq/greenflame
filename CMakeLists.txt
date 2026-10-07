@@ -15,6 +15,10 @@ option(GREENFLAME_ENABLE_COVERAGE
     "Instrument greenflame_core and tests for LLVM source coverage (Clang only)"
     OFF
 )
+option(GREENFLAME_BUILD_BENCH
+    "Build greenflame_render_bench (overlay render benchmark, see docs/testing.md)"
+    ON
+)
 option(GREENFLAME_ENABLE_SUPERLUMINAL
     "Enable Superluminal Performance API instrumentation"
     OFF
@@ -185,6 +189,51 @@ configure_file(
     @ONLY
 )
 
+# Shared warning set for every greenflame target. Per-target extras (coverage,
+# -Wno-global-constructors on tests) stay at the call site.
+function(greenflame_set_warnings target)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        target_compile_options(${target} PRIVATE
+            -Wall
+            -Wextra
+            -Wpedantic
+            -Werror
+            -Wno-c++98-compat
+            -Wno-c++98-compat-pedantic
+            -Wno-pre-c++14-compat
+            -Wno-pre-c++17-compat
+            -Wno-pre-c++20-compat
+            -Wno-implicit-int-float-conversion
+            -Wno-switch-default
+            -Wno-language-extension-token
+            -Wno-padded
+        )
+        if(GREENFLAME_HAS_WNO_NRVO)
+            target_compile_options(${target} PRIVATE -Wno-nrvo)
+        endif()
+        if(GREENFLAME_ENABLE_TIME_TRACE)
+            target_compile_options(${target} PRIVATE -ftime-trace)
+        endif()
+    elseif(MSVC)
+        target_compile_options(${target} PRIVATE
+            /Wall
+            /WX
+            /wd4355 # 'this': used in base member initializer list
+            /wd4514 # 'function' : unreferenced inline function has been removed
+            /wd4710 # 'function' : function not inlined
+            /wd4711 # 'function' : function selected for automatic inline expansion
+            /wd4820 # 'bytes' bytes padding added after construct 'member_name'
+            /wd5045 # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
+            /external:W0
+            /external:anglebrackets
+            /permissive-
+            /Zc:__cplusplus
+        )
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic -Werror)
+    endif()
+endfunction()
+
 # -----------------------------
 # greenflame_core (testable library)
 # -----------------------------
@@ -210,6 +259,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/pixel_ops.h
     src/greenflame_core/bmp.cpp
     src/greenflame_core/bmp.h
+    src/greenflame_core/frame_stats.cpp
+    src/greenflame_core/frame_stats.h
     src/greenflame_core/selection_handles.cpp
     src/greenflame_core/selection_handles.h
     src/greenflame_core/snap_to_edges.cpp
@@ -308,48 +359,9 @@ if(GREENFLAME_ENABLE_SUPERLUMINAL)
     )
 endif()
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(greenflame_core PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Werror
-        -Wno-c++98-compat
-        -Wno-c++98-compat-pedantic
-        -Wno-pre-c++14-compat
-        -Wno-pre-c++17-compat
-        -Wno-pre-c++20-compat
-        -Wno-implicit-int-float-conversion
-        -Wno-switch-default
-        -Wno-language-extension-token
-        -Wno-padded
-    )
-    if(GREENFLAME_HAS_WNO_NRVO)
-        target_compile_options(greenflame_core PRIVATE -Wno-nrvo)
-    endif()
-    if(GREENFLAME_ENABLE_TIME_TRACE)
-        target_compile_options(greenflame_core PRIVATE -ftime-trace)
-    endif()
-    if(GREENFLAME_ENABLE_COVERAGE)
-        target_compile_options(greenflame_core PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-    endif()
-elseif(MSVC)
-    target_compile_options(greenflame_core PRIVATE
-        /Wall
-        /WX
-        /wd4355 # 'this': used in base member initializer list
-        /wd4514 # 'function' : unreferenced inline function has been removed
-        /wd4710 # 'function' : function not inlined
-        /wd4711 # 'function' : function selected for automatic inline expansion
-        /wd4820 # 'bytes' bytes padding added after construct 'member_name'
-        /wd5045 # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
-        /external:W0
-        /external:anglebrackets
-        /permissive-
-        /Zc:__cplusplus
-    )
-else()
-    target_compile_options(greenflame_core PRIVATE -Wall -Wextra -Wpedantic -Werror)
+greenflame_set_warnings(greenflame_core)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND GREENFLAME_ENABLE_COVERAGE)
+    target_compile_options(greenflame_core PRIVATE -fprofile-instr-generate -fcoverage-mapping)
 endif()
 
 # -----------------------------
@@ -398,6 +410,54 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(easyjson)
 
 # -----------------------------
+# greenflame_render (Direct2D overlay paint; linked by the app and the bench)
+# -----------------------------
+add_library(greenflame_render STATIC
+    src/greenflame/win/overlay_button.h
+    src/greenflame/win/overlay_button.cpp
+    src/greenflame/win/overlay_panel_chrome.h
+    src/greenflame/win/overlay_top_layer.h
+    src/greenflame/win/ui_palette.h
+    src/greenflame/win/d2d_overlay_resources.h
+    src/greenflame/win/d2d_overlay_resources.cpp
+    src/greenflame/win/d2d_annotation_draw.h
+    src/greenflame/win/d2d_annotation_draw.cpp
+    src/greenflame/win/d2d_draw_helpers.h
+    src/greenflame/win/d2d_paint.h
+    src/greenflame/win/d2d_paint.cpp
+)
+
+target_include_directories(greenflame_render PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/greenflame
+)
+
+target_compile_definitions(greenflame_render PRIVATE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    UNICODE
+    _UNICODE
+    $<$<CONFIG:Debug>:DEBUG>
+)
+
+target_precompile_headers(greenflame_render PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/greenflame/pch.h>"
+)
+
+greenflame_set_warnings(greenflame_render)
+
+target_link_libraries(greenflame_render PUBLIC
+    greenflame_core
+    easyjson
+    d2d1
+    dwrite
+    d3d11
+    dxgi
+    dxguid  # CLSID_D2D1ArithmeticComposite and other D2D effect GUIDs
+    windowsapp
+)
+
+# -----------------------------
 # greenflame (Win32 GUI app)
 # -----------------------------
 add_executable(greenflame WIN32
@@ -422,8 +482,6 @@ add_executable(greenflame WIN32
     src/greenflame/win/overlay_help_overlay.cpp
     src/greenflame/win/overlay_help_overlay.h
     src/greenflame/win/overlay_panel_chrome.cpp
-    src/greenflame/win/overlay_panel_chrome.h
-    src/greenflame/win/overlay_top_layer.h
     src/greenflame/win/overlay_warning_dialog.cpp
     src/greenflame/win/overlay_warning_dialog.h
     src/greenflame/win/overlay_window.cpp
@@ -443,17 +501,8 @@ add_executable(greenflame WIN32
     src/greenflame/win/win32_services.cpp
     src/greenflame/win/win32_services.h
     src/greenflame/win/win32_spell_check_service.cpp
-    src/greenflame/win/overlay_button.h
-    src/greenflame/win/overlay_button.cpp
-    src/greenflame/win/d2d_overlay_resources.h
-    src/greenflame/win/d2d_overlay_resources.cpp
     src/greenflame/win/d2d_text_layout_engine.h
     src/greenflame/win/d2d_text_layout_engine.cpp
-    src/greenflame/win/d2d_annotation_draw.h
-    src/greenflame/win/d2d_annotation_draw.cpp
-    src/greenflame/win/d2d_draw_helpers.h
-    src/greenflame/win/d2d_paint.h
-    src/greenflame/win/d2d_paint.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/app.manifest
     ${CMAKE_CURRENT_BINARY_DIR}/greenflame.rc
 )
@@ -479,48 +528,10 @@ target_precompile_headers(greenflame PRIVATE
     "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/src/greenflame/pch.h>"
 )
 
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(greenflame PRIVATE
-        -Wall
-        -Wextra
-        -Wpedantic
-        -Werror
-        -Wno-c++98-compat
-        -Wno-c++98-compat-pedantic
-        -Wno-pre-c++14-compat
-        -Wno-pre-c++17-compat
-        -Wno-pre-c++20-compat
-        -Wno-implicit-int-float-conversion
-        -Wno-switch-default
-        -Wno-language-extension-token
-        -Wno-padded
-    )
-    if(GREENFLAME_HAS_WNO_NRVO)
-        target_compile_options(greenflame PRIVATE -Wno-nrvo)
-    endif()
-    if(GREENFLAME_ENABLE_TIME_TRACE)
-        target_compile_options(greenflame PRIVATE -ftime-trace)
-    endif()
-elseif(MSVC)
-    target_compile_options(greenflame PRIVATE
-        /Wall
-        /WX
-        /wd4355 # 'this': used in base member initializer list
-        /wd4514 # 'function' : unreferenced inline function has been removed
-        /wd4710 # 'function' : function not inlined
-        /wd4711 # 'function' : function selected for automatic inline expansion
-        /wd4820 # 'bytes' bytes padding added after construct 'member_name'
-        /wd5045 # Compiler will insert Spectre mitigation for memory load if /Qspectre switch specified
-        /external:W0
-        /external:anglebrackets
-        /permissive-
-        /Zc:__cplusplus
-    )
-else()
-    target_compile_options(greenflame PRIVATE -Wall -Wextra -Wpedantic -Werror)
-endif()
+greenflame_set_warnings(greenflame)
 
 target_link_libraries(greenflame PRIVATE
+    greenflame_render
     greenflame_core
     easyjson
 
@@ -554,14 +565,19 @@ endif()
 # -----------------------------
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     # Full LTO: TUs emit LLVM bitcode; lld-link merges and optimizes at link time.
-    foreach(_lto_tgt greenflame_core greenflame)
+    foreach(_lto_tgt greenflame_core greenflame_render greenflame)
         target_compile_options(${_lto_tgt} PRIVATE $<$<CONFIG:Release>:-flto=full>)
     endforeach()
     target_link_options(greenflame PRIVATE $<$<CONFIG:Release>:-flto=full>)
 elseif(MSVC)
     # Whole Program Optimisation: /GL at compile time, /LTCG at link time.
     set_property(TARGET greenflame_core PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set_property(TARGET greenflame_render PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     set_property(TARGET greenflame      PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+endif()
+
+if(GREENFLAME_BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
 
 # -----------------------------

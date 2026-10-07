@@ -7,7 +7,7 @@ audience:
 status: reference
 owners:
   - core-team
-last_updated: 2026-04-03
+last_updated: 2026-10-06
 tags:
   - testing
   - manual
@@ -1914,6 +1914,26 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - Window and monitor selection target the correct non-primary monitor content.
   - Clipboard output matches the actual target, not the primary monitor.
+
+### GF-MAN-PERF-001 - Overlay Frame Cost And Present Floor
+
+- Priority: `P2`
+- Run on: `ENV-B`, on the slowest multi-monitor desk available. Run it when a change
+  touches overlay painting, the overlay window or its swap chain.
+- Steps:
+  1. Build `x64-release-pdb`. Close other GPU-heavy apps. Note the power source and the
+     GPU state.
+  2. Run `greenflame_render_bench.exe --probe-present` and again with `--passes 3`.
+     Topmost windows cover the monitors for a few seconds each.
+  3. Run `greenflame_render_bench.exe --layout current --scenario all --repeat 3`.
+  4. Start `greenflame.exe`, drag a selection across every monitor, then draw a long
+     Brush and a long Highlighter stroke over a selection that spans two monitors.
+- Expected:
+  - Every run exits with code 0, and both probe arrangements report an fps.
+  - Record each scenario's verdict and median frame p95, and both probe results, in
+    the change's notes, next to the same numbers from the base build.
+  - The interactive drag and strokes look no worse than on the base build. Until
+    in-app frame timing exists, this step is judged by eye.
 
 ## CLI End-To-End
 

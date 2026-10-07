@@ -37,20 +37,20 @@ struct D2DOverlayResources final {
     // ID2D1DeviceContext IS-A ID2D1RenderTarget so existing callsites keep
     // working unchanged.
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> hwnd_rt;
-    // Bitmap wrapping the current back buffer. Re-created from
-    // swap_chain->GetBuffer(0) once at swap-chain creation; FLIP_DISCARD with
-    // BufferCount==2 keeps the same surface object across Present() calls.
+    // The render target bitmap. With a swap chain (Create_hwnd_rt) it wraps
+    // swap_chain->GetBuffer(0), made once at swap-chain creation; FLIP_DISCARD with
+    // BufferCount==2 keeps the same surface object across Present() calls. With
+    // Create_offscreen_target (render benchmark) it is a plain offscreen bitmap.
     Microsoft::WRL::ComPtr<ID2D1Bitmap1> back_buffer_bitmap;
     // Frame-latency waitable. Wait on this BEFORE BeginDraw so the paint
     // pipeline never builds frames faster than DWM consumes them.
     HANDLE frame_latency_waitable = nullptr;
     float target_dpi = kDefaultTargetDpi;
     // ArithmeticComposite effect (k1=1, k2=k3=k4=0) for multiply-blend highlighting.
-    // Null until Create_hwnd_rt succeeds and ID2D1DeviceContext QI is available.
+    // Created by Create_device; null if effect creation failed.
     Microsoft::WRL::ComPtr<ID2D1Effect> multiply_effect;
     // Composite effect used to merge cached highlighter body + live tail masks before
-    // the multiply pass. Null until Create_hwnd_rt succeeds and ID2D1DeviceContext QI
-    // is available.
+    // the multiply pass. Created by Create_device; null if effect creation failed.
     Microsoft::WRL::ComPtr<ID2D1Effect> draft_stroke_composite_effect;
     // Composite effect that combines the screenshot with already-committed annotations
     // to form the base (input 0) of the highlighter multiply. This is what lets a
@@ -138,8 +138,21 @@ struct D2DOverlayResources final {
     void Set_target_dpi(float dpi) noexcept;
     [[nodiscard]] float Target_dpi() const noexcept;
 
-    // Create (or recreate) the HwndRenderTarget. Call after Initialize_factory.
-    [[nodiscard]] bool Create_hwnd_rt(HWND hwnd, int width, int height);
+    // Create (or recreate) the D3D11 device, the D2D device context (hwnd_rt) and
+    // the shared effects. Call after Initialize_factory. Pass a null adapter with
+    // HARDWARE or WARP, or a real adapter with UNKNOWN.
+    [[nodiscard]] bool Create_device(IDXGIAdapter *adapter,
+                                     D3D_DRIVER_TYPE driver_type);
+
+    // Create (or recreate) the device and a swap chain on hwnd. A null adapter means
+    // the default hardware adapter (the app always passes null). Call after
+    // Initialize_factory.
+    [[nodiscard]] bool Create_hwnd_rt(HWND hwnd, int width, int height,
+                                      IDXGIAdapter *adapter = nullptr);
+
+    // Target an offscreen bitmap the size of the virtual desktop instead of a swap
+    // chain (render benchmark). Call after Create_device.
+    [[nodiscard]] bool Create_offscreen_target(int width, int height);
 
     // Upload the GDI capture as a D2D bitmap.
     [[nodiscard]] bool Upload_screenshot(GdiCaptureResult const &cap);

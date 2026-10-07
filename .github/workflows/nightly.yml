@@ -71,3 +71,7 @@ jobs:
             clang-tidy -p build/x64-debug-clang "%%f"
             if errorlevel 1 exit /b 1
           )
+          for /r bench %%f in (*.cpp) do (
+            clang-tidy -p build/x64-debug-clang "%%f"
+            if errorlevel 1 exit /b 1
+          )
