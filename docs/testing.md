@@ -206,6 +206,9 @@ virtual desktop.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.
+- `--annotated`: steady and freehand scenarios use a selection inset by an eighth of
+  the desktop and committed brush and highlighter strokes crossing its edge, so
+  frames carry dimmed pixels and annotations.
 - `--opacity N` (default 100): brush opacity percent. Below 100 shows double
   compositing that an opaque stroke hides.
 - `--frames N` (default 300, after 5 warm-up frames), `--repeat N`, `--csv FILE`.

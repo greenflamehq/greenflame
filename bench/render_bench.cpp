@@ -183,6 +183,7 @@ struct Args final {
     int tolerance = 0;
     bool list_adapters = false;
     bool probe_present = false;
+    bool annotated = false;
 };
 
 void Print_usage() {
@@ -196,6 +197,8 @@ void Print_usage() {
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
         "  --opacity N                  brush opacity percent, 0-100 (default 100)\n"
+        "  --annotated                  inset selection plus committed brush and "
+        "highlighter strokes\n"
         "  --frames N                   measured frames per run (default 300)\n"
         "  --repeat N                   runs per scenario (default 1)\n"
         "  --csv FILE                   per-frame rows\n"
@@ -317,6 +320,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
             args.tolerance = *v;
+        } else if (key == "--annotated") {
+            args.annotated = true;
         } else if (key == "--list-adapters") {
             args.list_adapters = true;
         } else if (key == "--probe-present") {
@@ -620,10 +625,45 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
     }
 }
 
+// --annotated: committed strokes crossing the selection edge on every monitor, so
+// frames carry annotations both inside the selection and under the dim.
+std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
+    constexpr int stroke_count = 4;
+    constexpr int points_per_stroke = 64;
+    constexpr double waves_per_stroke = 6.0;
+    constexpr int32_t brush_width_px = 7;
+    std::vector<core::Annotation> annotations;
+    for (int k = 0; k < stroke_count; ++k) {
+        core::FreehandStrokeAnnotation stroke{};
+        bool const highlighter = k == stroke_count - 1;
+        stroke.style.width_px = highlighter ? kHighlighterWidthPx : brush_width_px;
+        stroke.style.color = highlighter ? kHighlighterColor : RGB(0, 0, 255);
+        stroke.freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
+                                                : core::FreehandTipShape::Round;
+        double const base_y =
+            static_cast<double>(height) * (k + 1) / (stroke_count + 1);
+        for (int i = 0; i < points_per_stroke; ++i) {
+            double const t = static_cast<double>(i) / (points_per_stroke - 1);
+            double const y =
+                base_y + std::sin(t * waves_per_stroke * 2.0 * std::numbers::pi) *
+                             static_cast<double>(height) / kFreehandAmplitudeDivisor;
+            stroke.points.push_back(
+                {static_cast<int32_t>(t * (width - 1)), static_cast<int32_t>(y)});
+        }
+        annotations.push_back(
+            core::Annotation{.id = static_cast<uint64_t>(k + 1), .data = stroke});
+    }
+    return annotations;
+}
+
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
     if (scenario == "steady" || Is_freehand(scenario)) {
-        input.final_selection = core::RectPx::From_ltrb(0, 0, width, height);
+        // --annotated insets the selection by an eighth of the desktop on each side.
+        int const inset_x = args.annotated ? width / 8 : 0;
+        int const inset_y = args.annotated ? height / 8 : 0;
+        input.final_selection = core::RectPx::From_ltrb(
+            inset_x, inset_y, width - inset_x, height - inset_y);
         input.cursor_client_px = {width / 2, height / 2};
     }
     if (Is_freehand(scenario)) {
@@ -711,6 +751,11 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     D2DPaintInput input{};
     input.monitor_rects_client = *ctx.monitors_client;
     Set_scenario_base(scenario, ctx.width, ctx.height, args, input);
+    std::vector<core::Annotation> const annotations =
+        args.annotated ? Make_bench_annotations(ctx.width, ctx.height)
+                       : std::vector<core::Annotation>{};
+    input.annotations = annotations;
+    Rebuild_annotations_bitmap(*ctx.res, annotations);
     ctx.res->frozen_valid = false;
     ScenarioState state;
     std::vector<FrameSample> samples;
@@ -726,7 +771,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         LARGE_INTEGER const t0 = Now();
         // Mirror OverlayWindow::On_paint: rebuild invalid caches before the frame.
         if (!ctx.res->annotations_valid) {
-            Rebuild_annotations_bitmap(*ctx.res, {});
+            Rebuild_annotations_bitmap(*ctx.res, annotations);
         }
         if (!ctx.res->frozen_valid) {
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
