@@ -23,7 +23,6 @@ target_link_libraries(greenflame_render_bench PRIVATE
     greenflame_render
     user32
     gdi32
-    ole32
     winmm
 )
 

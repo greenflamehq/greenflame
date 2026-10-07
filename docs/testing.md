@@ -197,8 +197,8 @@ Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 m
   frame up to a tick multiple.
 
 It also prints the pixels shaded per frame (`PSInvocations`, compared with the desktop
-area; WARP reports 0), and for freehand the cost by stroke length. The verdict uses the
-`frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
+area; WARP counts only effect passes, so most scenarios read 0 there), and for freehand
+the cost by stroke length. The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
 
 The bench does not see presentation, the compositor or input coalescing. A `PASS`
 here does not mean the screen keeps up; see the present probe.

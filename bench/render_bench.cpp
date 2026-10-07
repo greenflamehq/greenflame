@@ -219,7 +219,8 @@ std::optional<int> Parse_int(std::string_view text) {
 
 std::optional<Args> Parse_args(std::span<char *const> argv) {
     Args args;
-    std::vector<std::string_view> const tokens(argv.begin() + 1, argv.end());
+    std::span<char *const> const options = argv.empty() ? argv : argv.subspan(1);
+    std::vector<std::string_view> const tokens(options.begin(), options.end());
     size_t i = 0;
     auto next = [&]() -> std::optional<std::string_view> {
         if (i + 1 >= tokens.size()) {
@@ -663,6 +664,7 @@ template <typename T> T Wait_query(ID3D11DeviceContext *context, ID3D11Query *qu
     return value;
 }
 
+// Fixed 3-decimal text, for CSV fields and table cells that may read n/a.
 std::string Csv_double(double value) { return std::format("{:.3f}", value); }
 
 void Print_row(std::string_view label, core::FrameTimeSummary const &s) {
@@ -762,7 +764,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             *ctx.csv << ctx.layout->name << ',' << '"' << Narrow(*ctx.adapter_name)
                      << '"' << ',' << scenario << ',' << (args.smooth ? "on" : "off")
                      << ',' << run << ',' << (&s - samples.data()) << ','
-                     << Csv_double(s.cpu_ms) << ',' << Csv_double(s.gpu_ms) << ','
+                     << Csv_double(s.cpu_ms) << ','
+                     << (s.gpu_ms >= 0.0 ? Csv_double(s.gpu_ms) : std::string()) << ','
                      << Csv_double(s.frame_ms) << ',' << Csv_double(s.mpx) << ','
                      << s.points << '\n';
         }
@@ -796,9 +799,10 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                 if (samples[k].gpu_ms >= 0.0) bg.push_back(samples[k].gpu_ms);
                 bm.push_back(samples[k].mpx);
             }
-            Print("points {:5}-{:5}  cpu p50 {:6.2f} | gpu p50 {:6.2f} | {:.1f} Mpx\n",
+            Print("points {:5}-{:5}  cpu p50 {:6.2f} | gpu p50 {:>6} | {:.1f} Mpx\n",
                   samples[b * per].points, samples[(b + 1) * per - 1].points,
-                  Median(bc), Median(bg), Median(bm));
+                  Median(bc), bg.empty() ? std::string("n/a") : Csv_double(Median(bg)),
+                  Median(bm));
         }
     }
     Print("verdict {} (frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
@@ -1032,6 +1036,8 @@ std::optional<std::vector<double>> Probe_loop(std::vector<ProbeSurface> &surface
 
 void Destroy_surfaces(std::vector<ProbeSurface> &surfaces) {
     for (ProbeSurface &s : surfaces) {
+        // Swap chain and waitable go before their window.
+        s.res->Release_all();
         if (s.hwnd != nullptr) {
             (void)DestroyWindow(s.hwnd);
         }
@@ -1132,7 +1138,6 @@ int main(int argc, char **argv) {
     // Console exe without the app manifest: opt in to the app's DPI mode first, or
     // monitor rects are virtualized and probe windows get DWM-stretched.
     (void)SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    (void)CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     // The driver sleeps while the GPU-done query is pending. At the default 15.6 ms
     // timer tick every frame time rounds up to a tick multiple (measured: steady
     // frames read 15.4 ms with 0.2 ms CPU and 6.4 ms GPU). 1 ms keeps them honest.
@@ -1142,6 +1147,5 @@ int main(int argc, char **argv) {
     CLANG_WARN_IGNORE_POP()
     int const code = greenflame::bench::Main(args);
     (void)timeEndPeriod(1);
-    CoUninitialize();
     return code;
 }

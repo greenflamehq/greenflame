@@ -36,7 +36,10 @@ Checks: >
     -clang-analyzer-optin.core.EnumCastOutOfRange,
     -clang-analyzer-core.CallAndMessage
 WarningsAsErrors: "*"
-HeaderFilterRegex: '^.*greenflame[/\\](src|tests|bench)[/\\].*'
+# Repo headers by path shape, not by checkout name (worktrees are not named
+# "greenflame"). tests/ and bench/ headers sit directly in their folder, which keeps
+# build/<preset>/{tests,bench}/CMakeFiles/... out.
+HeaderFilterRegex: '^.*[/\\](src[/\\]greenflame(_core)?[/\\].*|(tests|bench)[/\\][^/\\]+)$'
 SystemHeaders: false
 
 CheckOptions:

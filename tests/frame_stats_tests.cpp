@@ -47,6 +47,19 @@ TEST(frame_stats, HundredSamples_NearestRankPercentiles) {
     EXPECT_DOUBLE_EQ(summary.percent_within_60fps, 16.0);
 }
 
+TEST(frame_stats, TenSamples_FractionalRanksRoundUp) {
+    std::vector<double> values;
+    for (int i = 1; i <= 10; ++i) {
+        values.push_back(static_cast<double>(i));
+    }
+    FrameTimeSummary const summary = Summarize_frame_times(values);
+    // Ranks 9.5 and 9.9 round up to the 10th sample; rank 5 is the 5th.
+    EXPECT_EQ(summary.p95_ms, 10.0);
+    EXPECT_EQ(summary.p99_ms, 10.0);
+    EXPECT_EQ(summary.p90_ms, 9.0);
+    EXPECT_EQ(summary.p50_ms, 5.0);
+}
+
 TEST(frame_stats, UnsortedInput_SameAsSorted) {
     std::vector<double> values = One_to_hundred();
     std::reverse(values.begin(), values.end());
