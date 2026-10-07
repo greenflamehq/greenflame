@@ -29,6 +29,25 @@
 namespace {
 
 constexpr wchar_t kOverlayWindowClass[] = L"GreenflameOverlay";
+// GetMouseMovePointsEx matches its query point on the low 16 bits of each coordinate.
+constexpr int kMouseHistoryCoordinateMask = 0xFFFF;
+
+// Screen position (physical pixels) and tick time of the message being handled.
+[[nodiscard]] greenflame::core::MouseMoveSample Current_message_sample() {
+    DWORD const pos = GetMessagePos();
+    return greenflame::core::MouseMoveSample{
+        .screen = {static_cast<int16_t>(LOWORD(pos)),
+                   static_cast<int16_t>(HIWORD(pos))},
+        .time_ms = static_cast<uint32_t>(GetMessageTime()),
+    };
+}
+
+[[nodiscard]] greenflame::core::PointPx Client_origin_screen(HWND hwnd) {
+    POINT origin{0, 0};
+    (void)ClientToScreen(hwnd, &origin);
+    return {origin.x, origin.y};
+}
+
 constexpr int32_t kSnapThresholdPx = 10;
 constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
@@ -1528,30 +1547,31 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
                   core::AppConfig::kDefaultObfuscateBlockSize);
         tool_step(core::AnnotationToolId::Text, core::AppConfig::kDefaultTextSize);
     }
-    controller_.Set_brush_annotation_color(
+    // Session start: no manipulation can be in progress, so these always apply.
+    (void)controller_.Set_brush_annotation_color(
         config_ != nullptr ? config_->annotation_colors[static_cast<size_t>(
                                  core::Clamp_annotation_color_index(
                                      config_->current_annotation_color_index))]
                            : core::kDefaultAnnotationColorPalette[static_cast<size_t>(
                                  core::kDefaultAnnotationColorIndex)]);
-    controller_.Set_brush_smoothing_mode(
+    (void)controller_.Set_brush_smoothing_mode(
         config_ != nullptr ? config_->brush_smoothing_mode
                            : core::AppConfig::kDefaultBrushSmoothingMode);
-    controller_.Set_highlighter_color(
+    (void)controller_.Set_highlighter_color(
         config_ != nullptr ? config_->highlighter_colors[static_cast<size_t>(
                                  core::Clamp_highlighter_color_index(
                                      config_->current_highlighter_color_index))]
                            : core::kDefaultHighlighterColorPalette[static_cast<size_t>(
                                  core::kDefaultHighlighterColorIndex)]);
-    controller_.Set_highlighter_smoothing_mode(
+    (void)controller_.Set_highlighter_smoothing_mode(
         config_ != nullptr ? config_->highlighter_smoothing_mode
                            : core::AppConfig::kDefaultHighlighterSmoothingMode);
-    controller_.Set_highlighter_opacity_percent(
+    (void)controller_.Set_highlighter_opacity_percent(
         config_ != nullptr ? config_->highlighter_opacity_percent
                            : core::kDefaultHighlighterOpacityPercent);
-    controller_.Set_text_current_font(config_ != nullptr ? config_->text_current_font
-                                                         : core::TextFontChoice::Sans);
-    controller_.Set_bubble_current_font(
+    (void)controller_.Set_text_current_font(
+        config_ != nullptr ? config_->text_current_font : core::TextFontChoice::Sans);
+    (void)controller_.Set_bubble_current_font(
         config_ != nullptr ? config_->bubble_current_font : core::TextFontChoice::Sans);
     ShowWindow(hwnd, SW_SHOW);
     return true;
@@ -1624,6 +1644,76 @@ core::SnapEdges OverlayWindow::Collect_visible_snap_edges() const {
                                  monitor_edges.horizontal.begin(),
                                  monitor_edges.horizontal.end());
     return snap_edges;
+}
+
+bool OverlayWindow::Is_brush_stroke_active() const {
+    return controller_.Active_annotation_tool() == core::AnnotationToolId::Freehand &&
+           !controller_.Draft_freehand_points().empty();
+}
+
+core::PointPx
+OverlayWindow::Feed_brush_stroke_history(core::OverlayModifierState mods) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    core::MouseMoveSample const message = Current_message_sample();
+    core::PointPx const origin = Client_origin_screen(hwnd_);
+    MOUSEMOVEPOINT query{};
+    query.x = message.screen.x & kMouseHistoryCoordinateMask;
+    query.y = message.screen.y & kMouseHistoryCoordinateMask;
+    query.time = message.time_ms;
+    std::array<MOUSEMOVEPOINT, core::kMouseMoveHistoryCapacity> history{};
+    int const count =
+        GetMouseMovePointsEx(sizeof(MOUSEMOVEPOINT), &query, history.data(),
+                             static_cast<int>(history.size()), GMMP_USE_DISPLAY_POINTS);
+
+    core::MouseHistoryResult result{};
+    if (count < 0) {
+        // No history for this message (pen or touch input, a remote session, or a
+        // point the buffer no longer holds): take the message point alone.
+        ++brush_input_.fallbacks;
+        result.newest = message;
+        if (message.screen != brush_input_.last_consumed.screen) {
+            result.points_client.push_back(
+                {message.screen.x - origin.x, message.screen.y - origin.y});
+        }
+    } else {
+        std::vector<core::MouseMoveSample> samples;
+        samples.reserve(static_cast<size_t>(count));
+        for (MOUSEMOVEPOINT const &entry :
+             std::span(history).first(static_cast<size_t>(count))) {
+            samples.push_back({.screen = {entry.x, entry.y}, .time_ms = entry.time});
+        }
+        result =
+            core::Collect_new_mouse_points(samples, brush_input_.last_consumed, origin);
+        if (result.gap) {
+            ++brush_input_.gaps;
+        }
+        brush_input_.history_points += result.points_client.size();
+    }
+    brush_input_.last_consumed = result.newest;
+
+    // One controller call per point, one repaint request per message.
+    core::OverlayAction action = core::OverlayAction::None;
+    for (core::PointPx const point : result.points_client) {
+        core::OverlayAction const point_action = controller_.On_pointer_move(
+            mods, point, {point.x + origin.x, point.y + origin.y}, std::nullopt, {},
+            std::nullopt, 0, 0);
+        if (point_action != core::OverlayAction::None) {
+            action = point_action;
+        }
+    }
+    Apply_action(action);
+    return {result.newest.screen.x - origin.x, result.newest.screen.y - origin.y};
+}
+
+void OverlayWindow::Log_brush_stroke_input() const {
+    GREENFLAME_LOG_WRITE(
+        L"freehand", std::wstring(L"brush stroke: raw_points=") +
+                         std::to_wstring(controller_.Draft_freehand_points().size()) +
+                         L" history_points=" +
+                         std::to_wstring(brush_input_.history_points) + L" gaps=" +
+                         std::to_wstring(brush_input_.gaps) + L" fallbacks=" +
+                         std::to_wstring(brush_input_.fallbacks));
 }
 
 bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
@@ -2265,8 +2355,8 @@ void OverlayWindow::Select_wheel_segment(size_t index) {
     if (active_tool == core::AnnotationToolId::Text ||
         active_tool == core::AnnotationToolId::Bubble) {
         if (selection_wheel_.text_mode == core::TextWheelMode::Color) {
-            if (index < palette.size()) {
-                controller_.Set_brush_annotation_color(palette[index]);
+            if (index < palette.size() &&
+                controller_.Set_brush_annotation_color(palette[index])) {
                 if (config_ != nullptr) {
                     config_->current_annotation_color_index =
                         static_cast<int32_t>(index);
@@ -2277,15 +2367,17 @@ void OverlayWindow::Select_wheel_segment(size_t index) {
         } else {
             if (index < kTextWheelFontChoices.size()) {
                 if (active_tool == core::AnnotationToolId::Text) {
-                    controller_.Set_text_current_font(kTextWheelFontChoices[index]);
-                    if (config_ != nullptr) {
+                    if (controller_.Set_text_current_font(
+                            kTextWheelFontChoices[index]) &&
+                        config_ != nullptr) {
                         config_->text_current_font = kTextWheelFontChoices[index];
                         config_->Normalize();
                         (void)Save_app_config(*config_);
                     }
                 } else {
-                    controller_.Set_bubble_current_font(kTextWheelFontChoices[index]);
-                    if (config_ != nullptr) {
+                    if (controller_.Set_bubble_current_font(
+                            kTextWheelFontChoices[index]) &&
+                        config_ != nullptr) {
                         config_->bubble_current_font = kTextWheelFontChoices[index];
                         config_->Normalize();
                         (void)Save_app_config(*config_);
@@ -2298,8 +2390,8 @@ void OverlayWindow::Select_wheel_segment(size_t index) {
 
     if (active_tool == core::AnnotationToolId::Highlighter) {
         if (selection_wheel_.highlighter_mode == core::HighlighterWheelMode::Color) {
-            if (index < palette.size()) {
-                controller_.Set_highlighter_color(palette[index]);
+            if (index < palette.size() &&
+                controller_.Set_highlighter_color(palette[index])) {
                 if (config_ != nullptr) {
                     config_->current_highlighter_color_index =
                         static_cast<int32_t>(index);
@@ -2310,8 +2402,8 @@ void OverlayWindow::Select_wheel_segment(size_t index) {
         } else {
             if (index < core::kHighlighterOpacityPresets.size()) {
                 int32_t const preset = core::kHighlighterOpacityPresets[index];
-                controller_.Set_highlighter_opacity_percent(preset);
-                if (config_ != nullptr) {
+                if (controller_.Set_highlighter_opacity_percent(preset) &&
+                    config_ != nullptr) {
                     config_->highlighter_opacity_percent = preset;
                     config_->Normalize();
                     (void)Save_app_config(*config_);
@@ -2321,11 +2413,11 @@ void OverlayWindow::Select_wheel_segment(size_t index) {
         return;
     }
 
-    if (index >= palette.size()) {
+    if (index >= palette.size() ||
+        !controller_.Set_brush_annotation_color(palette[index])) {
         return;
     }
 
-    controller_.Set_brush_annotation_color(palette[index]);
     if (config_ != nullptr) {
         config_->current_annotation_color_index = static_cast<int32_t>(index);
         config_->Normalize();
@@ -2835,8 +2927,19 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
     if (wparam == VK_SHIFT || wparam == VK_CONTROL || wparam == VK_MENU) {
         bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
         core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt, primary_down};
-        core::PointPx const cursor_client =
-            Update_pointer_state_from_current_input(new_mods);
+        core::PointPx cursor_client{};
+        if (Is_brush_stroke_active()) {
+            // Mid-stroke, a modifier key adds no stroke point: the cursor position now
+            // is newer than mouse history not yet consumed, so it would land out of
+            // order. Re-send the last consumed point with the new modifiers.
+            core::PointPx const origin = Client_origin_screen(hwnd_);
+            core::PointPx const screen = brush_input_.last_consumed.screen;
+            cursor_client = {screen.x - origin.x, screen.y - origin.y};
+            Apply_action(controller_.On_pointer_move(
+                new_mods, cursor_client, screen, std::nullopt, {}, std::nullopt, 0, 0));
+        } else {
+            cursor_client = Update_pointer_state_from_current_input(new_mods);
+        }
         Refresh_pointer_visual_overlays(cursor_client);
         Refresh_cursor();
         return 0;
@@ -2869,8 +2972,19 @@ LRESULT OverlayWindow::On_key_up(WPARAM wparam, LPARAM lparam) {
     if (wparam == VK_SHIFT || wparam == VK_CONTROL || wparam == VK_MENU) {
         bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
         core::OverlayModifierState new_mods{eff_shift, eff_ctrl, eff_alt, primary_down};
-        core::PointPx const cursor_client =
-            Update_pointer_state_from_current_input(new_mods);
+        core::PointPx cursor_client{};
+        if (Is_brush_stroke_active()) {
+            // Mid-stroke, a modifier key adds no stroke point: the cursor position now
+            // is newer than mouse history not yet consumed, so it would land out of
+            // order. Re-send the last consumed point with the new modifiers.
+            core::PointPx const origin = Client_origin_screen(hwnd_);
+            core::PointPx const screen = brush_input_.last_consumed.screen;
+            cursor_client = {screen.x - origin.x, screen.y - origin.y};
+            Apply_action(controller_.On_pointer_move(
+                new_mods, cursor_client, screen, std::nullopt, {}, std::nullopt, 0, 0));
+        } else {
+            cursor_client = Update_pointer_state_from_current_input(new_mods);
+        }
         Refresh_pointer_visual_overlays(cursor_client);
         Refresh_cursor();
         return 0;
@@ -3043,7 +3157,16 @@ LRESULT OverlayWindow::On_l_button_down() {
     bool const ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     core::OverlayModifierState mods{shift, ctrl, alt};
-    core::PointPx const cursor_client = cur;
+    // A brush stroke starts at the press message's point, where its mouse history
+    // starts. The cursor may already have moved on.
+    core::MouseMoveSample const press_message = Current_message_sample();
+    bool const brush_tool =
+        controller_.Active_annotation_tool() == core::AnnotationToolId::Freehand;
+    core::PointPx const press_origin = Client_origin_screen(hwnd_);
+    core::PointPx const cursor_client =
+        brush_tool ? core::PointPx{press_message.screen.x - press_origin.x,
+                                   press_message.screen.y - press_origin.y}
+                   : cur;
     core::PointPx const cursor_screen = Get_cursor_pos_px();
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
@@ -3073,6 +3196,9 @@ LRESULT OverlayWindow::On_l_button_down() {
     Apply_action(controller_.On_primary_press(
         mods, cursor_client, cursor_screen, win_handle, monitor_idx, win_rect, vdesk,
         Collect_visible_snap_edges(), wr.left, wr.top, window_full_capture_available));
+    if (Is_brush_stroke_active()) {
+        brush_input_ = BrushStrokeInput{.last_consumed = press_message};
+    }
     if (controller_.Has_active_annotation_gesture() ||
         controller_.Has_active_text_edit()) {
         Clear_transient_center_label(false);
@@ -3167,7 +3293,9 @@ LRESULT OverlayWindow::On_mouse_move() {
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
     core::OverlayModifierState mods{shift, ctrl, alt, primary_down};
-    core::PointPx const cursor_client = Update_pointer_state_from_current_input(mods);
+    core::PointPx const cursor_client =
+        Is_brush_stroke_active() ? Feed_brush_stroke_history(mods)
+                                 : Update_pointer_state_from_current_input(mods);
     if (highlighter_straighten_pending_) {
         int32_t const deadzone =
             config_ != nullptr ? config_->highlighter_pause_straighten_deadzone_px : 0;
@@ -3317,6 +3445,12 @@ LRESULT OverlayWindow::On_l_button_up() {
     Cancel_highlighter_straighten_pending();
     core::OverlayModifierState mods{};
     mods.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
+    if (Is_brush_stroke_active()) {
+        core::OverlayModifierState stroke_mods = mods;
+        stroke_mods.primary_down = true;
+        (void)Feed_brush_stroke_history(stroke_mods);
+        Log_brush_stroke_input();
+    }
     Apply_action(controller_.On_primary_release(mods, Get_client_cursor_pos_px(hwnd_)));
     if (controller_.Has_active_text_edit()) {
         Reset_caret_blink();

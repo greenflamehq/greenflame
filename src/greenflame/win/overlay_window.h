@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame_core/mouse_move_history.h"
 #include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/overlay_help_content.h"
 #include "greenflame_core/rect_px.h"
@@ -127,6 +128,13 @@ class OverlayWindow final {
     void Refresh_cursor();
     bool Refresh_hover_handle();
     [[nodiscard]] bool Handle_tool_size_delta(int32_t delta_steps);
+    // Brush strokes take every mouse position Windows recorded, not one per handled
+    // WM_MOUSEMOVE (GetMouseMovePointsEx). True while a brush stroke is drawing.
+    [[nodiscard]] bool Is_brush_stroke_active() const;
+    // Feeds the positions recorded since the last one consumed, up to the current
+    // message's, to the controller. Returns the newest point in client pixels.
+    core::PointPx Feed_brush_stroke_history(core::OverlayModifierState mods);
+    void Log_brush_stroke_input() const;
     void Show_tool_size_overlay(int32_t step);
     void Clear_transient_center_label(bool repaint);
     [[nodiscard]] bool Read_clipboard_text(std::wstring &out) const;
@@ -236,6 +244,14 @@ class OverlayWindow final {
         // Accumulator for fractional scroll-wheel ticks; reset on show/dismiss.
         int scroll_delta_remainder = 0;
     };
+
+    struct BrushStrokeInput final {
+        core::MouseMoveSample last_consumed = {};
+        size_t history_points = 0; // points taken from the mouse history
+        size_t gaps = 0;           // history overflowed: movement was lost
+        size_t fallbacks = 0;      // history unavailable: message point only
+    };
+    BrushStrokeInput brush_input_ = {};
 
     bool highlighter_straighten_pending_ = false;
     core::PointPx highlighter_straighten_ref_pos_ = {};

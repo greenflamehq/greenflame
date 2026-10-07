@@ -2200,11 +2200,12 @@ void Reset_draft_stroke_metadata(D2DOverlayResources &res) {
 
 void Clear_draft_stroke_surface(D2DOverlayResources &res) {
     if (!res.draft_stroke_bitmap && !res.draft_stroke_body_bitmap &&
-        res.draft_stroke_point_count == 0) {
+        res.draft_stroke_point_count == 0 && !res.round_draft.active) {
         return;
     }
 
     Reset_draft_stroke_metadata(res);
+    res.round_draft = {};
     res.draft_stroke_bitmap.Reset();
     res.draft_stroke_body_bitmap.Reset();
     Clear_bitmap_target(res.draft_stroke_rt.Get());
@@ -2285,18 +2286,6 @@ void Store_draft_stroke_metadata(D2DOverlayResources &res,
     res.draft_stroke_tip_shape = tip_shape;
     res.draft_stroke_smoothing_mode = smoothing_mode;
     res.draft_stroke_bitmap_uses_cached_body = uses_cached_body;
-}
-
-[[nodiscard]] bool
-Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle style,
-                            core::FreehandTipShape tip_shape,
-                            core::FreehandSmoothingMode smoothing_mode,
-                            core::FreehandPreviewPlan const &plan) noexcept {
-    return res.draft_stroke_body_bitmap && plan.stable_raw_point_count != 0 &&
-           res.draft_stroke_stable_tail_start_index == plan.tail_start_index &&
-           res.draft_stroke_style == std::optional<core::StrokeStyle>(style) &&
-           res.draft_stroke_tip_shape == tip_shape &&
-           res.draft_stroke_smoothing_mode == smoothing_mode;
 }
 
 [[nodiscard]] bool Rebuild_draft_stroke_body_bitmap(
@@ -2455,7 +2444,8 @@ Can_reuse_draft_stroke_body(D2DOverlayResources const &res, core::StrokeStyle st
     return res.draft_stroke_bitmap != nullptr;
 }
 
-// Rebuilds the current freehand draft bitmap from the full live stroke each frame.
+// Rebuilds the highlighter (square-tip) draft bitmap, or clears the draft surfaces when
+// no stroke is live. Brush (round-tip) strokes use Prepare_round_draft instead.
 // The stable body may be smoothed while the newest tail stays raw so the cursor tip
 // remains visually attached during live drawing.
 // Must be called BEFORE hwnd_rt->BeginDraw.
@@ -2466,9 +2456,12 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
                                 core::FreehandSmoothingMode smoothing_mode) {
     GREENFLAME_PROFILE_FUNCTION();
 
-    if (points.empty() || !style.has_value()) {
+    if (points.empty() || !style.has_value() || res.round_draft.active) {
+        // Also drops a brush draft's state: it shares both draft surfaces.
         Clear_draft_stroke_surface(res);
-        return;
+        if (points.empty() || !style.has_value()) {
+            return;
+        }
     }
     if (Has_matching_cached_draft_input(res, points, style, tip_shape,
                                         smoothing_mode)) {
@@ -2496,17 +2489,14 @@ void Update_draft_stroke_bitmap(D2DOverlayResources &res,
                 body_ready = Update_incremental_square_draft_stroke_body_bitmap(
                     res, points, *style, smoothing_mode, *preview_plan);
             } else {
-                bool const reused_body = Can_reuse_draft_stroke_body(
-                    res, *style, tip_shape, smoothing_mode, *preview_plan);
-                body_ready = reused_body ||
-                             Rebuild_draft_stroke_body_bitmap(
-                                 res,
-                                 core::Smooth_freehand_points(
-                                     points.first(preview_plan->stable_raw_point_count),
-                                     smoothing_mode, style->width_px),
-                                 *style, tip_shape, smoothing_mode,
-                                 preview_plan->stable_raw_point_count,
-                                 preview_plan->tail_start_index);
+                body_ready = Rebuild_draft_stroke_body_bitmap(
+                    res,
+                    core::Smooth_freehand_points(
+                        points.first(preview_plan->stable_raw_point_count),
+                        smoothing_mode, style->width_px),
+                    *style, tip_shape, smoothing_mode,
+                    preview_plan->stable_raw_point_count,
+                    preview_plan->tail_start_index);
             }
             if (body_ready) {
                 if (tip_shape == core::FreehandTipShape::Square &&
@@ -2578,6 +2568,308 @@ void Set_live_square_draft_mask_input(ID2D1Effect *multiply_effect,
         return;
     }
     multiply_effect->SetInput(1, res.draft_stroke_bitmap.Get());
+}
+
+// ---------------------------------------------------------------------------
+// Live brush (round-tip) draft
+// ---------------------------------------------------------------------------
+
+// Pixels past a stroke's geometric edge that antialiasing may still touch.
+constexpr int32_t kRoundDraftAntialiasMarginPx = 2;
+
+[[nodiscard]] bool Is_round_freehand_draft(D2DPaintInput const &input) noexcept {
+    // A one-point stroke draws from its committed-form draft annotation instead.
+    return input.draft_text_annotation == nullptr &&
+           input.draft_annotation == nullptr && !input.draft_freehand_points.empty() &&
+           input.draft_freehand_style.has_value() &&
+           input.draft_freehand_tip_shape == core::FreehandTipShape::Round;
+}
+
+[[nodiscard]] core::RectPx Desktop_rect(int vd_width, int vd_height) noexcept {
+    return core::RectPx::From_ltrb(0, 0, vd_width, vd_height);
+}
+
+// Pixels a stroke piece may touch, clipped to the desktop. Empty when none.
+[[nodiscard]] core::RectPx
+Round_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width_px,
+                         int vd_width, int vd_height) noexcept {
+    core::RectPx const bounds = core::Freehand_points_bounds(points, width_px);
+    if (bounds.Is_empty()) {
+        return {};
+    }
+    core::RectPx const grown =
+        core::RectPx::From_ltrb(bounds.left - kRoundDraftAntialiasMarginPx,
+                                bounds.top - kRoundDraftAntialiasMarginPx,
+                                bounds.right + kRoundDraftAntialiasMarginPx,
+                                bounds.bottom + kRoundDraftAntialiasMarginPx);
+    return core::RectPx::Clip(grown, Desktop_rect(vd_width, vd_height))
+        .value_or(core::RectPx{});
+}
+
+[[nodiscard]] core::RectPx Union_non_empty(core::RectPx a, core::RectPx b) noexcept {
+    if (a.Is_empty()) {
+        return b;
+    }
+    if (b.Is_empty()) {
+        return a;
+    }
+    return core::RectPx::Union(a, b);
+}
+
+// The moving end of the stroke, redrawn every frame: the provisional smoothed points
+// (joined to the last final point) and the raw tail.
+struct RoundDraftLiveParts final {
+    std::vector<core::PointPx> provisional = {};
+    std::vector<core::PointPx> tail = {};
+};
+
+// Draws the stroke into rt: the body bitmap plus the live parts, all at full opacity
+// with max blending inside one layer, so overlapping pieces cover like one geometry.
+// The style opacity applies once, when the layer composites.
+void Draw_round_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                             core::StrokeStyle style, float blit_opacity,
+                             core::RectPx bounds, RoundDraftLiveParts const *live) {
+    core::StrokeStyle opaque_style = style;
+    opaque_style.opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
+    float const opacity = static_cast<float>(style.opacity_percent) /
+                          static_cast<float>(core::StrokeStyle::kMaxOpacityPercent) *
+                          blit_opacity;
+
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+    if (FAILED(rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
+        // No device context: plain source-over at the style opacity.
+        if (res.draft_stroke_body_bitmap) {
+            rt->DrawBitmap(res.draft_stroke_body_bitmap.Get(), nullptr, opacity);
+        } else {
+            Draw_freehand_points(rt, res, res.round_draft.smoother.Final_points(),
+                                 style, core::FreehandTipShape::Round);
+        }
+        if (live != nullptr) {
+            Draw_freehand_points(rt, res, live->provisional, style,
+                                 core::FreehandTipShape::Round);
+            Draw_freehand_points(rt, res, live->tail, style,
+                                 core::FreehandTipShape::Round);
+        }
+        return;
+    }
+
+    dc->PushLayer(D2D1::LayerParameters1(Rect(bounds), nullptr,
+                                         D2D1_ANTIALIAS_MODE_ALIASED,
+                                         D2D1::IdentityMatrix(), opacity),
+                  nullptr);
+    dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_MAX);
+    if (res.draft_stroke_body_bitmap) {
+        dc->DrawBitmap(res.draft_stroke_body_bitmap.Get());
+    } else {
+        Draw_freehand_points(dc.Get(), res, res.round_draft.smoother.Final_points(),
+                             opaque_style, core::FreehandTipShape::Round);
+    }
+    if (live != nullptr) {
+        Draw_freehand_points(dc.Get(), res, live->provisional, opaque_style,
+                             core::FreehandTipShape::Round);
+        Draw_freehand_points(dc.Get(), res, live->tail, opaque_style,
+                             core::FreehandTipShape::Round);
+    }
+    dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+    dc->PopLayer();
+}
+
+// Recomposites the overlay frame inside `clip` from its sources, in the order the
+// dynamic path uses for a live draft: screenshot, annotations, stroke, full dim, then
+// the selection restored with its annotations and stroke. Every pixel in the clip is
+// rebuilt, never layered over earlier output, so clip edges cannot show seams.
+// rt must be inside BeginDraw.
+void Composite_round_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                                  D2DPaintInput const &input, core::RectPx clip,
+                                  RoundDraftLiveParts const *live, int vd_width,
+                                  int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    core::StrokeStyle const style = *input.draft_freehand_style;
+    core::RectPx const restore_rect =
+        !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+
+    rt->PushAxisAlignedClip(Rect(clip), D2D1_ANTIALIAS_MODE_ALIASED);
+    rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f));
+    if (res.screenshot) {
+        rt->DrawBitmap(res.screenshot.Get());
+    }
+    if (res.annotations_bitmap) {
+        rt->DrawBitmap(res.annotations_bitmap.Get());
+    }
+    Draw_round_draft_stroke(rt, res, style, input.draft_freehand_blit_opacity, clip,
+                            live);
+    Draw_selection_dim(rt, res.solid_brush.Get(), core::RectPx{}, vd_width, vd_height);
+    if (!restore_rect.Is_empty()) {
+        if (input.lifted_window_bitmap != nullptr &&
+            !input.lifted_window_dest_rect.Is_empty() &&
+            !input.lifted_window_source_rect.Is_empty()) {
+            Draw_bitmap_rect(rt, input.lifted_window_bitmap,
+                             input.lifted_window_dest_rect,
+                             input.lifted_window_source_rect);
+        } else if (res.screenshot) {
+            Draw_clipped_screenshot_rect(rt, res.screenshot.Get(), restore_rect,
+                                         vd_width, vd_height);
+        }
+        rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
+        if (res.annotations_bitmap) {
+            rt->DrawBitmap(res.annotations_bitmap.Get());
+        }
+        Draw_round_draft_stroke(rt, res, style, input.draft_freehand_blit_opacity, clip,
+                                live);
+        rt->PopAxisAlignedClip();
+    }
+    rt->PopAxisAlignedClip();
+}
+
+void Reset_round_draft(D2DOverlayResources &res, core::StrokeStyle style,
+                       core::FreehandSmoothingMode mode, core::PointPx first_point) {
+    Clear_draft_stroke_surface(res);
+    res.round_draft.active = true;
+    res.round_draft.smoother.Reset(mode, style.width_px);
+    res.round_draft.style = style;
+    res.round_draft.first_point = first_point;
+}
+
+// Draws final points not yet in the body bitmap. Returns the pixels it touched.
+[[nodiscard]] core::RectPx Append_round_draft_body(D2DOverlayResources &res,
+                                                   int vd_width, int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    D2DOverlayResources::RoundDraftState &state = res.round_draft;
+    std::span<const core::PointPx> const final_points = state.smoother.Final_points();
+    if (final_points.size() <= state.drawn_final_count || !res.draft_stroke_body_rt) {
+        return {};
+    }
+    // Start at the last point already drawn so the new piece joins the old one.
+    size_t const begin = state.drawn_final_count > 0 ? state.drawn_final_count - 1 : 0;
+    std::span<const core::PointPx> const piece = final_points.subspan(begin);
+    core::StrokeStyle opaque_style = state.style;
+    opaque_style.opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
+
+    ID2D1BitmapRenderTarget *const body_rt = res.draft_stroke_body_rt.Get();
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+    body_rt->BeginDraw();
+    if (SUCCEEDED(body_rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
+        dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_MAX);
+    }
+    Draw_freehand_points(body_rt, res, piece, opaque_style,
+                         core::FreehandTipShape::Round);
+    if (dc) {
+        dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+    }
+    if (FAILED(body_rt->EndDraw()) ||
+        FAILED(body_rt->GetBitmap(
+            res.draft_stroke_body_bitmap.ReleaseAndGetAddressOf()))) {
+        res.draft_stroke_body_bitmap.Reset();
+        return {};
+    }
+    state.drawn_final_count = final_points.size();
+    core::RectPx const touched =
+        Round_draft_piece_bounds(piece, state.style.width_px, vd_width, vd_height);
+    state.body_bounds = Union_non_empty(state.body_bounds, touched);
+    return touched;
+}
+
+// Recomposites live_base (draft_stroke_rt) inside `clip`, or whole when it is stale.
+void Update_round_draft_live_base(D2DOverlayResources &res, D2DPaintInput const &input,
+                                  core::RectPx clip, int vd_width, int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    D2DOverlayResources::RoundDraftState &state = res.round_draft;
+    core::RectPx const restore_rect =
+        !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+    if (state.live_base_restore_rect != restore_rect ||
+        state.live_base_lifted_window != input.lifted_window_bitmap) {
+        state.live_base_valid = false;
+    }
+    if (state.live_base_valid && clip.Is_empty()) {
+        return;
+    }
+    if (!res.draft_stroke_rt) {
+        state.live_base_valid = false;
+        return;
+    }
+    core::RectPx const region =
+        state.live_base_valid ? clip : Desktop_rect(vd_width, vd_height);
+    res.draft_stroke_rt->BeginDraw();
+    Composite_round_draft_region(res.draft_stroke_rt.Get(), res, input, region, nullptr,
+                                 vd_width, vd_height);
+    if (FAILED(res.draft_stroke_rt->EndDraw()) ||
+        FAILED(res.draft_stroke_rt->GetBitmap(
+            res.draft_stroke_bitmap.ReleaseAndGetAddressOf()))) {
+        res.draft_stroke_bitmap.Reset();
+        state.live_base_valid = false;
+        return;
+    }
+    state.live_base_valid = true;
+    state.live_base_restore_rect = restore_rect;
+    state.live_base_lifted_window = input.lifted_window_bitmap;
+}
+
+// Brings the brush draft up to date before the frame: feeds new points to the
+// smoother, appends final points to the body bitmap and bakes them into live_base.
+// Fills `live` with the moving end and returns the pixels it touches.
+// Must be called BEFORE hwnd_rt->BeginDraw.
+[[nodiscard]] core::RectPx Prepare_round_draft(D2DOverlayResources &res,
+                                               D2DPaintInput const &input,
+                                               RoundDraftLiveParts &live, int vd_width,
+                                               int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    std::span<const core::PointPx> const points = input.draft_freehand_points;
+    core::StrokeStyle const style = *input.draft_freehand_style;
+    core::FreehandSmoothingMode const mode = input.draft_freehand_smoothing_mode;
+    D2DOverlayResources::RoundDraftState &state = res.round_draft;
+
+    // Off mode has no raw tail: every point is final at once. Smooth mode keeps the
+    // newest stretch raw so the tip stays on the cursor.
+    std::optional<core::FreehandPreviewPlan> plan = std::nullopt;
+    if (mode != core::FreehandSmoothingMode::Off) {
+        plan.emplace(core::Build_freehand_preview_plan(points, mode, style.width_px));
+    }
+    std::span<const core::PointPx> const body_source =
+        plan.has_value() ? points.first(plan->stable_raw_point_count) : points;
+
+    // A new stroke that arrives without an empty frame in between restarts the body.
+    // The controller blocks style and tool changes mid-stroke, so a different style
+    // or smoothing mode also means a different stroke.
+    bool const restart =
+        !state.active || state.style != style || state.smoother.Mode() != mode ||
+        points.size() < state.raw_point_count || points.front() != state.first_point ||
+        body_source.size() < state.fed_point_count;
+    if (restart) {
+        Reset_round_draft(res, style, mode, points.front());
+    }
+    state.raw_point_count = points.size();
+
+    if (body_source.size() > state.fed_point_count) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Prepare_round_draft::Smooth");
+        state.smoother.Append(body_source.subspan(state.fed_point_count));
+        state.fed_point_count = body_source.size();
+    }
+
+    core::RectPx const baked = Append_round_draft_body(res, vd_width, vd_height);
+    Update_round_draft_live_base(res, input, baked, vd_width, vd_height);
+
+    std::span<const core::PointPx> const final_points = state.smoother.Final_points();
+    std::span<const core::PointPx> const provisional =
+        state.smoother.Provisional_points();
+    live.provisional.clear();
+    if (!provisional.empty()) {
+        if (!final_points.empty()) {
+            live.provisional.push_back(final_points.back());
+        }
+        live.provisional.insert(live.provisional.end(), provisional.begin(),
+                                provisional.end());
+    }
+    live.tail.clear();
+    if (plan.has_value()) {
+        live.tail = std::move(plan->tail_points);
+    }
+    return Union_non_empty(
+        Round_draft_piece_bounds(live.provisional, style.width_px, vd_width, vd_height),
+        Round_draft_piece_bounds(live.tail, style.width_px, vd_width, vd_height));
 }
 
 // ---------------------------------------------------------------------------
@@ -2941,6 +3233,8 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
         return;
     }
 
+    // Highlighters use draft_stroke_rt as scratch, and live_base shows annotations.
+    res.round_draft.live_base_valid = false;
     res.annotations_rt->BeginDraw();
     res.annotations_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
     Draw_annotations_to_rt(res.annotations_rt.Get(), res, annotations, patches,
@@ -2957,6 +3251,9 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
 void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
                            int vd_width, int vd_height) {
     GREENFLAME_PROFILE_SCOPE("D2DPaint::Rebuild_frozen_bitmap");
+
+    // The selection may have changed; live_base dims around it.
+    res.round_draft.live_base_valid = false;
 
     if (!res.frozen_rt || !res.screenshot || !res.annotations_bitmap) {
         return;
@@ -2988,11 +3285,21 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         return true;
     }
 
+    bool const round_draft = Is_round_freehand_draft(input);
+    RoundDraftLiveParts round_live{};
+    core::RectPx round_live_clip{};
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Update_draft_stroke");
-        Update_draft_stroke_bitmap(
-            res, input.draft_freehand_points, input.draft_freehand_style,
-            input.draft_freehand_tip_shape, input.draft_freehand_smoothing_mode);
+        if (round_draft) {
+            round_live_clip =
+                Prepare_round_draft(res, input, round_live, vd_width, vd_height);
+        } else if (input.draft_freehand_points.empty() ||
+                   input.draft_freehand_tip_shape == core::FreehandTipShape::Square) {
+            Update_draft_stroke_bitmap(
+                res, input.draft_freehand_points, input.draft_freehand_style,
+                input.draft_freehand_tip_shape, input.draft_freehand_smoothing_mode);
+        }
+        // A one-point brush stroke draws from its draft annotation; nothing to cache.
     }
 
     // When an annotation edit interaction is active, the annotation under the cursor
@@ -3035,7 +3342,27 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     // RETAIN_CONTENTS surface state.
     res.hwnd_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f));
 
-    if (is_steady_state) {
+    if (round_draft) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Round_draft");
+        // live_base holds everything but the moving end of the stroke; recomposite
+        // only around that end. Without live_base, recomposite the whole frame.
+        if (res.round_draft.live_base_valid && res.draft_stroke_bitmap) {
+            // Nearest-neighbor 1:1 copy: a full-surface linear blit rounds differently
+            // on very wide desktops.
+            Draw_clipped_screenshot_rect(
+                res.hwnd_rt.Get(), res.draft_stroke_bitmap.Get(),
+                Desktop_rect(vd_width, vd_height), vd_width, vd_height);
+            if (!round_live_clip.Is_empty()) {
+                Composite_round_draft_region(res.hwnd_rt.Get(), res, input,
+                                             round_live_clip, &round_live, vd_width,
+                                             vd_height);
+            }
+        } else {
+            Composite_round_draft_region(res.hwnd_rt.Get(), res, input,
+                                         Desktop_rect(vd_width, vd_height), &round_live,
+                                         vd_width, vd_height);
+        }
+    } else if (is_steady_state) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Steady_state");
         // Fastest path: one GPU blit of the frozen composite.
         if (res.frozen_bitmap) {

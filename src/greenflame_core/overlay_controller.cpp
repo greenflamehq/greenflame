@@ -220,7 +220,7 @@ void OverlayController::Undo() { undo_stack_.Undo(); }
 void OverlayController::Redo() { undo_stack_.Redo(); }
 
 OverlayAction OverlayController::On_annotation_tool_hotkey(wchar_t hotkey, bool shift) {
-    if (state_.final_selection.Is_empty()) {
+    if (state_.final_selection.Is_empty() || Is_manipulating()) {
         return OverlayAction::None;
     }
     return annotation_controller_.Toggle_tool_by_hotkey(hotkey, shift)
@@ -229,7 +229,7 @@ OverlayAction OverlayController::On_annotation_tool_hotkey(wchar_t hotkey, bool 
 }
 
 OverlayAction OverlayController::On_select_annotation_tool(AnnotationToolId id) {
-    if (state_.final_selection.Is_empty()) {
+    if (state_.final_selection.Is_empty() || Is_manipulating()) {
         return OverlayAction::None;
     }
     return annotation_controller_.Toggle_tool(id) ? OverlayAction::Repaint
@@ -327,16 +327,24 @@ TextFontChoice OverlayController::Text_current_font() const noexcept {
     return annotation_controller_.Text_current_font();
 }
 
-void OverlayController::Set_text_current_font(TextFontChoice choice) noexcept {
+bool OverlayController::Set_text_current_font(TextFontChoice choice) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     annotation_controller_.Set_text_current_font(choice);
+    return true;
 }
 
 TextFontChoice OverlayController::Bubble_current_font() const noexcept {
     return annotation_controller_.Bubble_current_font();
 }
 
-void OverlayController::Set_bubble_current_font(TextFontChoice choice) noexcept {
+bool OverlayController::Set_bubble_current_font(TextFontChoice choice) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     annotation_controller_.Set_bubble_current_font(choice);
+    return true;
 }
 
 bool OverlayController::Commit_active_text_edit() {
@@ -424,37 +432,62 @@ int32_t OverlayController::Tool_physical_size(AnnotationToolId tool) const noexc
     return annotation_controller_.Tool_physical_size(tool);
 }
 
-void OverlayController::Set_annotation_color(COLORREF color) noexcept {
+bool OverlayController::Set_annotation_color(COLORREF color) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     (void)annotation_controller_.Set_annotation_color(color);
+    return true;
 }
 
-void OverlayController::Set_brush_annotation_color(COLORREF color) noexcept {
+bool OverlayController::Set_brush_annotation_color(COLORREF color) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     (void)annotation_controller_.Set_brush_annotation_color(color);
+    return true;
 }
 
-void OverlayController::Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept {
+bool OverlayController::Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     (void)annotation_controller_.Set_brush_smoothing_mode(mode);
+    return true;
 }
 
-void OverlayController::Set_highlighter_color(COLORREF color) noexcept {
+bool OverlayController::Set_highlighter_color(COLORREF color) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     (void)annotation_controller_.Set_highlighter_color(color);
+    return true;
 }
 
-void OverlayController::Set_highlighter_smoothing_mode(
+bool OverlayController::Set_highlighter_smoothing_mode(
     FreehandSmoothingMode mode) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     (void)annotation_controller_.Set_highlighter_smoothing_mode(mode);
+    return true;
 }
 
-void OverlayController::Set_highlighter_opacity_percent(
+bool OverlayController::Set_highlighter_opacity_percent(
     int32_t opacity_percent) noexcept {
+    if (Is_manipulating()) {
+        return false;
+    }
     (void)annotation_controller_.Set_highlighter_opacity_percent(opacity_percent);
+    return true;
 }
 
 std::optional<int32_t> OverlayController::Adjust_tool_size(int32_t delta_steps) {
     std::optional<AnnotationToolId> const active_tool =
         annotation_controller_.Active_tool();
+    // Every size-change input (wheel, Ctrl+/-) routes through here.
     if (delta_steps == 0 || state_.final_selection.Is_empty() ||
-        !active_tool.has_value()) {
+        !active_tool.has_value() || Is_manipulating()) {
         return std::nullopt;
     }
     switch (*active_tool) {
@@ -499,6 +532,13 @@ bool OverlayController::Can_interact_with_annotation_toolbar() const noexcept {
 
 bool OverlayController::Should_show_selected_annotation_handles() const noexcept {
     return annotation_controller_.Selected_annotation_count() == 1;
+}
+
+bool OverlayController::Is_manipulating() const noexcept {
+    return annotation_controller_.Has_active_tool_gesture() ||
+           annotation_controller_.Has_active_edit_interaction() || state_.dragging ||
+           state_.handle_dragging || state_.move_dragging ||
+           state_.annotation_selection_pending;
 }
 
 bool OverlayController::Has_active_annotation_gesture() const noexcept {

@@ -1562,6 +1562,118 @@ TEST(overlay_controller, ToolSizeAdjust_OnlyChangesTextSizeWhileTextToolIsArmed)
     EXPECT_EQ(c.Text_point_size(), 15);
 }
 
+TEST(overlay_controller, ToolSizeAdjust_IsANoOpDuringAGesture) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+
+    for (wchar_t const hotkey : {L'B', L'R'}) {
+        ASSERT_EQ(c.On_annotation_tool_hotkey(hotkey), OverlayAction::Repaint);
+        AnnotationToolId const tool = *c.Active_annotation_tool();
+        int32_t const step_before = c.Tool_size_step(tool);
+
+        // Mid-gesture: the wheel and Ctrl+/- change nothing.
+        ASSERT_EQ(Press(c, {200, 200}), OverlayAction::Repaint);
+        ASSERT_TRUE(c.Has_active_annotation_gesture());
+        (void)Move(c, {260, 240});
+        EXPECT_EQ(c.Adjust_tool_size(1), std::nullopt);
+        EXPECT_EQ(c.Adjust_tool_size(-1), std::nullopt);
+        EXPECT_EQ(c.Tool_size_step(tool), step_before);
+
+        // After release it works again.
+        (void)Release(c, {300, 300});
+        ASSERT_FALSE(c.Has_active_annotation_gesture());
+        EXPECT_TRUE(c.Adjust_tool_size(1).has_value());
+        EXPECT_EQ(c.Tool_size_step(tool), step_before + 1);
+    }
+}
+
+TEST(overlay_controller, StyleSetters_AreNoOpsDuringAGesture) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+    ASSERT_TRUE(c.Set_brush_smoothing_mode(FreehandSmoothingMode::Smooth));
+    COLORREF const brush_color = c.Brush_annotation_color();
+    COLORREF const highlighter_color = c.Highlighter_color();
+    int32_t const opacity = c.Highlighter_opacity_percent();
+    ASSERT_TRUE(c.Set_text_current_font(TextFontChoice::Sans));
+    ASSERT_TRUE(c.Set_bubble_current_font(TextFontChoice::Sans));
+    COLORREF const other_color = RGB(0x12, 0x34, 0x56);
+    int32_t const other_opacity = 40;
+
+    ASSERT_EQ(Press(c, {200, 200}), OverlayAction::Repaint);
+    (void)Move(c, {260, 240});
+    ASSERT_TRUE(c.Has_active_annotation_gesture());
+    EXPECT_FALSE(c.Set_annotation_color(other_color));
+    EXPECT_FALSE(c.Set_brush_annotation_color(other_color));
+    EXPECT_FALSE(c.Set_highlighter_color(other_color));
+    EXPECT_FALSE(c.Set_highlighter_opacity_percent(other_opacity));
+    EXPECT_FALSE(c.Set_brush_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_FALSE(c.Set_highlighter_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_FALSE(c.Set_text_current_font(TextFontChoice::Mono));
+    EXPECT_FALSE(c.Set_bubble_current_font(TextFontChoice::Art));
+    EXPECT_EQ(c.Brush_annotation_color(), brush_color);
+    EXPECT_EQ(c.Highlighter_color(), highlighter_color);
+    EXPECT_EQ(c.Highlighter_opacity_percent(), opacity);
+    EXPECT_EQ(c.Draft_freehand_smoothing_mode(), FreehandSmoothingMode::Smooth);
+    EXPECT_EQ(c.Text_current_font(), TextFontChoice::Sans);
+    EXPECT_EQ(c.Bubble_current_font(), TextFontChoice::Sans);
+
+    (void)Release(c, {300, 300});
+    EXPECT_TRUE(c.Set_brush_annotation_color(other_color));
+    EXPECT_TRUE(c.Set_highlighter_color(other_color));
+    EXPECT_TRUE(c.Set_highlighter_opacity_percent(other_opacity));
+    EXPECT_TRUE(c.Set_brush_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_TRUE(c.Set_highlighter_smoothing_mode(FreehandSmoothingMode::Off));
+    EXPECT_TRUE(c.Set_text_current_font(TextFontChoice::Mono));
+    EXPECT_TRUE(c.Set_bubble_current_font(TextFontChoice::Art));
+    EXPECT_EQ(c.Brush_annotation_color(), other_color);
+    EXPECT_EQ(c.Highlighter_color(), other_color);
+    EXPECT_EQ(c.Highlighter_opacity_percent(), other_opacity);
+    EXPECT_EQ(c.Text_current_font(), TextFontChoice::Mono);
+    EXPECT_EQ(c.Bubble_current_font(), TextFontChoice::Art);
+    ASSERT_EQ(Press(c, {400, 400}), OverlayAction::Repaint);
+    (void)Move(c, {420, 420});
+    EXPECT_EQ(c.Draft_freehand_smoothing_mode(), FreehandSmoothingMode::Off);
+    (void)Release(c, {420, 420});
+}
+
+TEST(overlay_controller, ToolChanges_AreNoOpsDuringAGesture) {
+    auto c = Make_controller();
+    Press(c, {100, 100});
+    Release(c, {600, 600});
+    ASSERT_EQ(c.On_annotation_tool_hotkey(L'B'), OverlayAction::Repaint);
+
+    ASSERT_EQ(Press(c, {200, 200}), OverlayAction::Repaint);
+    (void)Move(c, {260, 240});
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::None);
+    EXPECT_EQ(c.On_select_annotation_tool(AnnotationToolId::Highlighter),
+              OverlayAction::None);
+    EXPECT_EQ(c.Active_annotation_tool(), AnnotationToolId::Freehand);
+
+    (void)Release(c, {300, 300});
+    EXPECT_EQ(c.On_annotation_tool_hotkey(L'R'), OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(), AnnotationToolId::Rectangle);
+    EXPECT_EQ(c.On_select_annotation_tool(AnnotationToolId::Highlighter),
+              OverlayAction::Repaint);
+    EXPECT_EQ(c.Active_annotation_tool(), AnnotationToolId::Highlighter);
+}
+
+TEST(overlay_controller, StyleSetters_AreNoOpsDuringASelectionDrag) {
+    auto c = Make_controller();
+    COLORREF const before = c.Brush_annotation_color();
+    COLORREF const other_color = RGB(0x65, 0x43, 0x21);
+    ASSERT_NE(before, other_color);
+    Press(c, {100, 100});
+    (void)Move(c, {300, 300});
+    EXPECT_FALSE(c.Set_brush_annotation_color(other_color));
+    EXPECT_EQ(c.Brush_annotation_color(), before);
+    Release(c, {600, 600});
+    EXPECT_TRUE(c.Set_brush_annotation_color(other_color));
+    EXPECT_EQ(c.Brush_annotation_color(), other_color);
+}
+
 TEST(overlay_controller, DraftLocalUndoRedo_DoesNotPushOverlayUndoStack) {
     auto c = Make_controller();
     FakeTextLayoutEngine engine;
@@ -2214,9 +2326,9 @@ TEST(overlay_controller, SetterWrappers_UpdateFontsColorsAndHighlighterOpacity) 
     Press(c, {100, 100});
     Release(c, {300, 300});
 
-    c.Set_text_current_font(TextFontChoice::Mono);
-    c.Set_bubble_current_font(TextFontChoice::Art);
-    c.Set_brush_annotation_color(RGB(0x11, 0x22, 0x33));
+    EXPECT_TRUE(c.Set_text_current_font(TextFontChoice::Mono));
+    EXPECT_TRUE(c.Set_bubble_current_font(TextFontChoice::Art));
+    EXPECT_TRUE(c.Set_brush_annotation_color(RGB(0x11, 0x22, 0x33)));
 
     EXPECT_EQ(c.Text_current_font(), TextFontChoice::Mono);
     EXPECT_EQ(c.Bubble_current_font(), TextFontChoice::Art);
@@ -2224,20 +2336,21 @@ TEST(overlay_controller, SetterWrappers_UpdateFontsColorsAndHighlighterOpacity) 
 
     ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Freehand),
               OverlayAction::Repaint);
-    c.Set_annotation_color(RGB(0x44, 0x55, 0x66));
+    EXPECT_TRUE(c.Set_annotation_color(RGB(0x44, 0x55, 0x66)));
     EXPECT_EQ(c.Annotation_color(), RGB(0x44, 0x55, 0x66));
     EXPECT_EQ(c.Brush_annotation_color(), RGB(0x44, 0x55, 0x66));
 
     ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Highlighter),
               OverlayAction::Repaint);
-    c.Set_annotation_color(RGB(0x77, 0x88, 0x99));
+    EXPECT_TRUE(c.Set_annotation_color(RGB(0x77, 0x88, 0x99)));
     EXPECT_EQ(c.Annotation_color(), RGB(0x77, 0x88, 0x99));
     EXPECT_EQ(c.Highlighter_color(), RGB(0x77, 0x88, 0x99));
 
-    c.Set_highlighter_color(RGB(0xAA, 0xBB, 0xCC));
+    EXPECT_TRUE(c.Set_highlighter_color(RGB(0xAA, 0xBB, 0xCC)));
     EXPECT_EQ(c.Highlighter_color(), RGB(0xAA, 0xBB, 0xCC));
 
-    c.Set_highlighter_opacity_percent(StrokeStyle::kMaxOpacityPercent + 10);
+    EXPECT_TRUE(
+        c.Set_highlighter_opacity_percent(StrokeStyle::kMaxOpacityPercent + 10));
     EXPECT_EQ(c.Highlighter_opacity_percent(), StrokeStyle::kMaxOpacityPercent);
 }
 

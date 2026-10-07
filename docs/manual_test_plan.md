@@ -791,6 +791,35 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Record observed responsiveness and any input-to-display timings separately from
     the CPU-only benchmark; do not interpret its result as a frame-rate measurement.
 
+### GF-MAN-ANN-002E - Brush Strokes Keep Every Mouse Position
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`; include a monitor left of or above the primary
+  (negative virtual-desktop coordinates).
+- Prerequisite: an `x64-release-pdb` build with `GREENFLAME_LOG` enabled.
+- Steps:
+  1. Delete `%TEMP%\greenflame-debug.log` if it exists.
+  2. Select the whole desktop. With Brush, draw fast loops for about 10 seconds on
+     the monitor with negative coordinates, then one stroke crossing every monitor.
+  3. Draw the same loops with a brush opacity below 100, and once with smoothing
+     `off`.
+  4. Mid-stroke, turn the mouse wheel, press `Ctrl` `+`/`-`, press a tool hotkey and
+     open the color wheel. Release, then repeat them.
+  5. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
+  6. Capture a region across two monitors and the whole desktop; save and copy.
+- Expected:
+  - Loops come out round, not as polygons; the stroke follows the cursor without
+    spikes at its start, its end or where a modifier key was pressed.
+  - Each brush stroke writes one `freehand` line to the log: `raw_points` is close to
+    the mouse report rate times the stroke duration, `gaps` and `fallbacks` are 0 or
+    near it.
+  - A translucent stroke shows no darker dots or seams along it while drawing; the
+    committed stroke looks like the preview.
+  - Size, color, opacity, smoothing and tool do not change while the button is held;
+    they change normally after release.
+  - Escape leaves no stroke pixels behind; the new stroke draws normally.
+  - Cross-monitor and whole-desktop captures save and copy as before.
+
 ### GF-MAN-ANN-002D - Selection Dimming On Large Desktops
 
 - Priority: `P1`

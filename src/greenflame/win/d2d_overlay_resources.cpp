@@ -645,6 +645,7 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
     draft_stroke_tip_shape = core::FreehandTipShape::Round;
     draft_stroke_smoothing_mode = core::FreehandSmoothingMode::Off;
     draft_stroke_bitmap_uses_cached_body = false;
+    round_draft = {};
     return true;
 }
 
@@ -704,6 +705,7 @@ void D2DOverlayResources::Release_device_resources() {
     draft_stroke_tip_shape = core::FreehandTipShape::Round;
     draft_stroke_smoothing_mode = core::FreehandSmoothingMode::Off;
     draft_stroke_bitmap_uses_cached_body = false;
+    round_draft = {};
     multiply_effect.Reset();
     draft_stroke_composite_effect.Reset();
     base_composite_effect.Reset();

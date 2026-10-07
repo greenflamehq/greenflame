@@ -147,7 +147,9 @@ Prefer `ctest` for standard runs; use direct execution for local filtering.
 
 The disabled `freehand_smoothing.LongStrokePerformance` test times the production
 smoother on a fixed 8,192-point stroke. It reports microseconds per call and output
-point count, with no machine-dependent timing assertion:
+point count, then the live preview's incremental smoother's microseconds per appended
+point over the first and the last 1,024 points (these two should match: the cost per
+append must not grow with the stroke). There is no machine-dependent timing assertion:
 
 ```bat
 build\x64-release\bin\greenflame_tests.exe --gtest_filter=freehand_smoothing.DISABLED_LongStrokePerformance --gtest_also_run_disabled_tests --gtest_repeat=5

@@ -173,9 +173,11 @@ class OverlayController final {
     [[nodiscard]] TextEditController *Active_text_edit() noexcept;
     [[nodiscard]] int32_t Text_point_size() const noexcept;
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
-    void Set_text_current_font(TextFontChoice choice) noexcept;
+    // Style and tool setters return false, changing nothing, while a manipulation
+    // is in progress (see Is_manipulating).
+    [[nodiscard]] bool Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
-    void Set_bubble_current_font(TextFontChoice choice) noexcept;
+    [[nodiscard]] bool Set_bubble_current_font(TextFontChoice choice) noexcept;
     bool Commit_active_text_edit();
     void Cancel_text_draft();
     [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
@@ -190,12 +192,14 @@ class OverlayController final {
     void Set_tool_size_step(AnnotationToolId tool, int32_t step) noexcept;
     [[nodiscard]] int32_t Tool_size_step(AnnotationToolId tool) const noexcept;
     [[nodiscard]] int32_t Tool_physical_size(AnnotationToolId tool) const noexcept;
-    void Set_annotation_color(COLORREF color) noexcept;
-    void Set_brush_annotation_color(COLORREF color) noexcept;
-    void Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept;
-    void Set_highlighter_color(COLORREF color) noexcept;
-    void Set_highlighter_smoothing_mode(FreehandSmoothingMode mode) noexcept;
-    void Set_highlighter_opacity_percent(int32_t opacity_percent) noexcept;
+    [[nodiscard]] bool Set_annotation_color(COLORREF color) noexcept;
+    [[nodiscard]] bool Set_brush_annotation_color(COLORREF color) noexcept;
+    [[nodiscard]] bool Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept;
+    [[nodiscard]] bool Set_highlighter_color(COLORREF color) noexcept;
+    [[nodiscard]] bool
+    Set_highlighter_smoothing_mode(FreehandSmoothingMode mode) noexcept;
+    [[nodiscard]] bool
+    Set_highlighter_opacity_percent(int32_t opacity_percent) noexcept;
     [[nodiscard]] std::optional<int32_t> Adjust_tool_size(int32_t delta_steps);
     [[nodiscard]] bool Should_show_annotation_toolbar() const noexcept;
     [[nodiscard]] bool Can_interact_with_annotation_toolbar() const noexcept;
@@ -207,6 +211,10 @@ class OverlayController final {
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
 
   private:
+    // True while the pointer is down on a drawing, an annotation edit, a selection
+    // drag or a marquee. Style and tool changes wait until it ends. A text edit
+    // session is not a manipulation: its style changes apply to the text.
+    [[nodiscard]] bool Is_manipulating() const noexcept;
     void Reset_window_selection_metadata(bool reset_source) noexcept;
     [[nodiscard]] bool Restricts_annotation_edits_to_visible_selection() const noexcept;
     [[nodiscard]] PointPx
