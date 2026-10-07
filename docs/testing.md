@@ -185,6 +185,11 @@ virtual desktop.
 - `--scenario hover|select|brush|highlighter|steady|all`: crosshair sweep, live
   selection drag, freehand strokes growing by one point per frame (`--step`,
   `--smooth on|off`), idle selection, or all of them.
+- `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
+  mouse input delivers them. Larger values draw a longer stroke that wraps into rows
+  and crosses itself.
+- `--opacity N` (default 100): brush opacity percent. Below 100 shows double
+  compositing that an opaque stroke hides.
 - `--frames N` (default 300, after 5 warm-up frames), `--repeat N`, `--csv FILE`.
 
 Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 ms and

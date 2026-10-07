@@ -169,6 +169,8 @@ struct Args final {
     std::string scenario = "all";
     bool smooth = true;
     int step_px = kDefaultStepPx;
+    int points_per_frame = 1;
+    int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
     int frames = kDefaultFrames;
     bool frames_given = false;
     int repeat = 1;
@@ -192,6 +194,8 @@ void Print_usage() {
         "  --scenario hover|select|brush|highlighter|steady|all   (default all)\n"
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
+        "  --points-per-frame N         freehand points added per frame (default 1)\n"
+        "  --opacity N                  brush opacity percent, 0-100 (default 100)\n"
         "  --frames N                   measured frames per run (default 300)\n"
         "  --repeat N                   runs per scenario (default 1)\n"
         "  --csv FILE                   per-frame rows\n"
@@ -271,6 +275,15 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             std::optional<int> const v = next_int(1);
             if (!v) return std::nullopt;
             args.step_px = *v;
+        } else if (key == "--points-per-frame") {
+            std::optional<int> const v = next_int(1);
+            if (!v) return std::nullopt;
+            args.points_per_frame = *v;
+        } else if (key == "--opacity") {
+            std::optional<int> const v =
+                next_int(core::StrokeStyle::kMinOpacityPercent);
+            if (!v || *v > core::StrokeStyle::kMaxOpacityPercent) return std::nullopt;
+            args.opacity_percent = *v;
         } else if (key == "--frames") {
             std::optional<int> const v = next_int(1);
             if (!v) return std::nullopt;
@@ -583,20 +596,25 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         input.selection_drag_corner_guide_px =
             core::PointPx{input.live_rect.right, input.live_rect.bottom};
     } else if (Is_freehand(scenario) && frame >= 0) {
-        // One new input point per frame, as the app gets today.
+        // --points-per-frame new input points per frame (default 1). The path wave
+        // advances per point, so more points per frame draw a longer stroke that
+        // wraps into rows and crosses itself.
         core::RectPx const sel = input.final_selection;
-        double const travelled = static_cast<double>(kFreehandEdgeInsetPx) +
-                                 static_cast<double>(i) * args.step_px;
         double const span = static_cast<double>(sel.Width() - 2 * kFreehandEdgeInsetPx);
-        double const x = static_cast<double>(sel.left + kFreehandEdgeInsetPx) +
-                         std::fmod(travelled, span);
-        double const row = std::floor(travelled / span);
-        double const y =
-            static_cast<double>(sel.top + sel.bottom) / 2.0 +
-            std::sin(static_cast<double>(i) * kFreehandWavePerFrame) *
-                static_cast<double>(sel.Height() / kFreehandAmplitudeDivisor) +
-            row * kFreehandRowStepPx;
-        state.points.push_back({static_cast<int32_t>(x), static_cast<int32_t>(y)});
+        for (int k = 0; k < args.points_per_frame; ++k) {
+            int64_t const p = static_cast<int64_t>(i) * args.points_per_frame + k;
+            double const travelled = static_cast<double>(kFreehandEdgeInsetPx) +
+                                     static_cast<double>(p) * args.step_px;
+            double const x = static_cast<double>(sel.left + kFreehandEdgeInsetPx) +
+                             std::fmod(travelled, span);
+            double const row = std::floor(travelled / span);
+            double const y =
+                static_cast<double>(sel.top + sel.bottom) / 2.0 +
+                std::sin(static_cast<double>(p) * kFreehandWavePerFrame) *
+                    static_cast<double>(sel.Height() / kFreehandAmplitudeDivisor) +
+                row * kFreehandRowStepPx;
+            state.points.push_back({static_cast<int32_t>(x), static_cast<int32_t>(y)});
+        }
         input.draft_freehand_points = state.points;
         input.cursor_client_px = state.points.back();
     }
@@ -613,6 +631,9 @@ void Set_scenario_base(std::string_view scenario, int width, int height,
         core::StrokeStyle style{};
         style.width_px = highlighter ? kHighlighterWidthPx : kBrushWidthPx;
         style.color = highlighter ? kHighlighterColor : kBrushColor;
+        if (!highlighter) {
+            style.opacity_percent = args.opacity_percent;
+        }
         input.draft_freehand_style = style;
         input.draft_freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
                                                      : core::FreehandTipShape::Round;
@@ -776,10 +797,11 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         static_cast<double>(ctx.width) * static_cast<double>(ctx.height) / kMegapixel;
     double const shaded = Median(mpx);
 
-    Print("\nlayout={} vd={}x{} adapter=\"{}\" scenario={} smooth={} frames={} "
-          "run={}/{}\n",
+    Print("\nlayout={} vd={}x{} adapter=\"{}\" scenario={} smooth={} "
+          "points/frame={} opacity={} frames={} run={}/{}\n",
           ctx.layout->name, ctx.width, ctx.height, Narrow(*ctx.adapter_name), scenario,
-          args.smooth ? "on" : "off", args.frames, run + 1, args.repeat);
+          args.smooth ? "on" : "off", args.points_per_frame, args.opacity_percent,
+          args.frames, run + 1, args.repeat);
     Print("           p50     p90     p95     p99     max  <=33.3  <=16.7\n");
     Print_row("cpu", core::Summarize_frame_times(cpu));
     if (gpu.empty()) {
