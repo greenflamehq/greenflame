@@ -504,29 +504,32 @@ AnnotationKind Annotation::Kind() const noexcept {
         data);
 }
 
+RectPx Freehand_points_bounds(std::span<const PointPx> points,
+                              int32_t width_px) noexcept {
+    if (points.empty()) {
+        return {};
+    }
+    int32_t min_x = points.front().x;
+    int32_t min_y = points.front().y;
+    int32_t max_x = points.front().x;
+    int32_t max_y = points.front().y;
+    for (PointPx const &p : points) {
+        min_x = std::min(min_x, p.x);
+        min_y = std::min(min_y, p.y);
+        max_x = std::max(max_x, p.x);
+        max_y = std::max(max_y, p.y);
+    }
+    float const half_extent = std::max(1.0F, static_cast<float>(width_px)) * 0.5f;
+    int32_t const outset = static_cast<int32_t>(std::ceil(half_extent));
+    return RectPx::From_ltrb(min_x - outset, min_y - outset, max_x + outset + 1,
+                             max_y + outset + 1);
+}
+
 RectPx Annotation_bounds(Annotation const &annotation) noexcept {
     return std::visit(
         Overloaded{
             [](FreehandStrokeAnnotation const &fh) -> RectPx {
-                auto const &pts = fh.points;
-                if (pts.empty()) {
-                    return {};
-                }
-                int32_t min_x = pts.front().x;
-                int32_t min_y = pts.front().y;
-                int32_t max_x = pts.front().x;
-                int32_t max_y = pts.front().y;
-                for (PointPx const &p : pts) {
-                    min_x = std::min(min_x, p.x);
-                    min_y = std::min(min_y, p.y);
-                    max_x = std::max(max_x, p.x);
-                    max_y = std::max(max_y, p.y);
-                }
-                float const half_extent =
-                    std::max(1.0F, static_cast<float>(fh.style.width_px)) * 0.5f;
-                int32_t const outset = static_cast<int32_t>(std::ceil(half_extent));
-                return RectPx::From_ltrb(min_x - outset, min_y - outset,
-                                         max_x + outset + 1, max_y + outset + 1);
+                return Freehand_points_bounds(fh.points, fh.style.width_px);
             },
             [](LineAnnotation const &line) -> RectPx {
                 PointF const start_f = To_point_f(line.start);

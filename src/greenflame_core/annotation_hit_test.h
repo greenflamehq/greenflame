@@ -5,6 +5,10 @@
 namespace greenflame::core {
 
 [[nodiscard]] RectPx Annotation_bounds(Annotation const &annotation) noexcept;
+// Pixels a freehand stroke through `points` covers: their bounding box grown by half
+// the stroke width (right and bottom exclusive). Empty points give an empty rect.
+[[nodiscard]] RectPx Freehand_points_bounds(std::span<const PointPx> points,
+                                            int32_t width_px) noexcept;
 [[nodiscard]] RectPx Annotation_visual_bounds(Annotation const &annotation) noexcept;
 [[nodiscard]] RectPx
 Annotation_selection_frame_bounds(Annotation const &annotation) noexcept;

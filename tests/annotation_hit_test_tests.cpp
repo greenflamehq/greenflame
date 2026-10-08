@@ -513,3 +513,10 @@ TEST(annotation_hit_test, ResizeRectangleFromHandle_ClampsMinimumSizeForCrossedE
         RectPx::From_ltrb(10, 10, 21, 21), SelectionHandle::Top, {15, 21});
     EXPECT_EQ(from_top, (RectPx::From_ltrb(10, 20, 21, 21)));
 }
+
+TEST(annotation_hit_test, FreehandPointsBounds_CoverHalfTheStrokeWidth) {
+    std::vector<PointPx> const points = {{-10, 5}, {20, -3}, {4, 4}};
+    // Width 11: half is 5.5, rounded out to 6; right and bottom are exclusive.
+    EXPECT_EQ(Freehand_points_bounds(points, 11), RectPx::From_ltrb(-16, -9, 27, 12));
+    EXPECT_EQ(Freehand_points_bounds({}, 11), RectPx{});
+}

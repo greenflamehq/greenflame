@@ -95,6 +95,22 @@ Some Win32 overlay behaviors cannot be exercised in the unit-test binary because
 must not depend on the GUI executable. For those cases, add or update the detailed case coverage in
 [manual_test_plan.md](manual_test_plan.md) and run the applicable cases when the affected feature changes.
 
+### Diagnostic log build
+
+Manual cases that read `%TEMP%\greenflame-debug.log` (for example `GF-MAN-SEL-007`
+and `GF-MAN-ANN-002E`, brush stroke point counts) need a build with
+`GREENFLAME_ENABLE_DEBUG_LOG` (default `OFF`, set by no preset). Use a separate build
+directory so the option does not stick in a preset's cache:
+
+```bat
+cmake --preset x64-release-pdb -B build\x64-release-pdb-log -DGREENFLAME_ENABLE_DEBUG_LOG=ON
+cmake --build build\x64-release-pdb-log --target greenflame
+```
+
+Each brush stroke writes one `freehand` line: `raw_points`, `history_points` (points
+recovered from the mouse history), `gaps` (history overflowed, movement lost) and
+`fallbacks` (no history, message point only).
+
 ## Writing a test
 
 Use GoogleTest macros for plain logic tests:
@@ -150,7 +166,9 @@ execution to filter, since `ctest -R` matches only the whole-binary entry.
 
 The disabled `freehand_smoothing.LongStrokePerformance` test times the production
 smoother on a fixed 8,192-point stroke. It reports microseconds per call and output
-point count, with no machine-dependent timing assertion:
+point count, then the live preview's incremental smoother's microseconds per appended
+point over the first and the last 1,024 points (these two should match: the cost per
+append must not grow with the stroke). There is no machine-dependent timing assertion:
 
 ```bat
 build\x64-release\bin\greenflame_tests.exe --gtest_filter=freehand_smoothing.DISABLED_LongStrokePerformance --gtest_also_run_disabled_tests --gtest_repeat=5
@@ -186,8 +204,16 @@ virtual desktop.
 - `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
   prints the indexes.
 - `--scenario hover|select|brush|highlighter|steady|all`: crosshair sweep, live
-  selection drag, freehand strokes growing by one point per frame (`--step`,
-  `--smooth on|off`), idle selection, or all of them.
+  selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
+  `--points-per-frame`), idle selection, or all of them.
+- `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
+  mouse input delivers them. Larger values draw a longer stroke that wraps into rows
+  and crosses itself.
+- `--annotated`: steady and freehand scenarios use a selection inset by an eighth of
+  the desktop and committed brush and highlighter strokes crossing its edge, so
+  frames carry dimmed pixels and annotations.
+- `--opacity N` (default 100): brush opacity percent. Below 100 shows double
+  compositing that an opaque stroke hides.
 - `--frames N` (default 300, after 5 warm-up frames), `--repeat N`, `--csv FILE`.
 
 Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 ms and

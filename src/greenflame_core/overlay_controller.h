@@ -93,6 +93,10 @@ class OverlayController final {
 
     // WM_LBUTTONDBLCLK
     [[nodiscard]] OverlayAction On_primary_double_press(PointPx cursor_client);
+    // True when a double-click must act as a plain press: an annotation tool is armed
+    // (and no text is being typed), so a fast second click starts a new stroke or
+    // shape. Otherwise the double-click goes to On_primary_double_press.
+    [[nodiscard]] bool Double_press_is_press() const noexcept;
 
     // WM_LBUTTONDOWN: all Win32 queries are pre-resolved by caller.
     [[nodiscard]] OverlayAction
@@ -145,8 +149,9 @@ class OverlayController final {
     void Restore_selection_state(OverlaySelectionState const &state);
 
     void Push_command(std::unique_ptr<ICommand> cmd);
-    void Undo();
-    void Redo();
+    // Undo and redo do nothing (return false) while a manipulation is in progress.
+    bool Undo();
+    bool Redo();
 
     [[nodiscard]] OverlayAction On_annotation_tool_hotkey(wchar_t hotkey,
                                                           bool shift = false);
@@ -173,9 +178,13 @@ class OverlayController final {
     [[nodiscard]] TextEditController *Active_text_edit() noexcept;
     [[nodiscard]] int32_t Text_point_size() const noexcept;
     [[nodiscard]] TextFontChoice Text_current_font() const noexcept;
-    void Set_text_current_font(TextFontChoice choice) noexcept;
+    // No style changes during a manipulation (see Is_manipulating) or while typing
+    // in a text edit session: style setters and Adjust_tool_size refuse, change
+    // nothing and return false (nullopt). Tool changes refuse only during a
+    // manipulation.
+    [[nodiscard]] bool Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
-    void Set_bubble_current_font(TextFontChoice choice) noexcept;
+    [[nodiscard]] bool Set_bubble_current_font(TextFontChoice choice) noexcept;
     bool Commit_active_text_edit();
     void Cancel_text_draft();
     [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
@@ -190,12 +199,14 @@ class OverlayController final {
     void Set_tool_size_step(AnnotationToolId tool, int32_t step) noexcept;
     [[nodiscard]] int32_t Tool_size_step(AnnotationToolId tool) const noexcept;
     [[nodiscard]] int32_t Tool_physical_size(AnnotationToolId tool) const noexcept;
-    void Set_annotation_color(COLORREF color) noexcept;
-    void Set_brush_annotation_color(COLORREF color) noexcept;
-    void Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept;
-    void Set_highlighter_color(COLORREF color) noexcept;
-    void Set_highlighter_smoothing_mode(FreehandSmoothingMode mode) noexcept;
-    void Set_highlighter_opacity_percent(int32_t opacity_percent) noexcept;
+    [[nodiscard]] bool Set_annotation_color(COLORREF color) noexcept;
+    [[nodiscard]] bool Set_brush_annotation_color(COLORREF color) noexcept;
+    [[nodiscard]] bool Set_brush_smoothing_mode(FreehandSmoothingMode mode) noexcept;
+    [[nodiscard]] bool Set_highlighter_color(COLORREF color) noexcept;
+    [[nodiscard]] bool
+    Set_highlighter_smoothing_mode(FreehandSmoothingMode mode) noexcept;
+    [[nodiscard]] bool
+    Set_highlighter_opacity_percent(int32_t opacity_percent) noexcept;
     [[nodiscard]] std::optional<int32_t> Adjust_tool_size(int32_t delta_steps);
     [[nodiscard]] bool Should_show_annotation_toolbar() const noexcept;
     [[nodiscard]] bool Can_interact_with_annotation_toolbar() const noexcept;
@@ -206,7 +217,15 @@ class OverlayController final {
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
 
+    // True while the pointer is down on a drawing, an annotation edit, a selection
+    // drag or a marquee. Style, tool and document commands (undo, redo, save, copy,
+    // pin, delete) wait until it ends. Gesture modifiers (Shift, Ctrl, Alt) and
+    // Escape still act. A text edit session is not a manipulation: its own keys
+    // (text undo, Delete, Tab) keep working.
+    [[nodiscard]] bool Is_manipulating() const noexcept;
+
   private:
+    [[nodiscard]] bool Blocks_style_change() const noexcept;
     void Reset_window_selection_metadata(bool reset_source) noexcept;
     [[nodiscard]] bool Restricts_annotation_edits_to_visible_selection() const noexcept;
     [[nodiscard]] PointPx

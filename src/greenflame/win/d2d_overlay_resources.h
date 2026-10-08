@@ -85,6 +85,26 @@ struct D2DOverlayResources final {
         core::FreehandSmoothingMode::Off;
     bool draft_stroke_bitmap_uses_cached_body = false;
 
+    // Live brush (round-tip) stroke. The smoother turns the stroke's stable body into
+    // final points, drawn once each into draft_stroke_body_rt (append only, at full
+    // opacity, max blend). draft_stroke_rt holds live_base: the whole overlay frame
+    // (screenshot, annotations, body, dim) as of the last body update, so a frame is
+    // one live_base blit plus a recomposite clipped to the moving tail.
+    struct RoundDraftState final {
+        bool active = false;
+        core::FreehandIncrementalSmoother smoother = {};
+        core::StrokeStyle style = {};
+        core::PointPx first_point = {};
+        size_t raw_point_count = 0;    // raw stroke points seen
+        size_t fed_point_count = 0;    // raw points fed to the smoother
+        size_t drawn_final_count = 0;  // final points drawn into the body bitmap
+        core::RectPx body_bounds = {}; // pixels the body bitmap covers
+        bool live_base_valid = false;
+        core::RectPx live_base_restore_rect = {};
+        ID2D1Bitmap *live_base_lifted_window = nullptr;
+    };
+    RoundDraftState round_draft = {};
+
     // Reusable shared resources (recreated on device loss)
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solid_brush;
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> round_cap_style; // freehand, lines

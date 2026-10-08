@@ -453,7 +453,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
 
 - Priority: `P2`
 - Run on: `ENV-A`, `ENV-B`
-- Prerequisite: Build Greenflame with `GREENFLAME_LOG` enabled.
+- Prerequisite: a diagnostic log build (`GREENFLAME_ENABLE_DEBUG_LOG=ON`; see "Diagnostic log build" in [testing.md](testing.md)).
 - Steps:
   1. Delete `%TEMP%\greenflame-debug.log` if it exists.
   2. Start interactive capture and exercise `Ctrl` window preview on a normal window, a partially obscured window, and a partially off-screen window.
@@ -791,6 +791,53 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Record observed responsiveness and any input-to-display timings separately from
     the CPU-only benchmark; do not interpret its result as a frame-rate measurement.
 
+### GF-MAN-ANN-002E - Brush Strokes Keep Every Mouse Position
+
+- Priority: `P1`
+- Run on: `ENV-A`, `ENV-B`; include a monitor left of or above the primary
+  (negative virtual-desktop coordinates).
+- Prerequisite: an `x64-release-pdb` diagnostic log build (`GREENFLAME_ENABLE_DEBUG_LOG=ON`; see "Diagnostic log build" in [testing.md](testing.md)).
+- Steps:
+  1. Delete `%TEMP%\greenflame-debug.log` if it exists.
+  2. Select the whole desktop. With Brush, draw fast loops for about 10 seconds on
+     the monitor with negative coordinates, then one stroke crossing every monitor.
+  3. Draw the same loops with a brush opacity below 100, and once with smoothing
+     `off`.
+  4. Mid-stroke, turn the mouse wheel, press `Ctrl` `+`/`-`, a tool hotkey,
+     `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+S`, `Ctrl+C`, `Ctrl+P`, `Ctrl+K`, `Ctrl+H`,
+     `Delete` and `Tab`, and right-click; press and release `Shift`, `Ctrl` and
+     `Alt`. Release the button, then repeat the keys.
+  5. Place a Text annotation and type. While typing, press `Ctrl+Z`, `Ctrl+Shift+Z`,
+     `Delete`, `Tab`, `Ctrl+C`/`X`/`V` and `Ctrl+B`/`I`/`U`, and try to change
+     color, font, size, opacity or smoothing.
+  6. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
+  7. Click once with Brush, then click again quickly (a double-click) and drag: the
+     second click starts a stroke. Repeat with Rectangle and Line.
+  8. Capture a region across two monitors and the whole desktop; save and copy.
+- Expected:
+  - Loops come out round, not as polygons; the stroke follows the cursor without
+    spikes at its start, its end or where a modifier key was pressed.
+  - Each brush stroke writes one `freehand` line to the log: `raw_points` is close to
+    the mouse report rate times the stroke duration, `gaps` is 0 or near it.
+    `fallbacks` counts messages whose point the mouse history did not hold. The
+    release adds one when Windows does not record the button-up point in that
+    history, so `fallbacks=1` on a stroke is expected; more than a few means the
+    history is unavailable (pen, touch or a remote session).
+  - A translucent stroke shows no darker dots or seams along it while drawing; the
+    committed stroke looks like the preview.
+  - While the button is held, none of the keys in step 4 act: size, color, opacity,
+    smoothing and tool stay; nothing is undone, saved, copied, pinned or deleted; no
+    help, wheel or captured-cursor toggle; no size label appears. After release they
+    all work. `Shift`, `Ctrl` and `Alt` add no stroke point and change nothing;
+    `Escape` cancels the stroke.
+  - While typing, undo/redo, Delete and `Ctrl+C`/`X`/`V` edit the text, Tab inserts a
+    tab and `Ctrl+B`/`I`/`U` toggle bold, italic and underline; no other style change
+    applies (color, font, size, opacity, smoothing) and no size label appears.
+  - A fast second click with an armed tool starts a stroke or shape. With no tool
+    armed, double-clicking a text annotation still opens it for editing.
+  - Escape leaves no stroke pixels behind; the new stroke draws normally.
+  - Cross-monitor and whole-desktop captures save and copy as before.
+
 ### GF-MAN-ANN-002D - Selection Dimming On Large Desktops
 
 - Priority: `P1`
@@ -807,11 +854,18 @@ unless a real end-to-end bug escapes into the Win32 shell:
      off-screen windows; compare against regular region selection.
   4. Compare equal gestures before/after with the same physical desktop extent.
      Record GPU rendering time separately from capture startup and compositor waits.
+  5. Offscreen pixel check, before and after a paint change: run
+     `greenflame_render_bench --layout jocelyn-desk --scenario steady --annotated
+     --dump-frame 120 FILE.bmp` from both builds, then `--diff` the two dumps. Repeat
+     with `--scenario brush` and `--scenario highlighter`.
 - Expected:
   - The selected pixels remain undimmed; all outside pixels and annotations receive
     the same dim exactly once, without seams, flashing or annotation opacity changes.
   - Fine screenshot details inside a selection retain nearest-neighbor sampling,
-    including on virtual desktops wider than 8192 physical pixels.
+    including on virtual desktops wider than 8192 physical pixels. So do dimmed
+    pixels outside it and committed annotations: every desktop-sized bitmap is
+    copied 1:1, with no linear-filter shift of 1 in a channel on wide desktops. In
+    step 5, a change that does not touch rendering shows 0 differing pixels.
   - Committed annotations are composited once in regular selection frames. Live
     drafts and lifted-window replacement retain their existing restore composition.
   - Cursor, toolbar and selection handles remain above the dim. Clipboard/save
