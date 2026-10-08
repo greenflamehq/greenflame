@@ -81,9 +81,10 @@ target_link_libraries(greenflame_tests PRIVATE
     GTest::gtest_main
     GTest::gmock
 )
-include(GoogleTest)
-gtest_discover_tests(greenflame_tests
-    DISCOVERY_MODE PRE_TEST
-    PROPERTIES
-        ENVIRONMENT_MODIFICATION "PATH=path_list_append:$<TARGET_RUNTIME_DLL_DIRS:greenflame_tests>"
+# One ctest entry for the whole binary. Per-test discovery (gtest_discover_tests)
+# started ~980 processes and took ~20 minutes; the binary runs in seconds.
+# gtest names each failing test in the output; ctest --output-on-failure shows it.
+add_test(NAME greenflame_tests COMMAND greenflame_tests --gtest_brief=1)
+set_tests_properties(greenflame_tests PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_append:$<TARGET_RUNTIME_DLL_DIRS:greenflame_tests>"
 )

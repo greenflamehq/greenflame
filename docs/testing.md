@@ -141,7 +141,9 @@ Run a subset via GoogleTest filters:
 build\x64-debug\bin\greenflame_tests.exe --gtest_filter="RectPx*"
 ```
 
-Prefer `ctest` for standard runs; use direct execution for local filtering.
+`ctest` registers `greenflame_tests` as one test that runs the whole binary (about 2 seconds), so a full
+`ctest` run is fast. When it fails, `--output-on-failure` prints GoogleTest's output, which names each
+failing test. Use direct execution to filter, since `ctest -R` matches only the whole-binary entry.
 
 ## Freehand CPU performance check (opt-in)
 
