@@ -773,6 +773,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Steps:
   1. Select a region. With Brush, click once, draw a short two-point stroke, then
      draw a continuous looping stroke for at least 15 seconds without releasing.
+     With Highlighter, click once without moving: the mark multiplies (tints) like
+     a stroke, not a flat color.
   2. Repeat with Highlighter, including a pause to straighten it, and with each
      tool's smoothing set to `off` and `smooth`. Change size and color between
      strokes; cancel a stroke with Escape and start another at the same point.
@@ -791,7 +793,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Record observed responsiveness and any input-to-display timings separately from
     the CPU-only benchmark; do not interpret its result as a frame-rate measurement.
 
-### GF-MAN-ANN-002E - Brush Strokes Keep Every Mouse Position
+### GF-MAN-ANN-002E - Brush And Highlighter Strokes Keep Every Mouse Position
 
 - Priority: `P1`
 - Run on: `ENV-A`, `ENV-B`; include a monitor left of or above the primary
@@ -803,6 +805,10 @@ unless a real end-to-end bug escapes into the Win32 shell:
      the monitor with negative coordinates, then one stroke crossing every monitor.
   3. Draw the same loops with a brush opacity below 100, and once with smoothing
      `off`.
+     Then draw the same loops with Highlighter at opacity 50, crossing an earlier
+     brush stroke, pressing and releasing `Shift`, `Ctrl` and `Alt` mid-stroke. End
+     one highlighter stroke by flicking the mouse as the button comes up. Pause
+     mid-stroke to straighten another, then move and release.
   4. Mid-stroke, turn the mouse wheel, press `Ctrl` `+`/`-`, a tool hotkey,
      `Ctrl+Z`, `Ctrl+Shift+Z`, `Ctrl+S`, `Ctrl+C`, `Ctrl+P`, `Ctrl+K`, `Ctrl+H`,
      `Delete` and `Tab`, and right-click; press and release `Shift`, `Ctrl` and
@@ -817,14 +823,20 @@ unless a real end-to-end bug escapes into the Win32 shell:
 - Expected:
   - Loops come out round, not as polygons; the stroke follows the cursor without
     spikes at its start, its end or where a modifier key was pressed.
-  - Each brush stroke writes one `freehand` line to the log: `raw_points` is close to
-    the mouse report rate times the stroke duration, `gaps` is 0 or near it.
+  - Each brush or highlighter stroke writes one `freehand` line to the log
+    (`brush stroke` or `highlighter stroke`): `raw_points` is close to the mouse
+    report rate times the stroke duration, `gaps` is 0 or near it. A straightened
+    highlighter logs `raw_points=2`; leave it out of the rate check.
     `fallbacks` counts messages whose point the mouse history did not hold. The
     release adds one when Windows does not record the button-up point in that
     history, so `fallbacks=1` on a stroke is expected; more than a few means the
     history is unavailable (pen, touch or a remote session).
   - A translucent stroke shows no darker dots or seams along it while drawing; the
     committed stroke looks like the preview.
+  - The highlighter keeps up with the cursor, shows no darker spots where it crosses
+    itself, and tints the brush stroke under it. A flick-release ends the stroke
+    where the button came up, not past it. A straightened highlighter follows the
+    cursor from its start point and ends at the release point.
   - While the button is held, none of the keys in step 4 act: size, color, opacity,
     smoothing and tool stay; nothing is undone, saved, copied, pinned or deleted; no
     help, wheel or captured-cursor toggle; no size label appears. After release they

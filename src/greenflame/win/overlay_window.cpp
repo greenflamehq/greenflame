@@ -1648,27 +1648,32 @@ core::SnapEdges OverlayWindow::Collect_visible_snap_edges() const {
 
 core::PointPx
 OverlayWindow::Refresh_pointer_for_modifier_keys(core::OverlayModifierState mods) {
-    if (!Is_brush_stroke_active()) {
+    if (!Is_freehand_stroke_active()) {
         return Update_pointer_state_from_current_input(mods);
     }
     // Mid-stroke, a modifier key adds no stroke point: the cursor position now is
     // newer than mouse history not yet consumed, so it would land out of order.
     // Re-send the last consumed point with the new modifiers.
     core::PointPx const origin = Client_origin_screen(hwnd_);
-    core::PointPx const screen = brush_input_.last_consumed.screen;
+    core::PointPx const screen = stroke_input_.last_consumed.screen;
     core::PointPx const cursor_client = {screen.x - origin.x, screen.y - origin.y};
     Apply_action(controller_.On_pointer_move(mods, cursor_client, screen, std::nullopt,
                                              {}, std::nullopt, 0, 0));
     return cursor_client;
 }
 
-bool OverlayWindow::Is_brush_stroke_active() const {
-    return controller_.Active_annotation_tool() == core::AnnotationToolId::Freehand &&
-           !controller_.Draft_freehand_points().empty();
+bool OverlayWindow::Is_freehand_tool_armed() const {
+    std::optional<core::AnnotationToolId> const tool =
+        controller_.Active_annotation_tool();
+    return tool == core::AnnotationToolId::Freehand ||
+           tool == core::AnnotationToolId::Highlighter;
 }
 
-core::PointPx
-OverlayWindow::Feed_brush_stroke_history(core::OverlayModifierState mods) {
+bool OverlayWindow::Is_freehand_stroke_active() const {
+    return Is_freehand_tool_armed() && !controller_.Draft_freehand_points().empty();
+}
+
+core::PointPx OverlayWindow::Feed_stroke_history(core::OverlayModifierState mods) {
     GREENFLAME_PROFILE_FUNCTION();
 
     core::MouseMoveSample const message = Current_message_sample();
@@ -1686,9 +1691,9 @@ OverlayWindow::Feed_brush_stroke_history(core::OverlayModifierState mods) {
     if (count < 0) {
         // No history for this message (pen or touch input, a remote session, or a
         // point the buffer no longer holds): take the message point alone.
-        ++brush_input_.fallbacks;
+        ++stroke_input_.fallbacks;
         result.newest = message;
-        if (message.screen != brush_input_.last_consumed.screen) {
+        if (message.screen != stroke_input_.last_consumed.screen) {
             result.points_client.push_back(
                 {message.screen.x - origin.x, message.screen.y - origin.y});
         }
@@ -1699,14 +1704,14 @@ OverlayWindow::Feed_brush_stroke_history(core::OverlayModifierState mods) {
              std::span(history).first(static_cast<size_t>(count))) {
             samples.push_back({.screen = {entry.x, entry.y}, .time_ms = entry.time});
         }
-        result =
-            core::Collect_new_mouse_points(samples, brush_input_.last_consumed, origin);
+        result = core::Collect_new_mouse_points(samples, stroke_input_.last_consumed,
+                                                origin);
         if (result.gap) {
-            ++brush_input_.gaps;
+            ++stroke_input_.gaps;
         }
-        brush_input_.history_points += result.points_client.size();
+        stroke_input_.history_points += result.points_client.size();
     }
-    brush_input_.last_consumed = result.newest;
+    stroke_input_.last_consumed = result.newest;
 
     // One controller call per point, one repaint request per message.
     core::OverlayAction action = core::OverlayAction::None;
@@ -1722,14 +1727,17 @@ OverlayWindow::Feed_brush_stroke_history(core::OverlayModifierState mods) {
     return {result.newest.screen.x - origin.x, result.newest.screen.y - origin.y};
 }
 
-void OverlayWindow::Log_brush_stroke_input() const {
+void OverlayWindow::Log_stroke_input() const {
     GREENFLAME_LOG_WRITE(
-        L"freehand", std::wstring(L"brush stroke: raw_points=") +
+        L"freehand", std::wstring(controller_.Active_annotation_tool() ==
+                                          core::AnnotationToolId::Highlighter
+                                      ? L"highlighter stroke: raw_points="
+                                      : L"brush stroke: raw_points=") +
                          std::to_wstring(controller_.Draft_freehand_points().size()) +
                          L" history_points=" +
-                         std::to_wstring(brush_input_.history_points) + L" gaps=" +
-                         std::to_wstring(brush_input_.gaps) + L" fallbacks=" +
-                         std::to_wstring(brush_input_.fallbacks));
+                         std::to_wstring(stroke_input_.history_points) + L" gaps=" +
+                         std::to_wstring(stroke_input_.gaps) + L" fallbacks=" +
+                         std::to_wstring(stroke_input_.fallbacks));
 }
 
 bool OverlayWindow::Handle_tool_size_delta(int32_t delta_steps) {
@@ -3149,16 +3157,15 @@ LRESULT OverlayWindow::On_l_button_down() {
     bool const ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     core::OverlayModifierState mods{shift, ctrl, alt};
-    // A brush stroke starts at the press message's point, where its mouse history
-    // starts. The cursor may already have moved on.
+    // A brush or highlighter stroke starts at the press message's point, where its
+    // mouse history starts. The cursor may already have moved on.
     core::MouseMoveSample const press_message = Current_message_sample();
-    bool const brush_tool =
-        controller_.Active_annotation_tool() == core::AnnotationToolId::Freehand;
     core::PointPx const press_origin = Client_origin_screen(hwnd_);
     core::PointPx const cursor_client =
-        brush_tool ? core::PointPx{press_message.screen.x - press_origin.x,
-                                   press_message.screen.y - press_origin.y}
-                   : cur;
+        Is_freehand_tool_armed()
+            ? core::PointPx{press_message.screen.x - press_origin.x,
+                            press_message.screen.y - press_origin.y}
+            : cur;
     core::PointPx const cursor_screen = Get_cursor_pos_px();
     RECT wr{};
     GetWindowRect(hwnd_, &wr);
@@ -3188,8 +3195,8 @@ LRESULT OverlayWindow::On_l_button_down() {
     Apply_action(controller_.On_primary_press(
         mods, cursor_client, cursor_screen, win_handle, monitor_idx, win_rect, vdesk,
         Collect_visible_snap_edges(), wr.left, wr.top, window_full_capture_available));
-    if (Is_brush_stroke_active()) {
-        brush_input_ = BrushStrokeInput{.last_consumed = press_message};
+    if (Is_freehand_stroke_active()) {
+        stroke_input_ = StrokeInput{.last_consumed = press_message};
     }
     if (controller_.Has_active_annotation_gesture() ||
         controller_.Has_active_text_edit()) {
@@ -3286,8 +3293,8 @@ LRESULT OverlayWindow::On_mouse_move() {
     bool const primary_down = (GetKeyState(VK_LBUTTON) & 0x8000) != 0;
     core::OverlayModifierState mods{shift, ctrl, alt, primary_down};
     core::PointPx const cursor_client =
-        Is_brush_stroke_active() ? Feed_brush_stroke_history(mods)
-                                 : Update_pointer_state_from_current_input(mods);
+        Is_freehand_stroke_active() ? Feed_stroke_history(mods)
+                                    : Update_pointer_state_from_current_input(mods);
     if (highlighter_straighten_pending_) {
         int32_t const deadzone =
             config_ != nullptr ? config_->highlighter_pause_straighten_deadzone_px : 0;
@@ -3442,14 +3449,14 @@ LRESULT OverlayWindow::On_l_button_up() {
     Cancel_highlighter_straighten_pending();
     core::OverlayModifierState mods{};
     mods.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
-    // A brush stroke ends at the release message's point: the cursor may already
-    // have moved on, and a point past it would land after the stroke's history.
+    // A brush or highlighter stroke ends at the release message's point: the cursor may
+    // already have moved on, and a point past it would land after the stroke's history.
     core::PointPx release_client = Get_client_cursor_pos_px(hwnd_);
-    if (Is_brush_stroke_active()) {
+    if (Is_freehand_stroke_active()) {
         core::OverlayModifierState stroke_mods = mods;
         stroke_mods.primary_down = true;
-        release_client = Feed_brush_stroke_history(stroke_mods);
-        Log_brush_stroke_input();
+        release_client = Feed_stroke_history(stroke_mods);
+        Log_stroke_input();
     }
     Apply_action(controller_.On_primary_release(mods, release_client));
     if (controller_.Has_active_text_edit()) {
@@ -4251,7 +4258,10 @@ LRESULT OverlayWindow::On_paint() {
                     draft_text_view->annotation->visual_bounds;
             }
         } else if (!input.draft_freehand_style.has_value() ||
-                   input.draft_freehand_points.size() == 1) {
+                   (input.draft_freehand_points.size() == 1 &&
+                    input.draft_freehand_tip_shape != core::FreehandTipShape::Square)) {
+            // A one-point brush stroke draws as its committed form. A one-point
+            // highlighter stays on the freehand draft path, which multiplies.
             input.draft_annotation = paint_draft_annotation;
         }
         // Suppress selection handles while a text edit is active (consistent with

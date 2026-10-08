@@ -196,9 +196,8 @@ bool D2DOverlayResources::Create_device(IDXGIAdapter *adapter,
     hwnd_rt->SetAntialiasMode(D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
 
     // 3. Effects shared with the rest of the pipeline (multiply for highlighter
-    // tinting, source-over composites for highlighter base / draft mask merge).
+    // tinting, source-over composite for the highlighter base).
     multiply_effect.Reset();
-    draft_stroke_composite_effect.Reset();
     base_composite_effect.Reset();
     Microsoft::WRL::ComPtr<ID2D1Effect> effect;
     if (SUCCEEDED(hwnd_rt->CreateEffect(CLSID_D2D1ArithmeticComposite, &effect))) {
@@ -206,12 +205,6 @@ bool D2DOverlayResources::Create_device(IDXGIAdapter *adapter,
         D2D1_VECTOR_4F const coeffs = {1.0f, 0.0f, 0.0f, 0.0f};
         (void)effect->SetValue(D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
         multiply_effect = std::move(effect);
-    }
-    if (SUCCEEDED(hwnd_rt->CreateEffect(
-            CLSID_D2D1Composite,
-            draft_stroke_composite_effect.ReleaseAndGetAddressOf()))) {
-        // Default SOURCE_OVER: combines same-colored premultiplied coverage
-        // masks without seam darkening.
     }
     if (SUCCEEDED(hwnd_rt->CreateEffect(
             CLSID_D2D1Composite, base_composite_effect.ReleaseAndGetAddressOf()))) {
@@ -592,7 +585,8 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
         }
     }
 
-    // draft_stroke_rt: transparent BGRA premultiplied (composited live freehand draft).
+    // draft_stroke_rt: BGRA premultiplied. Holds live_base during a freehand stroke,
+    // and highlighter masks while annotations are rebuilt.
     {
         D2D1_PIXEL_FORMAT pf{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED};
         D2D1_SIZE_F const size_f =
@@ -605,7 +599,7 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
         }
     }
 
-    // draft_stroke_body_rt: transparent BGRA premultiplied (cached smoothed body).
+    // draft_stroke_body_rt: transparent BGRA premultiplied (freehand stroke body).
     {
         D2D1_PIXEL_FORMAT pf{DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED};
         D2D1_SIZE_F const size_f =
@@ -637,15 +631,7 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
 
     annotations_valid = false;
     frozen_valid = false;
-    draft_stroke_point_count = 0;
-    draft_stroke_body_raw_point_count = 0;
-    draft_stroke_body_point_count = 0;
-    draft_stroke_stable_tail_start_index = 0;
-    draft_stroke_style.reset();
-    draft_stroke_tip_shape = core::FreehandTipShape::Round;
-    draft_stroke_smoothing_mode = core::FreehandSmoothingMode::Off;
-    draft_stroke_bitmap_uses_cached_body = false;
-    round_draft = {};
+    freehand_draft = {};
     return true;
 }
 
@@ -697,17 +683,8 @@ void D2DOverlayResources::Release_device_resources() {
     draft_stroke_bitmap.Reset();
     draft_stroke_body_bitmap.Reset();
     base_composite_bitmap.Reset();
-    draft_stroke_point_count = 0;
-    draft_stroke_body_raw_point_count = 0;
-    draft_stroke_body_point_count = 0;
-    draft_stroke_stable_tail_start_index = 0;
-    draft_stroke_style.reset();
-    draft_stroke_tip_shape = core::FreehandTipShape::Round;
-    draft_stroke_smoothing_mode = core::FreehandSmoothingMode::Off;
-    draft_stroke_bitmap_uses_cached_body = false;
-    round_draft = {};
+    freehand_draft = {};
     multiply_effect.Reset();
-    draft_stroke_composite_effect.Reset();
     base_composite_effect.Reset();
     solid_brush.Reset();
     round_cap_style.Reset();

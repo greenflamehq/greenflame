@@ -128,16 +128,18 @@ class OverlayWindow final {
     void Refresh_cursor();
     bool Refresh_hover_handle();
     [[nodiscard]] bool Handle_tool_size_delta(int32_t delta_steps);
-    // Brush strokes take every mouse position Windows recorded, not one per handled
-    // WM_MOUSEMOVE (GetMouseMovePointsEx). True while a brush stroke is drawing.
-    [[nodiscard]] bool Is_brush_stroke_active() const;
-    // Pointer refresh for a Shift, Ctrl or Alt change. During a brush stroke it adds
+    // True when the brush or the highlighter is the armed tool.
+    [[nodiscard]] bool Is_freehand_tool_armed() const;
+    // Brush and highlighter strokes take every mouse position Windows recorded, not one
+    // per handled WM_MOUSEMOVE (GetMouseMovePointsEx). True while one is drawing.
+    [[nodiscard]] bool Is_freehand_stroke_active() const;
+    // Pointer refresh for a Shift, Ctrl or Alt change. During a freehand stroke it adds
     // no stroke point. Returns the cursor in client pixels.
     core::PointPx Refresh_pointer_for_modifier_keys(core::OverlayModifierState mods);
     // Feeds the positions recorded since the last one consumed, up to the current
     // message's, to the controller. Returns the newest point in client pixels.
-    core::PointPx Feed_brush_stroke_history(core::OverlayModifierState mods);
-    void Log_brush_stroke_input() const;
+    core::PointPx Feed_stroke_history(core::OverlayModifierState mods);
+    void Log_stroke_input() const;
     void Show_tool_size_overlay(int32_t step);
     void Clear_transient_center_label(bool repaint);
     [[nodiscard]] bool Read_clipboard_text(std::wstring &out) const;
@@ -248,13 +250,13 @@ class OverlayWindow final {
         int scroll_delta_remainder = 0;
     };
 
-    struct BrushStrokeInput final {
+    struct StrokeInput final {
         core::MouseMoveSample last_consumed = {};
         size_t history_points = 0; // points taken from the mouse history
         size_t gaps = 0;           // history overflowed: movement was lost
         size_t fallbacks = 0;      // history unavailable: message point only
     };
-    BrushStrokeInput brush_input_ = {};
+    StrokeInput stroke_input_ = {};
 
     bool highlighter_straighten_pending_ = false;
     core::PointPx highlighter_straighten_ref_pos_ = {};
