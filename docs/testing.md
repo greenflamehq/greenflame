@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-10-06
+last_updated: 2026-10-08
 tags:
   - tests
   - ctest
@@ -143,7 +143,8 @@ build\x64-debug\bin\greenflame_tests.exe --gtest_filter="RectPx*"
 
 `ctest` registers `greenflame_tests` as one test that runs the whole binary (about 2 seconds), so a full
 `ctest` run is fast. When it fails, `--output-on-failure` prints GoogleTest's output, which names each
-failing test. Use direct execution to filter, since `ctest -R` matches only the whole-binary entry.
+failing test. A crash or hang shows up as the last `[ RUN ]` line, which names the test. Use direct
+execution to filter, since `ctest -R` matches only the whole-binary entry.
 
 ## Freehand CPU performance check (opt-in)
 
