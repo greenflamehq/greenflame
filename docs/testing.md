@@ -218,6 +218,9 @@ virtual desktop.
 - `--straighten-at K`: highlighter only. From frame K the stroke is its first and
   newest point, as after a pause-to-straighten. Dump frame F with `--straighten-at K`
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
+- `--dump-frame K FILE.bmp`: writes frame K of run 1. For a freehand scenario,
+  K equal to `--frames` writes the release frame, and `FILE.bmp.rebuild.bmp` the same
+  frame with the annotations rebuilt from scratch (as after undo and redo).
 - `--frames N` (default 300, after 5 warm-up frames), `--repeat N`, `--csv FILE`.
 
 Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 ms and
