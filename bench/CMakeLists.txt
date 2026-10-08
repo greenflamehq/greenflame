@@ -55,4 +55,47 @@ if(BUILD_TESTING)
     set_tests_properties(greenflame_render_bench_diff_smoke PROPERTIES
         FIXTURES_REQUIRED greenflame_bench_smoke
     )
+
+    # Regression: a short stroke drawn and committed first must leave nothing behind
+    # in the next stroke's draft. The next stroke's frame must match the same frame
+    # when the short stroke was committed without ever being drawn. The short strokes
+    # are long enough to feed the smoother but too short for a final point, so no body
+    # is drawn (a drawn body's commit reuse may round its own pixels differently).
+    # The brush case runs with --annotated: a committed highlighter rebuilds the
+    # annotations through the highlighter path.
+    set(greenflame_dab_points_highlighter 7)
+    set(greenflame_dab_points_brush 5)
+    foreach(greenflame_dab_scenario highlighter brush)
+        set(greenflame_dab_args
+            --adapter warp --layout single-1080 --scenario ${greenflame_dab_scenario}
+            --annotated --points-per-frame 16 --frames 10
+            --dab ${greenflame_dab_points_${greenflame_dab_scenario}})
+        set(greenflame_dab_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/dab_${greenflame_dab_scenario}.bmp")
+        set(greenflame_dab_fresh_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/dab_${greenflame_dab_scenario}_fresh.bmp")
+        add_test(
+            NAME greenflame_render_bench_dab_${greenflame_dab_scenario}_drawn
+            COMMAND greenflame_render_bench ${greenflame_dab_args}
+                --dump-frame 3 "${greenflame_dab_bmp}"
+        )
+        add_test(
+            NAME greenflame_render_bench_dab_${greenflame_dab_scenario}_fresh
+            COMMAND greenflame_render_bench ${greenflame_dab_args} --dab-no-draft
+                --dump-frame 3 "${greenflame_dab_fresh_bmp}"
+        )
+        set_tests_properties(
+            greenflame_render_bench_dab_${greenflame_dab_scenario}_drawn
+            greenflame_render_bench_dab_${greenflame_dab_scenario}_fresh
+            PROPERTIES FIXTURES_SETUP greenflame_bench_dab_${greenflame_dab_scenario}
+        )
+        add_test(
+            NAME greenflame_render_bench_dab_${greenflame_dab_scenario}_diff
+            COMMAND greenflame_render_bench
+                --diff "${greenflame_dab_bmp}" "${greenflame_dab_fresh_bmp}"
+        )
+        set_tests_properties(greenflame_render_bench_dab_${greenflame_dab_scenario}_diff
+            PROPERTIES FIXTURES_REQUIRED greenflame_bench_dab_${greenflame_dab_scenario}
+        )
+    endforeach()
 endif()

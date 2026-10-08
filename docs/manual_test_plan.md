@@ -817,6 +817,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
      `Delete`, `Tab`, `Ctrl+C`/`X`/`V` and `Ctrl+B`/`I`/`U`, and try to change
      color, font, size, opacity or smoothing.
   6. Mid-stroke, press `Escape`; start a new stroke at once at the same point.
+     With Highlighter, and with Brush over an earlier highlighter, click once,
+     release, then at once draw a fast stroke from the same point.
   7. Click once with Brush, then click again quickly (a double-click) and drag: the
      second click starts a stroke. Repeat with Rectangle and Line.
   8. Capture a region across two monitors and the whole desktop; save and copy.
@@ -847,7 +849,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
     applies (color, font, size, opacity, smoothing) and no size label appears.
   - A fast second click with an armed tool starts a stroke or shape. With no tool
     armed, double-clicking a text annotation still opens it for editing.
-  - Escape leaves no stroke pixels behind; the new stroke draws normally.
+  - Escape leaves no stroke pixels behind; the new stroke draws normally. A fast
+    stroke right after a click draws from its first point while it is drawn.
   - Cross-monitor and whole-desktop captures save and copy as before.
 
 ### GF-MAN-ANN-002D - Selection Dimming On Large Desktops

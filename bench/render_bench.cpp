@@ -173,6 +173,8 @@ struct Args final {
     int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
     bool opacity_given = false;
     int straighten_at = -1;
+    int dab_points = 0;        // --dab N
+    bool dab_no_draft = false; // --dab-no-draft
     int frames = kDefaultFrames;
     bool frames_given = false;
     int repeat = 1;
@@ -202,6 +204,9 @@ void Print_usage() {
         "brush, 33 highlighter)\n"
         "  --straighten-at K            highlighter: from frame K the stroke is its "
         "first and newest point\n"
+        "  --dab N [--dab-no-draft]     freehand: first draw and commit an N-point "
+        "stroke at the same start, N at most --points-per-frame (--dab-no-draft: "
+        "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
         "  --frames N                   measured frames per run (default 300)\n"
@@ -293,6 +298,12 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             if (!v || *v > core::StrokeStyle::kMaxOpacityPercent) return std::nullopt;
             args.opacity_percent = *v;
             args.opacity_given = true;
+        } else if (key == "--dab") {
+            std::optional<int> const v = next_int(1);
+            if (!v) return std::nullopt;
+            args.dab_points = *v;
+        } else if (key == "--dab-no-draft") {
+            args.dab_no_draft = true;
         } else if (key == "--straighten-at") {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
@@ -776,17 +787,66 @@ struct RunContext final {
 };
 
 // Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
+// The annotation the tool commits for these draft points: smoothed when smoothing is
+// on, raw when off or straightened.
+core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
+                                  D2DPaintInput const &input, Args const &args,
+                                  bool straightened, uint64_t id) {
+    core::FreehandStrokeAnnotation stroke{
+        .points =
+            args.smooth && !straightened
+                ? core::Smooth_freehand_points(raw, core::FreehandSmoothingMode::Smooth,
+                                               input.draft_freehand_style->width_px)
+                : std::vector<core::PointPx>(raw.begin(), raw.end()),
+        .style = *input.draft_freehand_style,
+        .freehand_tip_shape = input.draft_freehand_tip_shape,
+    };
+    return core::Annotation{.id = id, .data = stroke};
+}
+
 std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                                    Args const &args, int run, bool dump_here) {
     D2DPaintInput input{};
     input.monitor_rects_client = *ctx.monitors_client;
     Set_scenario_base(scenario, ctx.width, ctx.height, args, input);
-    std::vector<core::Annotation> const annotations =
+    std::vector<core::Annotation> annotations =
         args.annotated ? Make_bench_annotations(ctx.width, ctx.height)
                        : std::vector<core::Annotation>{};
     input.annotations = annotations;
     Rebuild_annotations_bitmap(*ctx.res, annotations);
     ctx.res->frozen_valid = false;
+    // --dab N: a short stroke of the same tool, from the same start point, drawn and
+    // committed before the measured stroke (as with a quick click then a fast stroke).
+    // --dab-no-draft commits it without drawing it, so the measured stroke starts from
+    // a fresh draft: the two runs' frames must match.
+    if (Is_freehand(scenario) && args.dab_points > 0) {
+        ScenarioState dab_state;
+        D2DPaintInput dab_input = input;
+        Fill_frame_input(scenario, 0, args.frames, ctx.width, ctx.height, args,
+                         dab_state, dab_input);
+        dab_state.points.resize(
+            std::min(dab_state.points.size(), static_cast<size_t>(args.dab_points)));
+        bool ok = true;
+        if (!args.dab_no_draft) {
+            dab_input.draft_freehand_points = dab_state.points;
+            Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
+                                  ctx.height);
+            ok = Paint_d2d_frame(*ctx.res, dab_input, ctx.width, ctx.height, nullptr);
+        }
+        annotations.push_back(
+            Committed_stroke(dab_state.points, input, args, /*straightened=*/false,
+                             static_cast<uint64_t>(annotations.size() + 1)));
+        input.annotations = annotations;
+        Rebuild_annotations_bitmap(*ctx.res, annotations);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        if (ok && !args.dab_no_draft) {
+            ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+        }
+        if (!ok) {
+            Print("paint failed (device lost?)\n");
+            return std::nullopt;
+        }
+    }
     ScenarioState state;
     std::vector<FrameSample> samples;
     samples.reserve(static_cast<size_t>(args.frames));
@@ -867,19 +927,12 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     if (Is_freehand(scenario) && !input.draft_freehand_points.empty()) {
         std::span<const core::PointPx> const raw = input.draft_freehand_points;
         bool const straightened = raw.size() == 2 && args.straighten_at >= 0;
-        core::FreehandStrokeAnnotation stroke{
-            .points = args.smooth && !straightened
-                          ? core::Smooth_freehand_points(
-                                raw, core::FreehandSmoothingMode::Smooth,
-                                input.draft_freehand_style->width_px)
-                          : std::vector<core::PointPx>(raw.begin(), raw.end()),
-            .style = *input.draft_freehand_style,
-            .freehand_tip_shape = input.draft_freehand_tip_shape,
-        };
-        commit_points = stroke.points.size();
         std::vector<core::Annotation> committed = annotations;
-        committed.push_back(core::Annotation{
-            .id = static_cast<uint64_t>(annotations.size() + 1), .data = stroke});
+        committed.push_back(
+            Committed_stroke(raw, input, args, straightened,
+                             static_cast<uint64_t>(annotations.size() + 1)));
+        commit_points = std::get<core::FreehandStrokeAnnotation>(committed.back().data)
+                            .points.size();
         input.annotations = committed;
         input.draft_freehand_points = {};
         ID3D11DeviceContext *const context = ctx.queries->context.Get();
@@ -1014,8 +1067,13 @@ int Run_render_bench(Args const &args) {
         return static_cast<int>(BenchExit::BadArgs);
     }
     // --dump-frame equal to --frames dumps a freehand scenario's release frame.
-    if (args.dump_frame > args.frames) {
-        Print("--dump-frame {} is past --frames {}\n", args.dump_frame, args.frames);
+    std::string_view const dump_scenario =
+        args.scenario == "all" ? std::string_view("select") : scenarios.front();
+    if (args.dump_frame > args.frames ||
+        (args.dump_frame == args.frames && !Is_freehand(dump_scenario))) {
+        Print("--dump-frame {} is past --frames {} (equal is the release frame, brush "
+              "or highlighter only)\n",
+              args.dump_frame, args.frames);
         return static_cast<int>(BenchExit::BadArgs);
     }
 
@@ -1057,8 +1115,6 @@ int Run_render_bench(Args const &args) {
     RunContext ctx{
         &res,          &queries,   &*layout,    &monitors_client,
         &adapter_name, vd.Width(), vd.Height(), csv.is_open() ? &csv : nullptr};
-    std::string_view const dump_scenario =
-        args.scenario == "all" ? std::string_view("select") : scenarios.front();
     for (std::string_view const scenario : scenarios) {
         std::vector<double> p95s;
         for (int run = 0; run < args.repeat; ++run) {

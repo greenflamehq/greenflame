@@ -2309,7 +2309,11 @@ void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
     bool const has_dc = SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)));
     bool const can_multiply = has_dc && res.multiply_effect && res.screenshot;
-    if (!has_dc || (square && !can_multiply)) {
+    // The mask failed to record while there is a live end: draw plainly rather than
+    // multiply the body alone and drop the end.
+    bool const live_mask_missing = square && live != nullptr && !live->square_mask &&
+                                   (!live->provisional.empty() || !live->tail.empty());
+    if (!has_dc || (square && !can_multiply) || live_mask_missing) {
         // Plain source-over at the style opacity.
         if (res.draft_stroke_body_bitmap) {
             rt->DrawBitmap(res.draft_stroke_body_bitmap.Get(), nullptr, opacity);
@@ -2408,8 +2412,15 @@ void Composite_freehand_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources 
     rt->PopAxisAlignedClip();
 }
 
+// Starts a new stroke from nothing. Unconditional, unlike Clear_draft_stroke_surface:
+// whatever path ended the last stroke (a commit only marks it inactive, so the commit
+// can still reuse its body), no counter or pixel of it may carry over.
 void Reset_freehand_draft(D2DOverlayResources &res, D2DPaintInput const &input) {
-    Clear_draft_stroke_surface(res);
+    res.freehand_draft = {};
+    res.draft_stroke_bitmap.Reset();
+    res.draft_stroke_body_bitmap.Reset();
+    Clear_bitmap_target(res.draft_stroke_rt.Get());
+    Clear_bitmap_target(res.draft_stroke_body_rt.Get());
     D2DOverlayResources::FreehandDraftState &state = res.freehand_draft;
     state.active = true;
     state.style = *input.draft_freehand_style;
