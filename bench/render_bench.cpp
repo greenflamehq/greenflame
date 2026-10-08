@@ -786,7 +786,6 @@ struct RunContext final {
     std::ofstream *csv = nullptr;
 };
 
-// Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
 // The annotation the tool commits for these draft points: smoothed when smoothing is
 // on, raw when off or straightened.
 core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
@@ -804,6 +803,7 @@ core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
     return core::Annotation{.id = id, .data = stroke};
 }
 
+// Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
 std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                                    Args const &args, int run, bool dump_here) {
     D2DPaintInput input{};
@@ -1074,6 +1074,17 @@ int Run_render_bench(Args const &args) {
         Print("--dump-frame {} is past --frames {} (equal is the release frame, brush "
               "or highlighter only)\n",
               args.dump_frame, args.frames);
+        return static_cast<int>(BenchExit::BadArgs);
+    }
+
+    // --dab draws its short stroke from the first frame's points.
+    if (args.dab_points > args.points_per_frame) {
+        Print("--dab {} is past --points-per-frame {}\n", args.dab_points,
+              args.points_per_frame);
+        return static_cast<int>(BenchExit::BadArgs);
+    }
+    if (args.dab_no_draft && args.dab_points == 0) {
+        Print("--dab-no-draft needs --dab N\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
 
