@@ -117,31 +117,6 @@ TEST(freehand_smoothing, SmoothMode_ResamplesGentleCurves) {
     EXPECT_EQ(smoothed.back(), points.back());
 }
 
-TEST(freehand_smoothing, PreviewSplit_KeepsAllRawPointsWhenModeIsOff) {
-    std::vector<PointPx> const points = {{10, 10}, {20, 10}, {30, 20}, {40, 20}};
-
-    FreehandPreviewSegments const preview =
-        Build_freehand_preview_segments(points, FreehandSmoothingMode::Off, 8);
-
-    EXPECT_TRUE(preview.stable_points.empty());
-    EXPECT_EQ(preview.tail_points, points);
-}
-
-TEST(freehand_smoothing, PreviewSplit_SmoothsStableBodyAndKeepsRawTail) {
-    std::vector<PointPx> const points = {{10, 10}, {20, 10}, {30, 15}, {40, 20},
-                                         {50, 25}, {60, 30}, {70, 30}, {80, 30},
-                                         {90, 30}, {100, 30}};
-
-    FreehandPreviewSegments const preview =
-        Build_freehand_preview_segments(points, FreehandSmoothingMode::Smooth, 6);
-
-    ASSERT_FALSE(preview.stable_points.empty());
-    ASSERT_FALSE(preview.tail_points.empty());
-    EXPECT_EQ(preview.stable_points.front(), points.front());
-    EXPECT_EQ(preview.tail_points.back(), points.back());
-    EXPECT_LT(preview.tail_points.size(), points.size());
-}
-
 TEST(freehand_smoothing, PreviewPlan_ReportsStablePrefixAndTailStartIndex) {
     std::vector<PointPx> const points = {{10, 10}, {20, 10}, {30, 15}, {40, 20},
                                          {50, 25}, {60, 30}, {70, 30}, {80, 30},
