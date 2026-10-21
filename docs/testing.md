@@ -221,6 +221,11 @@ virtual desktop.
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
 - `--diagonal` (freehand): the points run from the selection's top-left to its
   bottom-right instead of a wave. With `--straighten-at`, the bar is a long diagonal.
+- `--arrow` (line): the line has an arrow head. `--flat` (line): it runs left to
+  right along the selection's middle row. `--line-dynamic` (line): the frozen
+  frame reads stale every frame, so the draft takes the dynamic path instead of
+  recompositing around itself; the two runs' frames must match at tolerance 0
+  (`ctest` runs this on WARP with a diagonal and a flat arrow).
 - `--lifted` (needs `--annotated`): a lifted window capture with its own pixels shown
   over the selection, as a Ctrl-click window selection does. With
   `--lifted-as-screenshot` instead, there is no lifted window and the screenshot
@@ -284,8 +289,9 @@ It reports the frame interval p50/p95 and fps of steady frames for two arrangeme
    (`nvidia-smi -q -d PERFORMANCE`); numbers from different sessions do not compare.
 3. Check pixels: `--scenario <s> --dump-frame 150 base.bmp` in one tree and
    `--dump-frame 150 new.bmp` in the other, then
-   `--diff base.bmp new.bmp [--tolerance T]`. It exits non-zero when any channel of
-   any pixel differs by more than T (default 0).
+   `--diff base.bmp new.bmp [--tolerance T] [--max-pixels N]`. It exits non-zero
+   when more than N pixels (default 0) have a channel that differs by more than T
+   (default 0).
 4. Run the present probe once per session.
 
 Interactive coverage is `GF-MAN-PERF-001` in [manual_test_plan.md](manual_test_plan.md).

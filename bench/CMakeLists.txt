@@ -99,6 +99,77 @@ if(BUILD_TESTING)
         )
     endforeach()
 
+    # A committed highlighter rebuilt from scratch (undo, redo) draws its mask in
+    # pieces, as the live draft does. Its frame must match the release frame, which
+    # reuses the draft's body, but for a few edge pixels at piece joins (2-3 now). One
+    # geometry for the whole stroke (the old way) differs on about 10,000 edge pixels.
+    set(greenflame_rebuild_max_pixels 100)
+    foreach(greenflame_rebuild_smooth on off)
+        set(greenflame_rebuild_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/rebuild_${greenflame_rebuild_smooth}.bmp")
+        add_test(
+            NAME greenflame_render_bench_rebuild_${greenflame_rebuild_smooth}
+            COMMAND greenflame_render_bench
+                --adapter warp --layout single-1080 --scenario highlighter --annotated
+                --smooth ${greenflame_rebuild_smooth} --points-per-frame 16 --frames 10
+                --dump-frame 10 "${greenflame_rebuild_bmp}"
+        )
+        set_tests_properties(greenflame_render_bench_rebuild_${greenflame_rebuild_smooth}
+            PROPERTIES FIXTURES_SETUP greenflame_bench_rebuild_${greenflame_rebuild_smooth}
+        )
+        add_test(
+            NAME greenflame_render_bench_rebuild_diff_${greenflame_rebuild_smooth}
+            COMMAND greenflame_render_bench
+                --diff "${greenflame_rebuild_bmp}" "${greenflame_rebuild_bmp}.rebuild.bmp"
+                --max-pixels ${greenflame_rebuild_max_pixels}
+        )
+        set_tests_properties(
+            greenflame_render_bench_rebuild_diff_${greenflame_rebuild_smooth}
+            PROPERTIES
+                FIXTURES_REQUIRED greenflame_bench_rebuild_${greenflame_rebuild_smooth}
+        )
+    endforeach()
+
+    # A line or arrow draft over the frozen frame recomposites only around itself. The
+    # frame must match the same frame drawn through the dynamic path. The flat arrow
+    # gets one tight rect, so its head shows any reach that falls short.
+    foreach(greenflame_line_shape diagonal flat)
+        set(greenflame_line_args
+            --adapter warp --layout single-1080 --scenario line --annotated --arrow
+            --frames 10)
+        if(greenflame_line_shape STREQUAL "flat")
+            list(APPEND greenflame_line_args --flat)
+        endif()
+        list(APPEND greenflame_line_args --dump-frame 9)
+        set(greenflame_line_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/line_${greenflame_line_shape}_fast.bmp")
+        set(greenflame_line_dynamic_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/line_${greenflame_line_shape}_dynamic.bmp")
+        add_test(
+            NAME greenflame_render_bench_line_${greenflame_line_shape}_fast
+            COMMAND greenflame_render_bench ${greenflame_line_args}
+                "${greenflame_line_bmp}"
+        )
+        add_test(
+            NAME greenflame_render_bench_line_${greenflame_line_shape}_dynamic
+            COMMAND greenflame_render_bench ${greenflame_line_args}
+                "${greenflame_line_dynamic_bmp}" --line-dynamic
+        )
+        set_tests_properties(
+            greenflame_render_bench_line_${greenflame_line_shape}_fast
+            greenflame_render_bench_line_${greenflame_line_shape}_dynamic
+            PROPERTIES FIXTURES_SETUP greenflame_bench_line_${greenflame_line_shape}
+        )
+        add_test(
+            NAME greenflame_render_bench_line_${greenflame_line_shape}_diff
+            COMMAND greenflame_render_bench
+                --diff "${greenflame_line_bmp}" "${greenflame_line_dynamic_bmp}"
+        )
+        set_tests_properties(greenflame_render_bench_line_${greenflame_line_shape}_diff
+            PROPERTIES FIXTURES_REQUIRED greenflame_bench_line_${greenflame_line_shape}
+        )
+    endforeach()
+
     # A highlighter over a lifted window capture tints the capture, not the screenshot
     # under it: frames must match those where the screenshot itself has the capture's
     # pixels. Frame 5 is the live stroke; frame 10 the committed one.

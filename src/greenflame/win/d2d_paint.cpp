@@ -3181,9 +3181,10 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         Rebuild_annotations_bitmap(res, input.annotations, input.annotation_patches);
     }
 
-    // Any live annotation draft must be drawn before the dim in the dynamic path so
-    // the dim sits on top outside the selection. Force the dynamic path whenever one
-    // is present.
+    // Any live annotation draft must be drawn before the dim so the dim sits on top
+    // outside the selection: it never takes the steady path. Freehand drafts and line
+    // drafts over a valid frozen frame recomposite around themselves; any other draft
+    // takes the dynamic path.
     bool const has_live_annotation_draft = Has_live_annotation_draft(input);
     bool const is_steady_state =
         res.frozen_valid && !input.dragging && !input.handle_dragging &&
@@ -3312,8 +3313,8 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         }
     }
 
-    // Draft visuals were already composited in the dynamic path above; skip them here
-    // so Draw_live_layer does not draw them again on top of the dim.
+    // Draft visuals were already composited above (freehand, line or dynamic path);
+    // skip them here so Draw_live_layer does not draw them again on top of the dim.
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Live_layer");
         Draw_live_layer(res.hwnd_rt.Get(), res, input, vd_width, vd_height,

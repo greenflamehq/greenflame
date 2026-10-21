@@ -56,6 +56,8 @@ constexpr COLORREF kBrushColor = RGB(255, 0, 0);
 constexpr COLORREF kHighlighterColor = RGB(255, 255, 0);
 constexpr uint32_t kNoiseSeed = 0x12345678u;
 constexpr uint32_t kLiftedNoiseSeed = 0x9E3779B9u; // --lifted: the window's own pixels
+// --lifted: capture pixels around the shown part, so the source rect is offset.
+constexpr int32_t kLiftedCaptureMarginPx = 32;
 constexpr uint32_t kLcgMultiplier = 1664525u;
 constexpr uint32_t kLcgIncrement = 1013904223u;
 constexpr uint32_t kNoiseShift = 8u;
@@ -189,11 +191,15 @@ struct Args final {
     std::string diff_a = {};
     std::string diff_b = {};
     int tolerance = 0;
+    int max_pixels = 0; // --max-pixels: pixels allowed over the tolerance
     bool list_adapters = false;
     bool probe_present = false;
     bool annotated = false;
     bool lifted = false;               // --lifted
     bool lifted_as_screenshot = false; // --lifted-as-screenshot
+    bool arrow = false;                // --arrow
+    bool flat = false;                 // --flat
+    bool line_dynamic = false;         // --line-dynamic
 };
 
 void Print_usage() {
@@ -217,16 +223,22 @@ void Print_usage() {
         "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
+        "  --arrow                      line: draw an arrow head\n"
+        "  --flat                       line: run left to right along the selection's "
+        "middle row\n"
+        "  --line-dynamic               line: skip the frozen-frame path (the frozen "
+        "frame reads stale every frame); frames must match without it\n"
         "  --lifted                     with --annotated: a lifted window capture with "
         "its own pixels over the selection\n"
         "  --lifted-as-screenshot       with --annotated: those pixels in the "
         "screenshot instead; frames must match --lifted\n"
-        "  --frames N                  measured frames per run (default 300)\n"
+        "  --frames N                   measured frames per run (default 300)\n"
         "  --repeat N                   runs per scenario (default 1)\n"
         "  --csv FILE                   per-frame rows\n"
         "  --dump-frame K FILE.bmp      write frame K (run 1) as BMP; with 'all', from "
         "select; K = --frames: the freehand release frame\n"
-        "  --diff A.bmp B.bmp [--tolerance T]   compare two dumps\n"
+        "  --diff A.bmp B.bmp [--tolerance T] [--max-pixels N]   compare two dumps; "
+        "fails when more than N pixels (default 0) differ by more than T\n"
         "  --probe-present [--passes N] [--frames N]   present floor on real "
         "monitors\n");
 }
@@ -355,8 +367,18 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
             args.tolerance = *v;
+        } else if (key == "--max-pixels") {
+            std::optional<int> const v = next_int(0);
+            if (!v) return std::nullopt;
+            args.max_pixels = *v;
         } else if (key == "--annotated") {
             args.annotated = true;
+        } else if (key == "--arrow") {
+            args.arrow = true;
+        } else if (key == "--flat") {
+            args.flat = true;
+        } else if (key == "--line-dynamic") {
+            args.line_dynamic = true;
         } else if (key == "--lifted") {
             args.lifted = true;
         } else if (key == "--lifted-as-screenshot") {
@@ -458,11 +480,17 @@ core::RectPx Inset_selection(int width, int height) {
 bool Prepare_lifted(D2DOverlayResources &res, int width, int height, Args const &args) {
     core::RectPx const sel = Inset_selection(width, height);
     GdiCaptureResult capture{};
-    capture.width = args.lifted ? sel.Width() : width;
-    capture.height = args.lifted ? sel.Height() : height;
+    // The shown part sits kLiftedCaptureMarginPx inside the capture, which has other
+    // pixels around it.
+    core::RectPx const source = core::RectPx::From_ltrb(
+        kLiftedCaptureMarginPx, kLiftedCaptureMarginPx,
+        kLiftedCaptureMarginPx + sel.Width(), kLiftedCaptureMarginPx + sel.Height());
+    capture.width = args.lifted ? sel.Width() + 2 * kLiftedCaptureMarginPx : width;
+    capture.height = args.lifted ? sel.Height() + 2 * kLiftedCaptureMarginPx : height;
     capture.bitmap =
         args.lifted
-            ? Make_noise_bitmap(capture.width, capture.height, kLiftedNoiseSeed)
+            ? Make_noise_bitmap(capture.width, capture.height, ~kNoiseSeed, source,
+                                kLiftedNoiseSeed)
             : Make_noise_bitmap(width, height, kNoiseSeed, sel, kLiftedNoiseSeed);
     if (capture.bitmap == nullptr) {
         return false;
@@ -471,10 +499,9 @@ bool Prepare_lifted(D2DOverlayResources &res, int width, int height, Args const 
                                 : res.Upload_screenshot(capture);
     (void)DeleteObject(capture.bitmap);
     if (ok && args.lifted) {
-        res.Set_lifted_view(LiftedWindowView{
-            .bitmap = res.lifted_window_capture.Get(),
-            .dest_rect = sel,
-            .source_rect = core::RectPx::From_ltrb(0, 0, sel.Width(), sel.Height())});
+        res.Set_lifted_view(LiftedWindowView{.bitmap = res.lifted_window_capture.Get(),
+                                             .dest_rect = sel,
+                                             .source_rect = source});
     }
     return ok;
 }
@@ -636,8 +663,9 @@ int Run_diff(Args const &args) {
     Print("diff: {} pixels differ, {} over tolerance {}, max channel delta {}\n",
           diff->differing_pixels, diff->pixels_over_tolerance, args.tolerance,
           diff->max_channel_delta);
-    return diff->pixels_over_tolerance == 0 ? static_cast<int>(BenchExit::Ok)
-                                            : static_cast<int>(BenchExit::PixelsDiffer);
+    return diff->pixels_over_tolerance <= static_cast<size_t>(args.max_pixels)
+               ? static_cast<int>(BenchExit::Ok)
+               : static_cast<int>(BenchExit::PixelsDiffer);
 }
 
 // ---------------------------------------------------------------------------
@@ -704,12 +732,21 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         input.selection_drag_corner_guide_px =
             core::PointPx{input.live_rect.right, input.live_rect.bottom};
     } else if (scenario == "line" && frame >= 0) {
-        // Line tool drag: from near the selection's top-left to the cursor.
+        // Line tool drag: from near the selection's top-left (--flat: left middle) to
+        // the cursor.
         core::RectPx const sel = input.final_selection;
+        auto const at = [&](int64_t t) {
+            core::PointPx p = Diagonal_point(sel, t, frames);
+            if (args.flat) {
+                p.y = (sel.top + sel.bottom) / 2;
+            }
+            return p;
+        };
         core::LineAnnotation const line{
-            .start = Diagonal_point(sel, 0, frames),
-            .end = Diagonal_point(sel, i, frames),
+            .start = at(0),
+            .end = at(i),
             .style = {.width_px = kLineWidthPx, .color = kLineColor},
+            .arrow_head = args.arrow,
         };
         state.line = core::Annotation{.id = 1, .data = line};
         input.draft_annotation = &state.line;
@@ -954,6 +991,10 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
         }
+        if (args.line_dynamic) {
+            // A stale frozen frame sends a line draft down the dynamic path.
+            ctx.res->frozen_valid = false;
+        }
         bool const ok =
             Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
         LARGE_INTEGER const t1 = Now();
@@ -1156,7 +1197,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
               static_cast<double>(rebuild_cycles) / kCyclesPerMegacycle,
               rebuild_ms.second);
     }
-    Print("verdict {}(frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
+    Print("verdict {} (frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
           core::Frame_rate_verdict_label(verdict), frame_summary.p95_ms);
     return frame_summary.p95_ms;
 }
