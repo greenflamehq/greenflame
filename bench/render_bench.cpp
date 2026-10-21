@@ -55,6 +55,7 @@ constexpr COLORREF kLineColor = RGB(0, 128, 255);
 constexpr COLORREF kBrushColor = RGB(255, 0, 0);
 constexpr COLORREF kHighlighterColor = RGB(255, 255, 0);
 constexpr uint32_t kNoiseSeed = 0x12345678u;
+constexpr uint32_t kLiftedNoiseSeed = 0x9E3779B9u; // --lifted: the window's own pixels
 constexpr uint32_t kLcgMultiplier = 1664525u;
 constexpr uint32_t kLcgIncrement = 1013904223u;
 constexpr uint32_t kNoiseShift = 8u;
@@ -191,6 +192,8 @@ struct Args final {
     bool list_adapters = false;
     bool probe_present = false;
     bool annotated = false;
+    bool lifted = false;               // --lifted
+    bool lifted_as_screenshot = false; // --lifted-as-screenshot
 };
 
 void Print_usage() {
@@ -214,7 +217,11 @@ void Print_usage() {
         "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
-        "  --frames N                   measured frames per run (default 300)\n"
+        "  --lifted                     with --annotated: a lifted window capture with "
+        "its own pixels over the selection\n"
+        "  --lifted-as-screenshot       with --annotated: those pixels in the "
+        "screenshot instead; frames must match --lifted\n"
+        "  --frames N                  measured frames per run (default 300)\n"
         "  --repeat N                   runs per scenario (default 1)\n"
         "  --csv FILE                   per-frame rows\n"
         "  --dump-frame K FILE.bmp      write frame K (run 1) as BMP; with 'all', from "
@@ -350,6 +357,10 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.tolerance = *v;
         } else if (key == "--annotated") {
             args.annotated = true;
+        } else if (key == "--lifted") {
+            args.lifted = true;
+        } else if (key == "--lifted-as-screenshot") {
+            args.lifted_as_screenshot = true;
         } else if (key == "--list-adapters") {
             args.list_adapters = true;
         } else if (key == "--probe-present") {
@@ -397,8 +408,10 @@ double Median(std::vector<double> values) {
 // Device and resources
 // ---------------------------------------------------------------------------
 
-// Deterministic noise, so GPU colour compression cannot make blits cheap.
-HBITMAP Make_noise_bitmap(int width, int height) {
+// Deterministic noise, so GPU colour compression cannot make blits cheap. Inside
+// `paste`, the noise of a paste-sized bitmap made from `paste_seed` instead.
+HBITMAP Make_noise_bitmap(int width, int height, uint32_t seed, core::RectPx paste = {},
+                          uint32_t paste_seed = 0) {
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
     bmi.bmiHeader.biWidth = width;
@@ -417,18 +430,59 @@ HBITMAP Make_noise_bitmap(int width, int height) {
                                      static_cast<size_t>(width) *
                                          static_cast<size_t>(height));
     CLANG_WARN_IGNORE_POP()
-    uint32_t state = kNoiseSeed;
-    for (uint32_t &px : pixels) {
+    uint32_t state = seed;
+    uint32_t paste_state = paste_seed;
+    for (size_t i = 0; i < pixels.size(); ++i) {
         state = state * kLcgMultiplier + kLcgIncrement;
-        px = (state >> kNoiseShift) | kOpaqueAlpha;
+        core::PointPx const at = {static_cast<int32_t>(i % static_cast<size_t>(width)),
+                                  static_cast<int32_t>(i / static_cast<size_t>(width))};
+        uint32_t value = state;
+        if (paste.Contains(at)) {
+            paste_state = paste_state * kLcgMultiplier + kLcgIncrement;
+            value = paste_state;
+        }
+        pixels[i] = (value >> kNoiseShift) | kOpaqueAlpha;
     }
     return bitmap;
+}
+
+// The selection --annotated uses: inset by an eighth of the desktop on each side.
+core::RectPx Inset_selection(int width, int height) {
+    return core::RectPx::From_ltrb(width / 8, height / 8, width - width / 8,
+                                   height - height / 8);
+}
+
+// --lifted: a window capture with its own pixels, shown over the selection, as a
+// Ctrl-click window selection lifts it. --lifted-as-screenshot: no lifted window, the
+// screenshot itself carries those pixels; its frames must match --lifted.
+bool Prepare_lifted(D2DOverlayResources &res, int width, int height, Args const &args) {
+    core::RectPx const sel = Inset_selection(width, height);
+    GdiCaptureResult capture{};
+    capture.width = args.lifted ? sel.Width() : width;
+    capture.height = args.lifted ? sel.Height() : height;
+    capture.bitmap =
+        args.lifted
+            ? Make_noise_bitmap(capture.width, capture.height, kLiftedNoiseSeed)
+            : Make_noise_bitmap(width, height, kNoiseSeed, sel, kLiftedNoiseSeed);
+    if (capture.bitmap == nullptr) {
+        return false;
+    }
+    bool const ok = args.lifted ? res.Upload_lifted_window_capture(capture)
+                                : res.Upload_screenshot(capture);
+    (void)DeleteObject(capture.bitmap);
+    if (ok && args.lifted) {
+        res.Set_lifted_view(LiftedWindowView{
+            .bitmap = res.lifted_window_capture.Get(),
+            .dest_rect = sel,
+            .source_rect = core::RectPx::From_ltrb(0, 0, sel.Width(), sel.Height())});
+    }
+    return ok;
 }
 
 // Screenshot, shared resources and cache targets, as OverlayWindow sets them up.
 bool Prepare_resources(D2DOverlayResources &res, int width, int height) {
     GdiCaptureResult capture{};
-    capture.bitmap = Make_noise_bitmap(width, height);
+    capture.bitmap = Make_noise_bitmap(width, height, kNoiseSeed);
     capture.width = width;
     capture.height = height;
     if (capture.bitmap == nullptr) {
@@ -730,11 +784,9 @@ std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
     if (scenario == "steady" || scenario == "line" || Is_freehand(scenario)) {
-        // --annotated insets the selection by an eighth of the desktop on each side.
-        int const inset_x = args.annotated ? width / 8 : 0;
-        int const inset_y = args.annotated ? height / 8 : 0;
-        input.final_selection = core::RectPx::From_ltrb(
-            inset_x, inset_y, width - inset_x, height - inset_y);
+        input.final_selection = args.annotated
+                                    ? Inset_selection(width, height)
+                                    : core::RectPx::From_ltrb(0, 0, width, height);
         input.cursor_client_px = {width / 2, height / 2};
     }
     if (Is_freehand(scenario)) {
@@ -839,6 +891,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     D2DPaintInput input{};
     input.monitor_rects_client = *ctx.monitors_client;
     Set_scenario_base(scenario, ctx.width, ctx.height, args, input);
+    input.lifted_window_bitmap = ctx.res->lifted_view.bitmap;
+    input.lifted_window_dest_rect = ctx.res->lifted_view.dest_rect;
+    input.lifted_window_source_rect = ctx.res->lifted_view.source_rect;
     std::vector<core::Annotation> annotations =
         args.annotated ? Make_bench_annotations(ctx.width, ctx.height)
                        : std::vector<core::Annotation>{};
@@ -1143,6 +1198,11 @@ int Run_render_bench(Args const &args) {
         Print("--dab-no-draft needs --dab N\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
+    if ((args.lifted || args.lifted_as_screenshot) &&
+        (!args.annotated || (args.lifted && args.lifted_as_screenshot))) {
+        Print("--lifted and --lifted-as-screenshot need --annotated, one at a time\n");
+        return static_cast<int>(BenchExit::BadArgs);
+    }
 
     core::RectPx const vd = Union_of(layout->monitors_screen);
     std::vector<core::RectPx> monitors_client;
@@ -1156,6 +1216,8 @@ int Run_render_bench(Args const &args) {
     if (!Create_bench_device(res, args) ||
         !res.Create_offscreen_target(vd.Width(), vd.Height()) ||
         !Prepare_resources(res, vd.Width(), vd.Height()) ||
+        ((args.lifted || args.lifted_as_screenshot) &&
+         !Prepare_lifted(res, vd.Width(), vd.Height(), args)) ||
         !Create_queries(res.d3d_device.Get(), queries)) {
         Print("device setup failed\n");
         return static_cast<int>(BenchExit::DeviceFailed);

@@ -221,6 +221,12 @@ virtual desktop.
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
 - `--diagonal` (freehand): the points run from the selection's top-left to its
   bottom-right instead of a wave. With `--straighten-at`, the bar is a long diagonal.
+- `--lifted` (needs `--annotated`): a lifted window capture with its own pixels shown
+  over the selection, as a Ctrl-click window selection does. With
+  `--lifted-as-screenshot` instead, there is no lifted window and the screenshot
+  itself has those pixels inside the selection. The two runs' frames must match at
+  tolerance 0 (highlighters tint the capture, not the screenshot under it); `ctest`
+  runs this on WARP for a live and a committed highlighter.
 - `--dab N` (freehand): before the measured stroke, draw and commit an N-point stroke
   from the same start point, as a quick click followed by a fast stroke. With
   `--dab-no-draft` the short stroke is committed without being drawn. The two runs'

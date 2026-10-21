@@ -99,6 +99,43 @@ if(BUILD_TESTING)
         )
     endforeach()
 
+    # A highlighter over a lifted window capture tints the capture, not the screenshot
+    # under it: frames must match those where the screenshot itself has the capture's
+    # pixels. Frame 5 is the live stroke; frame 10 the committed one.
+    foreach(greenflame_lifted_frame 5 10)
+        set(greenflame_lifted_args
+            --adapter warp --layout single-1080 --scenario highlighter --annotated
+            --points-per-frame 16 --frames 10 --dump-frame ${greenflame_lifted_frame})
+        set(greenflame_lifted_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/lifted_${greenflame_lifted_frame}.bmp")
+        set(greenflame_lifted_ref_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/lifted_ref_${greenflame_lifted_frame}.bmp")
+        add_test(
+            NAME greenflame_render_bench_lifted_${greenflame_lifted_frame}
+            COMMAND greenflame_render_bench ${greenflame_lifted_args}
+                "${greenflame_lifted_bmp}"
+                --lifted
+        )
+        add_test(
+            NAME greenflame_render_bench_lifted_ref_${greenflame_lifted_frame}
+            COMMAND greenflame_render_bench ${greenflame_lifted_args}
+                "${greenflame_lifted_ref_bmp}" --lifted-as-screenshot
+        )
+        set_tests_properties(
+            greenflame_render_bench_lifted_${greenflame_lifted_frame}
+            greenflame_render_bench_lifted_ref_${greenflame_lifted_frame}
+            PROPERTIES FIXTURES_SETUP greenflame_bench_lifted_${greenflame_lifted_frame}
+        )
+        add_test(
+            NAME greenflame_render_bench_lifted_diff_${greenflame_lifted_frame}
+            COMMAND greenflame_render_bench
+                --diff "${greenflame_lifted_bmp}" "${greenflame_lifted_ref_bmp}"
+        )
+        set_tests_properties(greenflame_render_bench_lifted_diff_${greenflame_lifted_frame}
+            PROPERTIES FIXTURES_REQUIRED greenflame_bench_lifted_${greenflame_lifted_frame}
+        )
+    endforeach()
+
     # A straightened highlighter bar recomposites in pieces along a long diagonal.
     # The last live frame must show the whole bar: it matches the release frame
     # (the bar committed and drawn as an annotation) up to rounding.

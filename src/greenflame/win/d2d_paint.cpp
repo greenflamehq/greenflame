@@ -2333,15 +2333,44 @@ void Draw_freehand_draft_pieces(ID2D1DeviceContext *dc, D2DOverlayResources &res
     dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
 }
 
+[[nodiscard]] LiftedWindowView Lifted_view(D2DPaintInput const &input) noexcept {
+    return LiftedWindowView{.bitmap = input.lifted_window_bitmap,
+                            .dest_rect = input.lifted_window_dest_rect,
+                            .source_rect = input.lifted_window_source_rect};
+}
+
+// The pixels a highlighter tints: the screenshot, except inside a shown lifted
+// window's dest rect, where the overlay shows the window's capture instead. The
+// screenshot alone if the effects are missing.
+[[nodiscard]] Microsoft::WRL::ComPtr<ID2D1Image>
+Highlighter_base_image(D2DOverlayResources &res, LiftedWindowView const &lifted) {
+    Microsoft::WRL::ComPtr<ID2D1Image> image = res.screenshot;
+    if (!lifted.Is_shown() || !res.screenshot || !res.lifted_base_effect) {
+        return image;
+    }
+    D2D1_MATRIX_3X2_F const move = D2D1::Matrix3x2F::Translation(
+        static_cast<float>(lifted.dest_rect.left - lifted.source_rect.left),
+        static_cast<float>(lifted.dest_rect.top - lifted.source_rect.top));
+    D2D1_RECT_F const dest = Rect(lifted.dest_rect);
+    D2D1_VECTOR_4F const crop = {dest.left, dest.top, dest.right, dest.bottom};
+    res.lifted_transform_effect->SetInput(0, lifted.bitmap);
+    (void)res.lifted_transform_effect->SetValue(
+        D2D1_2DAFFINETRANSFORM_PROP_TRANSFORM_MATRIX, move);
+    (void)res.lifted_crop_effect->SetValue(D2D1_CROP_PROP_RECT, crop);
+    res.lifted_base_effect->SetInput(0, res.screenshot.Get());
+    res.lifted_base_effect->GetOutput(image.ReleaseAndGetAddressOf());
+    return image;
+}
+
 // Draws the stroke into rt, inside `bounds`.
 // Brush: the pieces inside one layer; the style opacity applies once, when the layer
 // composites.
-// Highlighter: multiplies the screenshot plus committed annotations by an opaque
-// coverage mask of the pieces; the opacity applies once, as k1. Opaque masks merge
-// without darkening where pieces overlap.
+// Highlighter: multiplies `base` (Highlighter_base_image) plus committed annotations
+// by an opaque coverage mask of the pieces; the opacity applies once, as k1. Opaque
+// masks merge without darkening where pieces overlap.
 void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                                core::RectPx bounds,
-                                FreehandDraftLiveParts const *live) {
+                                core::RectPx bounds, FreehandDraftLiveParts const *live,
+                                ID2D1Image *base) {
     D2DOverlayResources::FreehandDraftState const &state = res.freehand_draft;
     bool const square = state.tip_shape == core::FreehandTipShape::Square;
     float const blit_opacity = Alpha_from_opacity_percent(state.blit_opacity_percent);
@@ -2353,7 +2382,7 @@ void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
     bool const has_dc = SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)));
-    bool const can_multiply = has_dc && res.multiply_effect && res.screenshot;
+    bool const can_multiply = has_dc && res.multiply_effect && base != nullptr;
     // The mask failed to record while there is a live end: draw plainly rather than
     // multiply the body alone and drop the end.
     bool const live_mask_missing = square && live != nullptr && !live->square_mask &&
@@ -2398,11 +2427,11 @@ void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     (void)res.multiply_effect->SetValue(D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS,
                                         coeffs);
     if (res.base_composite_effect && res.annotations_bitmap) {
-        res.base_composite_effect->SetInput(0, res.screenshot.Get());
+        res.base_composite_effect->SetInput(0, base);
         res.base_composite_effect->SetInput(1, res.annotations_bitmap.Get());
         res.multiply_effect->SetInputEffect(0, res.base_composite_effect.Get());
     } else {
-        res.multiply_effect->SetInput(0, res.screenshot.Get());
+        res.multiply_effect->SetInput(0, base);
     }
     res.multiply_effect->SetInput(1, mask);
     D2D1_RECT_F const target_rect = Rect(*target);
@@ -2416,7 +2445,9 @@ void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 // dynamic path uses for a live draft: screenshot, annotations, draft, full dim, then
 // the selection restored with its annotations and draft. Every pixel in the clip is
 // rebuilt, never layered over earlier output, so clip edges cannot show seams.
-// draw_draft(rt) draws the draft. rt must be inside BeginDraw.
+// draw_draft(rt, restored) draws the draft; `restored` is true for the pass over the
+// restored selection, which shows a lifted window's capture. rt must be inside
+// BeginDraw.
 template <typename DrawDraft>
 void Composite_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                             D2DPaintInput const &input, core::RectPx clip, int vd_width,
@@ -2434,15 +2465,12 @@ void Composite_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     if (res.annotations_bitmap) {
         Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
     }
-    draw_draft(rt);
+    draw_draft(rt, false);
     Draw_selection_dim(rt, res.solid_brush.Get(), core::RectPx{}, vd_width, vd_height);
     if (!restore_rect.Is_empty()) {
-        if (input.lifted_window_bitmap != nullptr &&
-            !input.lifted_window_dest_rect.Is_empty() &&
-            !input.lifted_window_source_rect.Is_empty()) {
-            Draw_bitmap_rect(rt, input.lifted_window_bitmap,
-                             input.lifted_window_dest_rect,
-                             input.lifted_window_source_rect);
+        LiftedWindowView const lifted = Lifted_view(input);
+        if (lifted.Is_shown()) {
+            Draw_bitmap_rect(rt, lifted.bitmap, lifted.dest_rect, lifted.source_rect);
         } else if (res.screenshot) {
             Draw_bitmap_pixels_1to1(rt, res.screenshot.Get(), restore_rect, vd_width,
                                     vd_height);
@@ -2451,7 +2479,7 @@ void Composite_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         if (res.annotations_bitmap) {
             Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
         }
-        draw_draft(rt);
+        draw_draft(rt, true);
         rt->PopAxisAlignedClip();
     }
     rt->PopAxisAlignedClip();
@@ -2464,9 +2492,14 @@ void Composite_freehand_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources 
                                      int vd_height) {
     GREENFLAME_PROFILE_FUNCTION();
 
+    Microsoft::WRL::ComPtr<ID2D1Image> const restored_base =
+        Highlighter_base_image(res, Lifted_view(input));
     Composite_draft_region(rt, res, input, clip, vd_width, vd_height,
-                           [&](ID2D1RenderTarget *target) {
-                               Draw_freehand_draft_stroke(target, res, clip, live);
+                           [&](ID2D1RenderTarget *target, bool restored) {
+                               Draw_freehand_draft_stroke(target, res, clip, live,
+                                                          restored
+                                                              ? restored_base.Get()
+                                                              : res.screenshot.Get());
                            });
 }
 
@@ -3007,8 +3040,8 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
             Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
             if (stroke_bmp != nullptr &&
                 SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)))) {
-                // A scratch mask carries the style opacity (k1 = 1); the reused
-                // opaque mask takes it as k1.
+                // The opaque mask takes the style opacity as k1; the fallback mask
+                // carries it (k1 = 1).
                 D2D1_VECTOR_4F const coeffs = {
                     mask_is_opaque
                         ? Alpha_from_opacity_percent(fh.style.opacity_percent)
@@ -3016,14 +3049,17 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     0.0f, 0.0f, 0.0f};
                 (void)res.multiply_effect->SetValue(
                     D2D1_ARITHMETICCOMPOSITE_PROP_COEFFICIENTS, coeffs);
+                // A lifted window shows its capture inside its rect: tint that.
+                Microsoft::WRL::ComPtr<ID2D1Image> const base =
+                    Highlighter_base_image(res, res.lifted_view);
                 if (base_snapshot_ok && res.base_composite_effect) {
-                    res.base_composite_effect->SetInput(0, res.screenshot.Get());
+                    res.base_composite_effect->SetInput(0, base.Get());
                     res.base_composite_effect->SetInput(
                         1, res.base_composite_bitmap.Get());
                     res.multiply_effect->SetInputEffect(
                         0, res.base_composite_effect.Get());
                 } else {
-                    res.multiply_effect->SetInput(0, res.screenshot.Get());
+                    res.multiply_effect->SetInput(0, base.Get());
                 }
                 res.multiply_effect->SetInput(1, stroke_bmp.Get());
                 GREENFLAME_PROFILE_SCOPE(
@@ -3204,7 +3240,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
                  line_draft->start, line_draft->end, Line_draft_reach_px(*line_draft),
                  vd_width, vd_height)) {
             Composite_draft_region(res.hwnd_rt.Get(), res, input, clip, vd_width,
-                                   vd_height, [&](ID2D1RenderTarget *target) {
+                                   vd_height, [&](ID2D1RenderTarget *target, bool) {
                                        Draw_annotation(target, res,
                                                        *input.draft_annotation);
                                    });
