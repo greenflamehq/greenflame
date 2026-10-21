@@ -69,10 +69,11 @@ std::vector<RectPx> Monitor_rects_in_client(std::span<const MonitorWithBounds> m
     std::vector<RectPx> out;
     out.reserve(monitors.size());
     for (MonitorWithBounds const &monitor : monitors) {
-        out.push_back(RectPx::From_ltrb(monitor.bounds.left - client_origin_screen.x,
-                                        monitor.bounds.top - client_origin_screen.y,
-                                        monitor.bounds.right - client_origin_screen.x,
-                                        monitor.bounds.bottom - client_origin_screen.y));
+        out.push_back(
+            RectPx::From_ltrb(monitor.bounds.left - client_origin_screen.x,
+                              monitor.bounds.top - client_origin_screen.y,
+                              monitor.bounds.right - client_origin_screen.x,
+                              monitor.bounds.bottom - client_origin_screen.y));
     }
     return out;
 }

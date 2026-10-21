@@ -186,7 +186,8 @@ TEST(monitor_policy, Monitor_rects_in_client_NegativeY) {
         {RectPx::From_ltrb(0, 0, 1920, 1080), info},
         {RectPx::From_ltrb(0, -1440, 2560, 0), info},
     };
-    std::vector<RectPx> const rects = Monitor_rects_in_client(monitors, PointPx{0, -1440});
+    std::vector<RectPx> const rects =
+        Monitor_rects_in_client(monitors, PointPx{0, -1440});
     ASSERT_EQ(rects.size(), 2u);
     EXPECT_EQ(rects[0], RectPx::From_ltrb(0, 1440, 1920, 2520));
     EXPECT_EQ(rects[1], RectPx::From_ltrb(0, 0, 2560, 1440));

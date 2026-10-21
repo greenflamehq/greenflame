@@ -136,7 +136,8 @@ std::optional<BmpDiff> Diff_bmp_bytes(std::span<const uint8_t> a,
             size_t merged = 0;
             for (size_t i = 1; i < spans.size(); ++i) {
                 if (spans[i].first <= spans[merged].second) {
-                    spans[merged].second = std::max(spans[merged].second, spans[i].second);
+                    spans[merged].second =
+                        std::max(spans[merged].second, spans[i].second);
                 } else {
                     spans[++merged] = spans[i];
                 }

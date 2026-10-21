@@ -281,7 +281,7 @@ build\x64-release-pdb\bin\greenflame_render_bench.exe --probe-present --passes 3
 ```
 
 It puts topmost windows over every monitor for a few seconds (no capture, no input).
-It reports the frame interval p50/p95 and fps of steady frames for two arrangements:
+It reports the frame interval p50/p95 and fps of steady frames for three arrangements:
 
 - `span`: one window over the whole desktop, through the app's `Create_hwnd_rt`;
 - `per-monitor-shared`: one window and swap chain per monitor, all on one adapter

@@ -918,7 +918,8 @@ void OverlayWindow::Request_repaint() const {
 
 void OverlayWindow::Repaint_now() const {
     if (hwnd_ != nullptr) {
-        RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+        RedrawWindow(hwnd_, nullptr, nullptr,
+                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
 }
 
@@ -1481,11 +1482,10 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         core::RectPx const created_px = core::RectPx::From_ltrb(
             created.left, created.top, created.right, created.bottom);
         if (created_px != bounds) {
-            GREENFLAME_LOG_WRITE(L"overlay",
-                                 std::wstring(L"Overlay window rect ") +
-                                     Format_rect_for_debug_log(created_px) +
-                                     L" differs from the virtual desktop " +
-                                     Format_rect_for_debug_log(bounds));
+            GREENFLAME_LOG_WRITE(L"overlay", std::wstring(L"Overlay window rect ") +
+                                                 Format_rect_for_debug_log(created_px) +
+                                                 L" differs from the virtual desktop " +
+                                                 Format_rect_for_debug_log(bounds));
         }
     }
     if (!Rebuild_display_capture() || !resources_->Initialize_for_capture(hinstance_)) {
@@ -1826,7 +1826,7 @@ void OverlayWindow::Clear_transient_center_label(bool repaint) {
         return;
     }
     transient_center_label_text_.clear();
-    if (repaint && hwnd_ != nullptr) {
+    if (repaint) {
         Request_repaint();
     }
 }
@@ -2288,7 +2288,7 @@ void OverlayWindow::Dismiss_selection_wheel(bool repaint) {
     if (hwnd_ != nullptr) {
         Refresh_cursor();
     }
-    if (repaint && hwnd_ != nullptr) {
+    if (repaint) {
         Request_repaint();
     }
 }
@@ -3167,14 +3167,12 @@ LRESULT OverlayWindow::On_l_button_down() {
     // A brush or highlighter stroke starts at the press message's point, where its
     // mouse history starts. The cursor may already have moved on.
     core::MouseMoveSample const press_message = Current_message_sample();
-    core::PointPx const press_origin = Desktop_origin_px();
-    core::PointPx const cursor_client =
-        Is_freehand_tool_armed()
-            ? core::PointPx{press_message.screen.x - press_origin.x,
-                            press_message.screen.y - press_origin.y}
-            : cur;
-    core::PointPx const cursor_screen = Get_cursor_pos_px();
     core::PointPx const origin = Desktop_origin_px();
+    core::PointPx const cursor_client =
+        Is_freehand_tool_armed() ? core::PointPx{press_message.screen.x - origin.x,
+                                                 press_message.screen.y - origin.y}
+                                 : cur;
+    core::PointPx const cursor_screen = Get_cursor_pos_px();
 
     // Pre-resolve only the hint relevant to the active preview mode.
     std::optional<HWND> win_handle;
@@ -3198,9 +3196,10 @@ LRESULT OverlayWindow::On_l_button_down() {
         vdesk = Get_virtual_desktop_bounds_px();
     }
 
-    Apply_action(controller_.On_primary_press(
-        mods, cursor_client, cursor_screen, win_handle, monitor_idx, win_rect, vdesk,
-        Collect_visible_snap_edges(), origin.x, origin.y, window_full_capture_available));
+    Apply_action(controller_.On_primary_press(mods, cursor_client, cursor_screen,
+                                              win_handle, monitor_idx, win_rect, vdesk,
+                                              Collect_visible_snap_edges(), origin.x,
+                                              origin.y, window_full_capture_available));
     if (Is_freehand_stroke_active()) {
         stroke_input_ = StrokeInput{.last_consumed = press_message};
     }
@@ -3276,8 +3275,7 @@ LRESULT OverlayWindow::On_mouse_move() {
         return 0;
     }
     if (selection_wheel_.visible) {
-        bool const hover_changed =
-            Update_selection_wheel_hover(Cursor_client_px());
+        bool const hover_changed = Update_selection_wheel_hover(Cursor_client_px());
         bool const toolbar_changed = Clear_toolbar_hover_states();
         if (last_hover_handle_.has_value()) {
             last_hover_handle_ = std::nullopt;
@@ -4343,19 +4341,20 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         D2DFrameStatus status = D2DFrameStatus::Ok;
         {
             GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Paint_d2d_frame");
-            status = Paint_d2d_frame(
-                *d2d_resources_, input, resources_->display_capture.width,
-                resources_->display_capture.height, Active_top_layer(),
-                kFrameWaitTimeoutMs);
+            status = Paint_d2d_frame(*d2d_resources_, input,
+                                     resources_->display_capture.width,
+                                     resources_->display_capture.height,
+                                     Active_top_layer(), kFrameWaitTimeoutMs);
         }
         EndPaint(hwnd, &paint);
         if (status == D2DFrameStatus::DeviceLost) {
             Handle_device_loss();
         } else if (status == D2DFrameStatus::WaitTimedOut) {
             // Nothing was drawn. Ask again; the GPU may still be busy.
-            GREENFLAME_LOG_WRITE(L"overlay", std::wstring(L"Frame wait timed out after ") +
-                                                 std::to_wstring(kFrameWaitTimeoutMs) +
-                                                 L" ms; frame skipped");
+            GREENFLAME_LOG_WRITE(L"overlay",
+                                 std::wstring(L"Frame wait timed out after ") +
+                                     std::to_wstring(kFrameWaitTimeoutMs) +
+                                     L" ms; frame skipped");
             Request_repaint();
         }
         return 0;

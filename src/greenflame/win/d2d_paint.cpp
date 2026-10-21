@@ -3208,11 +3208,11 @@ struct FramePlan final {
     if (bounds.Is_empty()) {
         return true;
     }
-    core::RectPx const grown = core::RectPx::From_ltrb(
-        bounds.left - kFreehandDraftAntialiasMarginPx,
-        bounds.top - kFreehandDraftAntialiasMarginPx,
-        bounds.right + kFreehandDraftAntialiasMarginPx,
-        bounds.bottom + kFreehandDraftAntialiasMarginPx);
+    core::RectPx const grown =
+        core::RectPx::From_ltrb(bounds.left - kFreehandDraftAntialiasMarginPx,
+                                bounds.top - kFreehandDraftAntialiasMarginPx,
+                                bounds.right + kFreehandDraftAntialiasMarginPx,
+                                bounds.bottom + kFreehandDraftAntialiasMarginPx);
     return Touches(grown, target_rect);
 }
 
@@ -3250,7 +3250,8 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
         res.frozen_valid && !input.dragging && !input.handle_dragging &&
         !input.move_dragging && !input.annotation_editing && !input.modifier_preview &&
         !plan.has_live_annotation_draft && input.lifted_window_bitmap == nullptr;
-    plan.line_draft = plan.freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
+    plan.line_draft =
+        plan.freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
 }
 
 // Draws the frame's content into rt, which is inside BeginDraw with the world
@@ -3272,9 +3273,8 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                     vd_height);
             for (core::RectPx const &clip : plan.freehand_live.clips) {
                 if (Touches(clip, target_rect)) {
-                    Composite_freehand_draft_region(rt, res, input, clip,
-                                                    &plan.freehand_live, vd_width,
-                                                    vd_height);
+                    Composite_freehand_draft_region(
+                        rt, res, input, clip, &plan.freehand_live, vd_width, vd_height);
                 }
             }
         } else {
@@ -3369,8 +3369,7 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Live_layer");
         Draw_live_layer(rt, res, input, vd_width, vd_height,
-                        /*draw_annotation_draft=*/!plan.has_live_annotation_draft &&
-                            draft_here);
+                        /*draw_annotation_draft=*/!plan.has_live_annotation_draft);
     }
 
     if (top_layer != nullptr && top_layer->Is_visible()) {
@@ -3406,9 +3405,9 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
     }
     if (!waitables.empty()) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Wait_frame_latency");
-        DWORD const wait = WaitForMultipleObjectsEx(static_cast<DWORD>(waitables.size()),
-                                                    waitables.data(), TRUE,
-                                                    wait_timeout_ms, FALSE);
+        DWORD const wait =
+            WaitForMultipleObjectsEx(static_cast<DWORD>(waitables.size()),
+                                     waitables.data(), TRUE, wait_timeout_ms, FALSE);
         if (wait == WAIT_TIMEOUT) {
             return D2DFrameStatus::WaitTimedOut;
         }
