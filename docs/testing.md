@@ -77,7 +77,7 @@ Test must be run and must pass before any task is considered complete. This is a
 - Add new test files under `tests/`
 - Register them in `tests/CMakeLists.txt` as sources of `greenflame_tests`
 - Tests must only link against `greenflame_core` and the testable logic library — never against `greenflame` directly
-- `ctest` also runs two non-unit smoke tests of `greenflame_render_bench` on WARP (see [Overlay performance](#overlay-performance-opt-in)). That tool links `greenflame_render`; the rule above is about `greenflame_tests`
+- `ctest` also runs smoke and regression tests of `greenflame_render_bench` on WARP (see [Overlay performance](#overlay-performance-opt-in)). That tool links `greenflame_render`; the rule above is about `greenflame_tests`
 
 ## Source coverage
 
@@ -203,9 +203,10 @@ virtual desktop.
   (the real monitors).
 - `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
   prints the indexes.
-- `--scenario hover|select|brush|highlighter|steady|all`: crosshair sweep, live
+- `--scenario hover|select|brush|highlighter|line|steady|all`: crosshair sweep, live
   selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
-  `--points-per-frame`), idle selection, or all of them.
+  `--points-per-frame`), a line tool drag from the selection's top-left to its
+  bottom-right, idle selection, or all of them.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.
@@ -218,6 +219,8 @@ virtual desktop.
 - `--straighten-at K`: highlighter only. From frame K the stroke is its first and
   newest point, as after a pause-to-straighten. Dump frame F with `--straighten-at K`
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
+- `--diagonal` (freehand): the points run from the selection's top-left to its
+  bottom-right instead of a wave. With `--straighten-at`, the bar is a long diagonal.
 - `--dab N` (freehand): before the measured stroke, draw and commit an N-point stroke
   from the same start point, as a quick click followed by a fast stroke. With
   `--dab-no-draft` the short stroke is committed without being drawn. The two runs'

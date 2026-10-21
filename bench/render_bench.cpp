@@ -50,6 +50,8 @@ constexpr int kFreehandAmplitudeDivisor = 5;
 constexpr double kFreehandRowStepPx = 40.0;
 constexpr int32_t kBrushWidthPx = 11;
 constexpr int32_t kHighlighterWidthPx = 20;
+constexpr int32_t kLineWidthPx = 4;
+constexpr COLORREF kLineColor = RGB(0, 128, 255);
 constexpr COLORREF kBrushColor = RGB(255, 0, 0);
 constexpr COLORREF kHighlighterColor = RGB(255, 255, 0);
 constexpr uint32_t kNoiseSeed = 0x12345678u;
@@ -173,6 +175,7 @@ struct Args final {
     int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
     bool opacity_given = false;
     int straighten_at = -1;
+    bool diagonal = false;     // --diagonal
     int dab_points = 0;        // --dab N
     bool dab_no_draft = false; // --dab-no-draft
     int frames = kDefaultFrames;
@@ -196,7 +199,7 @@ void Print_usage() {
         "  --layout jocelyn-desk|4k-desk|single-1080|current   (default jocelyn-desk)\n"
         "  --adapter default|N|warp     D3D adapter (default: what the app uses)\n"
         "  --list-adapters              print DXGI adapters and exit\n"
-        "  --scenario hover|select|brush|highlighter|steady|all   (default all)\n"
+        "  --scenario hover|select|brush|highlighter|line|steady|all   (default all)\n"
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
@@ -204,6 +207,8 @@ void Print_usage() {
         "brush, 33 highlighter)\n"
         "  --straighten-at K            highlighter: from frame K the stroke is its "
         "first and newest point\n"
+        "  --diagonal                   freehand: points run from the selection's "
+        "top-left to its bottom-right instead of a wave\n"
         "  --dab N [--dab-no-draft]     freehand: first draw and commit an N-point "
         "stroke at the same start, N at most --points-per-frame (--dab-no-draft: "
         "commit it without drawing)\n"
@@ -308,6 +313,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
             args.straighten_at = *v;
+        } else if (key == "--diagonal") {
+            args.diagonal = true;
         } else if (key == "--frames") {
             std::optional<int> const v = next_int(1);
             if (!v) return std::nullopt;
@@ -583,8 +590,8 @@ int Run_diff(Args const &args) {
 // B1: scenarios
 // ---------------------------------------------------------------------------
 
-constexpr std::array<std::string_view, 5> kAllScenarios = {
-    {"hover", "select", "brush", "highlighter", "steady"}};
+constexpr std::array<std::string_view, 6> kAllScenarios = {
+    {"hover", "select", "brush", "highlighter", "line", "steady"}};
 
 constexpr double kCyclesPerMegacycle = 1'000'000.0;
 
@@ -603,7 +610,17 @@ int Stroke_opacity_percent(std::string_view scenario, Args const &args) {
 struct ScenarioState final {
     std::vector<core::PointPx> points = {};
     std::vector<core::PointPx> straightened = {}; // --straighten-at: first and newest
+    core::Annotation line = {};                   // line: the draft annotation
 };
+
+// Point t of count on the diagonal from the inset top-left to the inset bottom-right.
+core::PointPx Diagonal_point(core::RectPx sel, int64_t t, int64_t count) {
+    int64_t const last = std::max<int64_t>(1, count - 1);
+    int64_t const w = sel.Width() - 2 * kFreehandEdgeInsetPx;
+    int64_t const h = sel.Height() - 2 * kFreehandEdgeInsetPx;
+    return {static_cast<int32_t>(sel.left + kFreehandEdgeInsetPx + w * t / last),
+            static_cast<int32_t>(sel.top + kFreehandEdgeInsetPx + h * t / last)};
+}
 
 // Fills the per-frame fields the way OverlayWindow::On_paint does for this mode.
 void Fill_frame_input(std::string_view scenario, int frame, int frames, int width,
@@ -632,6 +649,17 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         input.cursor_client_px = {x, y};
         input.selection_drag_corner_guide_px =
             core::PointPx{input.live_rect.right, input.live_rect.bottom};
+    } else if (scenario == "line" && frame >= 0) {
+        // Line tool drag: from near the selection's top-left to the cursor.
+        core::RectPx const sel = input.final_selection;
+        core::LineAnnotation const line{
+            .start = Diagonal_point(sel, 0, frames),
+            .end = Diagonal_point(sel, i, frames),
+            .style = {.width_px = kLineWidthPx, .color = kLineColor},
+        };
+        state.line = core::Annotation{.id = 1, .data = line};
+        input.draft_annotation = &state.line;
+        input.cursor_client_px = line.end;
     } else if (Is_freehand(scenario) && frame >= 0) {
         // --points-per-frame new input points per frame (default 1). The path wave
         // advances per point, so more points per frame draw a longer stroke that
@@ -650,7 +678,11 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
                 std::sin(static_cast<double>(p) * kFreehandWavePerFrame) *
                     static_cast<double>(sel.Height() / kFreehandAmplitudeDivisor) +
                 row * kFreehandRowStepPx;
-            state.points.push_back({static_cast<int32_t>(x), static_cast<int32_t>(y)});
+            state.points.push_back(
+                args.diagonal
+                    ? Diagonal_point(
+                          sel, p, static_cast<int64_t>(frames) * args.points_per_frame)
+                    : core::PointPx{static_cast<int32_t>(x), static_cast<int32_t>(y)});
         }
         input.draft_freehand_points = state.points;
         // --straighten-at: the highlighter tool keeps the first point and moves the
@@ -697,7 +729,7 @@ std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
 
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
-    if (scenario == "steady" || Is_freehand(scenario)) {
+    if (scenario == "steady" || scenario == "line" || Is_freehand(scenario)) {
         // --annotated insets the selection by an eighth of the desktop on each side.
         int const inset_x = args.annotated ? width / 8 : 0;
         int const inset_y = args.annotated ? height / 8 : 0;
@@ -1002,6 +1034,10 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     double const desktop_mpx =
         static_cast<double>(ctx.width) * static_cast<double>(ctx.height) / kMegapixel;
     double const shaded = Median(mpx);
+    std::vector<double> mcycles;
+    for (FrameSample const &s : samples) {
+        mcycles.push_back(s.cpu_mcycles);
+    }
 
     Print("\nlayout={} vd={}x{} adapter=\"{}\" scenario={} smooth={} "
           "points/frame={} opacity={} frames={} run={}/{}\n",
@@ -1016,8 +1052,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         Print_row("gpu", core::Summarize_frame_times(gpu));
     }
     Print_row("frame", frame_summary);
-    Print("shaded p50 {:.1f} Mpx ({:.2f} x desktop)\n", shaded,
-          desktop_mpx > 0.0 ? shaded / desktop_mpx : 0.0);
+    Print("shaded p50 {:.1f} Mpx ({:.2f} x desktop); cpu p50 {:.1f} Mcycles\n", shaded,
+          desktop_mpx > 0.0 ? shaded / desktop_mpx : 0.0, Median(mcycles));
     if (Is_freehand(scenario)) {
         size_t const per = samples.size() / kFreehandBuckets;
         for (size_t b = 0; per > 0 && b < static_cast<size_t>(kFreehandBuckets); ++b) {

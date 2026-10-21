@@ -98,4 +98,37 @@ if(BUILD_TESTING)
             PROPERTIES FIXTURES_REQUIRED greenflame_bench_dab_${greenflame_dab_scenario}
         )
     endforeach()
+
+    # A straightened highlighter bar recomposites in pieces along a long diagonal.
+    # The last live frame must show the whole bar: it matches the release frame
+    # (the bar committed and drawn as an annotation) up to rounding.
+    set(greenflame_straight_args
+        --adapter warp --layout single-1080 --scenario highlighter --annotated
+        --diagonal --frames 10 --straighten-at 2)
+    set(greenflame_straight_live_bmp "${CMAKE_CURRENT_BINARY_DIR}/straight_live.bmp")
+    set(greenflame_straight_release_bmp
+        "${CMAKE_CURRENT_BINARY_DIR}/straight_release.bmp")
+    add_test(
+        NAME greenflame_render_bench_straight_live
+        COMMAND greenflame_render_bench ${greenflame_straight_args}
+            --dump-frame 9 "${greenflame_straight_live_bmp}"
+    )
+    add_test(
+        NAME greenflame_render_bench_straight_release
+        COMMAND greenflame_render_bench ${greenflame_straight_args}
+            --dump-frame 10 "${greenflame_straight_release_bmp}"
+    )
+    set_tests_properties(
+        greenflame_render_bench_straight_live greenflame_render_bench_straight_release
+        PROPERTIES FIXTURES_SETUP greenflame_bench_straight
+    )
+    add_test(
+        NAME greenflame_render_bench_straight_diff
+        COMMAND greenflame_render_bench
+            --diff "${greenflame_straight_live_bmp}" "${greenflame_straight_release_bmp}"
+            --tolerance 2
+    )
+    set_tests_properties(greenflame_render_bench_straight_diff
+        PROPERTIES FIXTURES_REQUIRED greenflame_bench_straight
+    )
 endif()

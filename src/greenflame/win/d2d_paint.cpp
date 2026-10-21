@@ -2253,12 +2253,56 @@ Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width
     return core::RectPx::Union(a, b);
 }
 
+// Caps the pieces Segment_cover_rects cuts a segment into, and so the recomposites
+// and their draw calls per frame. 16 pieces keep thread cycles near the old cost.
+constexpr int64_t kMaxSegmentCoverPieces = 16;
+
+// Rects covering every pixel within `reach_px` of the segment a-b on each axis,
+// clipped to the desktop. A long diagonal's box is mostly empty, so the segment is
+// cut into equal pieces, each covered by its own grown box. The piece count minimizes
+// the covered area (about sqrt(|dx| |dy|) / (2 reach)); an axis-aligned or short
+// segment gets one rect, its grown box.
+[[nodiscard]] std::vector<core::RectPx>
+Segment_cover_rects(core::PointPx a, core::PointPx b, int32_t reach_px, int vd_width,
+                    int vd_height) {
+    double const dx = static_cast<double>(b.x) - static_cast<double>(a.x);
+    double const dy = static_cast<double>(b.y) - static_cast<double>(a.y);
+    double const piece_side = 2.0 * static_cast<double>(std::max(reach_px, 1));
+    int64_t const pieces = std::clamp<int64_t>(
+        static_cast<int64_t>(std::sqrt(std::abs(dx) * std::abs(dy)) / piece_side), 1,
+        kMaxSegmentCoverPieces);
+    core::RectPx const desktop = Desktop_rect(vd_width, vd_height);
+    std::vector<core::RectPx> rects;
+    rects.reserve(static_cast<size_t>(pieces));
+    for (int64_t k = 0; k < pieces; ++k) {
+        double const t0 = static_cast<double>(k) / static_cast<double>(pieces);
+        double const t1 = static_cast<double>(k + 1) / static_cast<double>(pieces);
+        double const x0 = static_cast<double>(a.x) + dx * t0;
+        double const x1 = static_cast<double>(a.x) + dx * t1;
+        double const y0 = static_cast<double>(a.y) + dy * t0;
+        double const y1 = static_cast<double>(a.y) + dy * t1;
+        // Round outward, and +1 on the far side: pixel x covers [x, x + 1).
+        core::RectPx const grown = core::RectPx::From_ltrb(
+            static_cast<int32_t>(std::floor(std::min(x0, x1))) - reach_px,
+            static_cast<int32_t>(std::floor(std::min(y0, y1))) - reach_px,
+            static_cast<int32_t>(std::ceil(std::max(x0, x1))) + reach_px + 1,
+            static_cast<int32_t>(std::ceil(std::max(y0, y1))) + reach_px + 1);
+        std::optional<core::RectPx> const clipped = core::RectPx::Clip(grown, desktop);
+        if (clipped.has_value() && !clipped->Is_empty()) {
+            rects.push_back(*clipped);
+        }
+    }
+    return rects;
+}
+
 // The moving end of the stroke, redrawn every frame: the provisional smoothed points
 // (joined to the last final point) and the raw tail.
 struct FreehandDraftLiveParts final {
     std::vector<core::PointPx> provisional = {};
     std::vector<core::PointPx> tail = {};
     core::RectPx bounds = {}; // pixels the live parts may touch
+    // Rects to recomposite each frame; together they cover `bounds`' stroke pixels.
+    std::vector<core::RectPx> clips = {};
     // Highlighter only: the body bitmap plus the live parts as one opaque mask,
     // recorded before the frame's BeginDraw. Null if recording failed.
     Microsoft::WRL::ComPtr<ID2D1CommandList> square_mask = {};
@@ -2369,15 +2413,15 @@ void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 }
 
 // Recomposites the overlay frame inside `clip` from its sources, in the order the
-// dynamic path uses for a live draft: screenshot, annotations, stroke, full dim, then
-// the selection restored with its annotations and stroke. Every pixel in the clip is
+// dynamic path uses for a live draft: screenshot, annotations, draft, full dim, then
+// the selection restored with its annotations and draft. Every pixel in the clip is
 // rebuilt, never layered over earlier output, so clip edges cannot show seams.
-// rt must be inside BeginDraw.
-void Composite_freehand_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
-                                     D2DPaintInput const &input, core::RectPx clip,
-                                     FreehandDraftLiveParts const *live, int vd_width,
-                                     int vd_height) {
-    GREENFLAME_PROFILE_FUNCTION();
+// draw_draft(rt) draws the draft. rt must be inside BeginDraw.
+template <typename DrawDraft>
+void Composite_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                            D2DPaintInput const &input, core::RectPx clip, int vd_width,
+                            int vd_height, DrawDraft const &draw_draft) {
+    GREENFLAME_PROFILE_SCOPE("D2DPaint::Composite_draft_region");
 
     core::RectPx const restore_rect =
         !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
@@ -2390,7 +2434,7 @@ void Composite_freehand_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources 
     if (res.annotations_bitmap) {
         Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
     }
-    Draw_freehand_draft_stroke(rt, res, clip, live);
+    draw_draft(rt);
     Draw_selection_dim(rt, res.solid_brush.Get(), core::RectPx{}, vd_width, vd_height);
     if (!restore_rect.Is_empty()) {
         if (input.lifted_window_bitmap != nullptr &&
@@ -2407,10 +2451,23 @@ void Composite_freehand_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources 
         if (res.annotations_bitmap) {
             Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
         }
-        Draw_freehand_draft_stroke(rt, res, clip, live);
+        draw_draft(rt);
         rt->PopAxisAlignedClip();
     }
     rt->PopAxisAlignedClip();
+}
+
+// The freehand draft's recomposite inside `clip`.
+void Composite_freehand_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                                     D2DPaintInput const &input, core::RectPx clip,
+                                     FreehandDraftLiveParts const *live, int vd_width,
+                                     int vd_height) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    Composite_draft_region(rt, res, input, clip, vd_width, vd_height,
+                           [&](ID2D1RenderTarget *target) {
+                               Draw_freehand_draft_stroke(target, res, clip, live);
+                           });
 }
 
 // Starts a new stroke from nothing. Unconditional, unlike Clear_draft_stroke_surface:
@@ -2541,12 +2598,10 @@ void Update_freehand_draft_live_base(D2DOverlayResources &res,
 
 // Brings the freehand draft up to date before the frame: feeds new points to the
 // smoother, appends final points to the body bitmap and bakes them into live_base.
-// Fills `live` with the moving end and returns the pixels it touches.
+// Fills `live` with the moving end and the rects to recomposite around it.
 // Must be called BEFORE hwnd_rt->BeginDraw.
-[[nodiscard]] core::RectPx Prepare_freehand_draft(D2DOverlayResources &res,
-                                                  D2DPaintInput const &input,
-                                                  FreehandDraftLiveParts &live,
-                                                  int vd_width, int vd_height) {
+void Prepare_freehand_draft(D2DOverlayResources &res, D2DPaintInput const &input,
+                            FreehandDraftLiveParts &live, int vd_width, int vd_height) {
     GREENFLAME_PROFILE_FUNCTION();
 
     std::span<const core::PointPx> const points = input.draft_freehand_points;
@@ -2614,10 +2669,22 @@ void Update_freehand_draft_live_base(D2DOverlayResources &res,
         Freehand_draft_piece_bounds(live.provisional, style.width_px, vd_width,
                                     vd_height),
         Freehand_draft_piece_bounds(live.tail, style.width_px, vd_width, vd_height));
+    live.clips.clear();
+    if (live_only && points.size() == 2) {
+        // A straightened bar: its box spans start to cursor, so cover the bar itself.
+        // Same reach as Freehand_draft_piece_bounds.
+        int32_t const reach_px =
+            static_cast<int32_t>(
+                std::ceil(static_cast<float>(std::max(1, style.width_px)) * 0.5f)) +
+            kFreehandDraftAntialiasMarginPx;
+        live.clips =
+            Segment_cover_rects(points[0], points[1], reach_px, vd_width, vd_height);
+    } else if (!live.bounds.Is_empty()) {
+        live.clips.push_back(live.bounds);
+    }
     if (tip_shape == core::FreehandTipShape::Square) {
         Record_square_draft_mask(res, live);
     }
-    return live.bounds;
 }
 
 // ---------------------------------------------------------------------------
@@ -2641,6 +2708,38 @@ void Draw_live_annotation_draft(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         Draw_annotation(rt, res, *input.draft_annotation);
     }
     // Freehand drafts draw on their own path (Composite_freehand_draft_region).
+}
+
+// A line or arrow draft over an up-to-date frozen frame, or null. Such a frame is the
+// frozen bitmap plus a recomposite around the line, instead of a whole dynamic frame:
+// outside the selection the frozen bitmap is screenshot, annotations, dim; inside it,
+// screenshot and annotations, the same passes the dynamic path makes there.
+[[nodiscard]] core::LineAnnotation const *
+Line_draft_over_frozen(D2DOverlayResources const &res,
+                       D2DPaintInput const &input) noexcept {
+    core::RectPx const restore_rect =
+        !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+    if (input.draft_annotation == nullptr || input.draft_text_annotation != nullptr ||
+        !res.frozen_valid || !res.frozen_bitmap ||
+        restore_rect != res.frozen_selection || input.dragging ||
+        input.handle_dragging || input.move_dragging || input.annotation_editing ||
+        input.modifier_preview || input.lifted_window_bitmap != nullptr) {
+        return nullptr;
+    }
+    return std::get_if<core::LineAnnotation>(&input.draft_annotation->data);
+}
+
+// Pixels the line may touch on either side of its axis, as a Segment_cover_rects
+// reach: half its width, or half the arrow head's width, plus antialiasing.
+[[nodiscard]] int32_t Line_draft_reach_px(core::LineAnnotation const &line) noexcept {
+    float const width = static_cast<float>(line.style.width_px);
+    float half_extent = width * 0.5f;
+    if (line.arrow_head) {
+        half_extent = std::max(half_extent,
+                               (kArrowBaseWidth + width * kArrowWidthPerStroke) * 0.5f);
+    }
+    return static_cast<int32_t>(std::ceil(half_extent)) +
+           kFreehandDraftAntialiasMarginPx;
 }
 
 void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
@@ -2989,6 +3088,7 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
     if (SUCCEEDED(hr)) {
         (void)res.frozen_rt->GetBitmap(res.frozen_bitmap.ReleaseAndGetAddressOf());
         res.frozen_valid = true;
+        res.frozen_selection = selection;
     }
 }
 
@@ -3002,12 +3102,10 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
 
     bool const freehand_draft = Is_freehand_draft(input);
     FreehandDraftLiveParts freehand_live{};
-    core::RectPx freehand_live_clip{};
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Update_draft_stroke");
         if (freehand_draft) {
-            freehand_live_clip =
-                Prepare_freehand_draft(res, input, freehand_live, vd_width, vd_height);
+            Prepare_freehand_draft(res, input, freehand_live, vd_width, vd_height);
         } else {
             // No stroke, or a one-point brush stroke drawn from its draft annotation.
             Clear_draft_stroke_surface(res);
@@ -3032,6 +3130,8 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         res.frozen_valid && !input.dragging && !input.handle_dragging &&
         !input.move_dragging && !input.annotation_editing && !input.modifier_preview &&
         !has_live_annotation_draft && input.lifted_window_bitmap == nullptr;
+    core::LineAnnotation const *const line_draft =
+        freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
 
     // Frame-latency throttle: with FRAME_LATENCY_WAITABLE_OBJECT and max
     // latency 1, this blocks until DWM has consumed the prior frame, so the
@@ -3064,15 +3164,27 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
             Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.draft_stroke_bitmap.Get(),
                                     Desktop_rect(vd_width, vd_height), vd_width,
                                     vd_height);
-            if (!freehand_live_clip.Is_empty()) {
-                Composite_freehand_draft_region(res.hwnd_rt.Get(), res, input,
-                                                freehand_live_clip, &freehand_live,
-                                                vd_width, vd_height);
+            for (core::RectPx const &clip : freehand_live.clips) {
+                Composite_freehand_draft_region(res.hwnd_rt.Get(), res, input, clip,
+                                                &freehand_live, vd_width, vd_height);
             }
         } else {
             Composite_freehand_draft_region(res.hwnd_rt.Get(), res, input,
                                             Desktop_rect(vd_width, vd_height),
                                             &freehand_live, vd_width, vd_height);
+        }
+    } else if (line_draft != nullptr) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Line_draft");
+        Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.frozen_bitmap.Get(),
+                                Desktop_rect(vd_width, vd_height), vd_width, vd_height);
+        for (core::RectPx const &clip : Segment_cover_rects(
+                 line_draft->start, line_draft->end, Line_draft_reach_px(*line_draft),
+                 vd_width, vd_height)) {
+            Composite_draft_region(res.hwnd_rt.Get(), res, input, clip, vd_width,
+                                   vd_height, [&](ID2D1RenderTarget *target) {
+                                       Draw_annotation(target, res,
+                                                       *input.draft_annotation);
+                                   });
         }
     } else if (is_steady_state) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Steady_state");

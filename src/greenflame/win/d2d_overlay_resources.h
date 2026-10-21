@@ -141,6 +141,7 @@ struct D2DOverlayResources final {
 
     bool annotations_valid = false;
     bool frozen_valid = false;
+    core::RectPx frozen_selection = {}; // the selection frozen_bitmap was built with
 
     // Initialize the process-lifetime factories (call once).
     [[nodiscard]] bool Initialize_factory();
