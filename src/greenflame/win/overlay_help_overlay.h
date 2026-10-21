@@ -38,6 +38,9 @@ class OverlayHelpOverlay final : public IOverlayTopLayer {
     core::OverlayHelpContent const *content_ = nullptr;
     bool visible_ = false;
     std::optional<core::RectPx> monitor_rect_client_ = std::nullopt;
+    // The whole overlay's size (the virtual desktop), set by Show_at_cursor. A paint
+    // target may cover only part of the overlay, so its size is not this.
+    D2D1_SIZE_F overlay_size_ = {};
     // DWrite text formats are created lazily and reused across overlay frames.
     Microsoft::WRL::ComPtr<IDWriteTextFormat> dwrite_title_;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> dwrite_body_;

@@ -94,10 +94,11 @@ class OverlayWindow final {
 
     static LRESULT CALLBACK Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wparam,
                                             LPARAM lparam);
-    LRESULT Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam);
+    // hwnd is the window the message is for.
+    LRESULT Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     void Apply_action(core::OverlayAction action);
-    LRESULT On_key_down(WPARAM wparam, LPARAM lparam);
-    LRESULT On_key_up(WPARAM wparam, LPARAM lparam);
+    LRESULT On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam);
+    LRESULT On_key_up(HWND hwnd, WPARAM wparam, LPARAM lparam);
     LRESULT On_char(WPARAM wparam);
     LRESULT On_l_button_down();
     LRESULT On_l_button_dbl_clk();
@@ -105,7 +106,17 @@ class OverlayWindow final {
     LRESULT On_mouse_wheel(WPARAM wparam);
     LRESULT On_l_button_up();
     LRESULT On_r_button_down();
-    LRESULT On_timer(WPARAM wparam);
+    LRESULT On_timer(HWND hwnd, WPARAM wparam);
+
+    // The overlay's coordinates are virtual-desktop pixels: client pixel (0, 0) is the
+    // virtual desktop's top-left, wherever the overlay windows sit.
+    [[nodiscard]] core::PointPx Desktop_origin_px() const noexcept;
+    // The virtual desktop in screen pixels, as captured at open.
+    [[nodiscard]] core::RectPx Desktop_rect_screen() const noexcept;
+    [[nodiscard]] core::PointPx Cursor_client_px() const;
+    // Asks for a repaint of the overlay; Repaint_now paints before returning.
+    void Request_repaint() const;
+    void Repaint_now() const;
 
     void Build_default_save_name(std::wstring_view save_dir_for_num_scan,
                                  std::span<wchar_t> out) const;
@@ -121,10 +132,10 @@ class OverlayWindow final {
     void Notify_save_and_close(GdiCaptureResult &cropped, std::wstring_view saved_path,
                                bool file_copied_to_clipboard);
 
-    LRESULT On_paint();
+    LRESULT On_paint(HWND hwnd);
     LRESULT On_destroy();
     LRESULT On_close();
-    LRESULT On_set_cursor(WPARAM wparam, LPARAM lparam);
+    LRESULT On_set_cursor(HWND hwnd, WPARAM wparam, LPARAM lparam);
     void Refresh_cursor();
     bool Refresh_hover_handle();
     [[nodiscard]] bool Handle_tool_size_delta(int32_t delta_steps);

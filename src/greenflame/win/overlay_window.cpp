@@ -42,12 +42,6 @@ constexpr int kMouseHistoryCoordinateMask = 0xFFFF;
     };
 }
 
-[[nodiscard]] greenflame::core::PointPx Client_origin_screen(HWND hwnd) {
-    POINT origin{0, 0};
-    (void)ClientToScreen(hwnd, &origin);
-    return {origin.x, origin.y};
-}
-
 constexpr int32_t kSnapThresholdPx = 10;
 constexpr int kToolbarButtonSizePx = 36;
 constexpr int kToolbarButtonSeparatorPx = 9; // size / 4
@@ -771,14 +765,10 @@ struct OverlayWindow::ObfuscateSourceProvider final
         if (state.selection_uses_full_window_capture &&
             owner_->resources_->window_capture.display_capture.Is_valid() &&
             !state.selection_capture_rect_screen.Is_empty()) {
-            RECT overlay_rect{};
-            if (GetWindowRect(owner_->hwnd_, &overlay_rect) == 0) {
-                return std::nullopt;
-            }
+            core::PointPx const origin = owner_->Desktop_origin_px();
             source_capture = &owner_->resources_->window_capture.display_capture;
-            source_bounds =
-                core::Screen_rect_to_client_rect(state.selection_capture_rect_screen,
-                                                 overlay_rect.left, overlay_rect.top);
+            source_bounds = core::Screen_rect_to_client_rect(
+                state.selection_capture_rect_screen, origin.x, origin.y);
         } else if (owner_->resources_->display_capture.Is_valid()) {
             source_capture = &owner_->resources_->display_capture;
             source_bounds = {};
@@ -897,6 +887,36 @@ bool OverlayWindow::Rebuild_display_capture() {
     }
 
     return true;
+}
+
+core::PointPx OverlayWindow::Desktop_origin_px() const noexcept {
+    return resources_ != nullptr ? resources_->capture_origin_px : core::PointPx{};
+}
+
+core::RectPx OverlayWindow::Desktop_rect_screen() const noexcept {
+    if (resources_ == nullptr) {
+        return {};
+    }
+    return Capture_bounds_screen(resources_->capture_origin_px,
+                                 resources_->display_capture);
+}
+
+core::PointPx OverlayWindow::Cursor_client_px() const {
+    core::PointPx const screen = Get_cursor_pos_px();
+    core::PointPx const origin = Desktop_origin_px();
+    return {screen.x - origin.x, screen.y - origin.y};
+}
+
+void OverlayWindow::Request_repaint() const {
+    if (hwnd_ != nullptr) {
+        InvalidateRect(hwnd_, nullptr, FALSE);
+    }
+}
+
+void OverlayWindow::Repaint_now() const {
+    if (hwnd_ != nullptr) {
+        RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+    }
 }
 
 core::RectPx OverlayWindow::Visible_window_rect_screen(
@@ -1036,7 +1056,7 @@ core::PointPx OverlayWindow::Update_pointer_state_from_current_input(
     core::OverlayModifierState mods) {
     GREENFLAME_PROFILE_FUNCTION();
 
-    core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
+    core::PointPx const cursor_client = Cursor_client_px();
 
     auto const &s = controller_.State();
     bool const needs_preview = !s.dragging && !s.handle_dragging && !s.move_dragging &&
@@ -1052,10 +1072,9 @@ core::PointPx OverlayWindow::Update_pointer_state_from_current_input(
         GREENFLAME_PROFILE_SCOPE(
             "OverlayWindow::Update_pointer_state_from_current_input::Modifier_preview");
         cursor_screen = Get_cursor_pos_px();
-        RECT wr{};
-        GetWindowRect(hwnd_, &wr);
-        ox = wr.left;
-        oy = wr.top;
+        core::PointPx const origin = Desktop_origin_px();
+        ox = origin.x;
+        oy = origin.y;
         if (mods.ctrl && !mods.shift) {
             std::optional<HWND> const preview_window =
                 Resolve_ctrl_preview_window(cursor_screen, win_rect);
@@ -1088,12 +1107,12 @@ void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client)
 
     bool const hover_handle_changed = Refresh_hover_handle();
     if (hover_handle_changed) {
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        Request_repaint();
     }
 
     bool const toolbar_hover_changed = Update_toolbar_hover_states(cursor_client);
     if (toolbar_hover_changed) {
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
     }
 
     if (Should_force_obfuscate_repaint() ||
@@ -1102,8 +1121,7 @@ void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client)
           controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
         GREENFLAME_PROFILE_SCOPE(
             "OverlayWindow::Refresh_pointer_visual_overlays::Forced_redraw");
-        RedrawWindow(hwnd_, nullptr, nullptr,
-                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+        Repaint_now();
     }
 }
 
@@ -1117,7 +1135,7 @@ void OverlayWindow::Restore_selection_state(core::OverlaySelectionState const &s
         }
         d2d_resources_->Invalidate_annotations();
     }
-    InvalidateRect(hwnd_, nullptr, TRUE);
+    Request_repaint();
 }
 
 void OverlayWindow::Toggle_captured_cursor_visibility() {
@@ -1153,9 +1171,9 @@ void OverlayWindow::Toggle_captured_cursor_visibility() {
         d2d_resources_->Invalidate_annotations();
     }
     (void)Refresh_hover_handle();
-    (void)Update_toolbar_hover_states(Get_client_cursor_pos_px(hwnd_));
+    (void)Update_toolbar_hover_states(Cursor_client_px());
     Refresh_cursor();
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    Request_repaint();
 }
 
 void OverlayWindow::Show_help_overlay_at_cursor() {
@@ -1166,20 +1184,12 @@ void OverlayWindow::Show_help_overlay_at_cursor() {
         return;
     }
 
-    RECT overlay_rect{};
-    if (GetWindowRect(hwnd_, &overlay_rect) == 0) {
-        return;
-    }
-
-    core::RectPx const overlay_screen_rect = core::RectPx::From_ltrb(
-        static_cast<int32_t>(overlay_rect.left), static_cast<int32_t>(overlay_rect.top),
-        static_cast<int32_t>(overlay_rect.right),
-        static_cast<int32_t>(overlay_rect.bottom));
+    core::RectPx const overlay_screen_rect = Desktop_rect_screen();
     hotkey_help_overlay_.Show_at_cursor(
         Get_cursor_pos_px(), controller_.State().cached_monitors, overlay_screen_rect);
     (void)Clear_toolbar_hover_states();
     Refresh_cursor();
-    InvalidateRect(hwnd_, nullptr, TRUE);
+    Request_repaint();
 }
 
 void OverlayWindow::Hide_help_overlay(bool suppress_next_lbutton_up) {
@@ -1192,28 +1202,20 @@ void OverlayWindow::Hide_help_overlay(bool suppress_next_lbutton_up) {
         suppress_next_lbutton_up_ = true;
     }
     (void)Refresh_hover_handle();
-    (void)Update_toolbar_hover_states(Get_client_cursor_pos_px(hwnd_));
+    (void)Update_toolbar_hover_states(Cursor_client_px());
     Refresh_cursor();
-    InvalidateRect(hwnd_, nullptr, TRUE);
+    Request_repaint();
 }
 
 void OverlayWindow::Show_obfuscate_warning_at_cursor() {
-    RECT overlay_rect{};
-    if (GetWindowRect(hwnd_, &overlay_rect) == 0) {
-        return;
-    }
-
-    core::RectPx const overlay_screen_rect = core::RectPx::From_ltrb(
-        static_cast<int32_t>(overlay_rect.left), static_cast<int32_t>(overlay_rect.top),
-        static_cast<int32_t>(overlay_rect.right),
-        static_cast<int32_t>(overlay_rect.bottom));
+    core::RectPx const overlay_screen_rect = Desktop_rect_screen();
     obfuscate_warning_dialog_.Show_at_cursor(
         Get_cursor_pos_px(), controller_.State().cached_monitors, overlay_screen_rect);
     (void)Clear_toolbar_hover_states();
     selection_wheel_.mouse_hovered_segment = std::nullopt;
     selection_wheel_.hovered_hub = std::nullopt;
     Refresh_cursor();
-    InvalidateRect(hwnd_, nullptr, TRUE);
+    Request_repaint();
 }
 
 void OverlayWindow::Hide_obfuscate_warning() {
@@ -1223,9 +1225,9 @@ void OverlayWindow::Hide_obfuscate_warning() {
 
     obfuscate_warning_dialog_.Hide();
     (void)Refresh_hover_handle();
-    (void)Update_toolbar_hover_states(Get_client_cursor_pos_px(hwnd_));
+    (void)Update_toolbar_hover_states(Cursor_client_px());
     Refresh_cursor();
-    InvalidateRect(hwnd_, nullptr, TRUE);
+    Request_repaint();
 }
 
 void OverlayWindow::Accept_obfuscate_warning() {
@@ -1279,19 +1281,8 @@ OverlayWindow::Compute_toolbar_positions(int button_count) const {
         return {};
     }
 
-    // Build client-space monitor rects.
-    std::vector<core::RectPx> monitor_client_rects;
-    monitor_client_rects.reserve(s.cached_monitors.size());
-    RECT overlay_rect{};
-    if (GetWindowRect(hwnd_, &overlay_rect) != 0) {
-        for (auto const &monitor : s.cached_monitors) {
-            monitor_client_rects.push_back(core::RectPx::From_ltrb(
-                monitor.bounds.left - static_cast<int32_t>(overlay_rect.left),
-                monitor.bounds.top - static_cast<int32_t>(overlay_rect.top),
-                monitor.bounds.right - static_cast<int32_t>(overlay_rect.left),
-                monitor.bounds.bottom - static_cast<int32_t>(overlay_rect.top)));
-        }
-    }
+    std::vector<core::RectPx> const monitor_client_rects =
+        core::Monitor_rects_in_client(s.cached_monitors, Desktop_origin_px());
 
     core::ToolbarPlacementParams params{};
     params.selection = s.final_selection;
@@ -1481,6 +1472,19 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         hinstance_ = nullptr;
         return false;
     }
+    // Every overlay coordinate assumes the window sits exactly on the virtual desktop
+    // captured above. Record it if Windows put it anywhere else.
+    if (RECT created{}; GetWindowRect(hwnd, &created) != 0) {
+        core::RectPx const created_px = core::RectPx::From_ltrb(
+            created.left, created.top, created.right, created.bottom);
+        if (created_px != bounds) {
+            GREENFLAME_LOG_WRITE(L"overlay",
+                                 std::wstring(L"Overlay window rect ") +
+                                     Format_rect_for_debug_log(created_px) +
+                                     L" differs from the virtual desktop " +
+                                     Format_rect_for_debug_log(bounds));
+        }
+    }
     if (!Rebuild_display_capture() || !resources_->Initialize_for_capture(hinstance_)) {
         DestroyWindow(hwnd);
         return false;
@@ -1654,7 +1658,7 @@ OverlayWindow::Refresh_pointer_for_modifier_keys(core::OverlayModifierState mods
     // Mid-stroke, a modifier key adds no stroke point: the cursor position now is
     // newer than mouse history not yet consumed, so it would land out of order.
     // Re-send the last consumed point with the new modifiers.
-    core::PointPx const origin = Client_origin_screen(hwnd_);
+    core::PointPx const origin = Desktop_origin_px();
     core::PointPx const screen = stroke_input_.last_consumed.screen;
     core::PointPx const cursor_client = {screen.x - origin.x, screen.y - origin.y};
     Apply_action(controller_.On_pointer_move(mods, cursor_client, screen, std::nullopt,
@@ -1677,7 +1681,7 @@ core::PointPx OverlayWindow::Feed_stroke_history(core::OverlayModifierState mods
     GREENFLAME_PROFILE_FUNCTION();
 
     core::MouseMoveSample const message = Current_message_sample();
-    core::PointPx const origin = Client_origin_screen(hwnd_);
+    core::PointPx const origin = Desktop_origin_px();
     MOUSEMOVEPOINT query{};
     query.x = message.screen.x & kMouseHistoryCoordinateMask;
     query.y = message.screen.y & kMouseHistoryCoordinateMask;
@@ -1808,7 +1812,7 @@ void OverlayWindow::Show_tool_size_overlay(int32_t step) {
     transient_center_label_text_ = std::to_wstring(step);
     (void)SetTimer(hwnd_, kBrushSizeOverlayTimerId, static_cast<UINT>(duration_ms),
                    nullptr);
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    Request_repaint();
 }
 
 void OverlayWindow::Clear_transient_center_label(bool repaint) {
@@ -1820,7 +1824,7 @@ void OverlayWindow::Clear_transient_center_label(bool repaint) {
     }
     transient_center_label_text_.clear();
     if (repaint && hwnd_ != nullptr) {
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
     }
 }
 
@@ -2251,7 +2255,7 @@ void OverlayWindow::Navigate_wheel(int steps) {
     selection_wheel_.nav_hovered_segment = static_cast<size_t>(idx);
     selection_wheel_.hovered_hub = std::nullopt;
     selection_wheel_.highlighter_hovered_hub = std::nullopt;
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    Request_repaint();
 }
 
 void OverlayWindow::Show_selection_wheel(core::PointPx center) {
@@ -2269,7 +2273,7 @@ void OverlayWindow::Show_selection_wheel(core::PointPx center) {
     last_hover_handle_ = std::nullopt;
     (void)Clear_toolbar_hover_states();
     Refresh_cursor();
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    Request_repaint();
 }
 
 void OverlayWindow::Dismiss_selection_wheel(bool repaint) {
@@ -2282,7 +2286,7 @@ void OverlayWindow::Dismiss_selection_wheel(bool repaint) {
         Refresh_cursor();
     }
     if (repaint && hwnd_ != nullptr) {
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
     }
 }
 
@@ -2596,7 +2600,7 @@ LRESULT CALLBACK OverlayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wpar
     if (!self) {
         return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
-    LRESULT const result = self->Wnd_proc(msg, wparam, lparam);
+    LRESULT const result = self->Wnd_proc(hwnd, msg, wparam, lparam);
     if (msg == WM_NCDESTROY) {
         self->hwnd_ = nullptr;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
@@ -2616,13 +2620,13 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
     }
     switch (action) {
     case core::OverlayAction::Repaint:
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        Request_repaint();
         break;
     case core::OverlayAction::InvalidateFrozenCache:
         if (d2d_resources_) {
             d2d_resources_->Invalidate_annotations();
         }
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
         break;
     case core::OverlayAction::Close:
         Destroy();
@@ -2650,7 +2654,7 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
     }
 }
 
-LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
+LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
     bool const ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     bool const shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
     bool const alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -2707,7 +2711,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
                 }
                 selection_wheel_.nav_hovered_segment = std::nullopt;
                 selection_wheel_.mouse_hovered_segment = std::nullopt;
-                InvalidateRect(hwnd_, nullptr, FALSE);
+                Request_repaint();
             }
             return 0;
         }
@@ -2719,7 +2723,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
             }
             Dismiss_selection_wheel(false);
             Refresh_cursor();
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            Request_repaint();
             return 0;
         }
         // Down arrow = clockwise (+1); Up arrow = counter-clockwise (-1).
@@ -2745,7 +2749,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         auto repaint_text_draft = [&]() {
             Reset_caret_blink();
             Refresh_cursor();
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            Request_repaint();
         };
 
         if (wparam == VK_RETURN) {
@@ -2760,7 +2764,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
                 (void)KillTimer(hwnd_, kCaretBlinkTimerId);
                 (void)Refresh_hover_handle();
                 Refresh_cursor();
-                InvalidateRect(hwnd_, nullptr, FALSE);
+                Request_repaint();
             }
             return 0;
         }
@@ -2875,7 +2879,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
     }
     // Tab (bare): show selection wheel at cursor.
     if (wparam == VK_TAB && !eff_ctrl && !eff_shift && !eff_alt && !is_repeat) {
-        Show_selection_wheel(Get_client_cursor_pos_px(hwnd_));
+        Show_selection_wheel(Cursor_client_px());
         return 0;
     }
     if (eff_ctrl && wparam == L'H') {
@@ -2914,7 +2918,7 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
         Rebuild_toolbar_buttons();
         (void)Refresh_hover_handle();
         Refresh_cursor();
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
         return 0;
     }
     if (eff_ctrl && wparam == L'S') {
@@ -2958,10 +2962,10 @@ LRESULT OverlayWindow::On_key_down(WPARAM wparam, LPARAM lparam) {
     }
     UINT const message_id =
         (lparam & (static_cast<LPARAM>(1) << 29)) != 0 ? WM_SYSKEYDOWN : WM_KEYDOWN;
-    return DefWindowProcW(hwnd_, message_id, wparam, lparam);
+    return DefWindowProcW(hwnd, message_id, wparam, lparam);
 }
 
-LRESULT OverlayWindow::On_key_up(WPARAM wparam, LPARAM lparam) {
+LRESULT OverlayWindow::On_key_up(HWND hwnd, WPARAM wparam, LPARAM lparam) {
     if (selection_wheel_.visible) {
         return 0;
     }
@@ -2991,7 +2995,7 @@ LRESULT OverlayWindow::On_key_up(WPARAM wparam, LPARAM lparam) {
     }
     UINT const message_id =
         (lparam & (static_cast<LPARAM>(1) << 29)) != 0 ? WM_SYSKEYUP : WM_KEYUP;
-    return DefWindowProcW(hwnd_, message_id, wparam, lparam);
+    return DefWindowProcW(hwnd, message_id, wparam, lparam);
 }
 
 LRESULT OverlayWindow::On_char(WPARAM wparam) {
@@ -3017,7 +3021,7 @@ LRESULT OverlayWindow::On_char(WPARAM wparam) {
     text_edit->On_text_input(
         std::wstring_view(text.data(), static_cast<size_t>(text.size())));
     Reset_caret_blink();
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    Request_repaint();
     return 0;
 }
 
@@ -3026,12 +3030,12 @@ LRESULT OverlayWindow::On_l_button_down() {
         return 0;
     }
     bool const had_text_edit = controller_.Has_active_text_edit();
-    core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+    core::PointPx const cur = Cursor_client_px();
     if (obfuscate_warning_dialog_.Is_visible()) {
         (void)obfuscate_warning_dialog_.Update_hover(cur);
         obfuscate_warning_dialog_.On_mouse_down(cur);
         Refresh_cursor();
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
         return 0;
     }
     // If the wheel is up and the click lands on a toolbar button, dismiss the
@@ -3061,7 +3065,7 @@ LRESULT OverlayWindow::On_l_button_down() {
                 selection_wheel_.hovered_hub = std::nullopt;
                 selection_wheel_.mouse_hovered_segment = std::nullopt;
                 Refresh_cursor();
-                InvalidateRect(hwnd_, nullptr, FALSE);
+                Request_repaint();
                 return 0; // wheel stays open
             }
         }
@@ -3077,7 +3081,7 @@ LRESULT OverlayWindow::On_l_button_down() {
                 selection_wheel_.highlighter_hovered_hub = std::nullopt;
                 selection_wheel_.mouse_hovered_segment = std::nullopt;
                 Refresh_cursor();
-                InvalidateRect(hwnd_, nullptr, FALSE);
+                Request_repaint();
                 return 0; // wheel stays open
             }
         }
@@ -3095,7 +3099,7 @@ LRESULT OverlayWindow::On_l_button_down() {
         }
         Dismiss_selection_wheel(false);
         Refresh_cursor();
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
         return 0;
     }
     if (hotkey_help_overlay_.Is_visible()) {
@@ -3120,7 +3124,7 @@ LRESULT OverlayWindow::On_l_button_down() {
             if (controller_.Can_interact_with_annotation_toolbar()) {
                 (void)Update_toolbar_hover_states(cur);
                 hit_button->button->On_mouse_down(cur);
-                InvalidateRect(hwnd_, nullptr, FALSE);
+                Request_repaint();
                 return 0;
             }
 
@@ -3147,7 +3151,7 @@ LRESULT OverlayWindow::On_l_button_down() {
                 (void)Update_toolbar_hover_states(cur);
                 hit_button->button->On_mouse_down(cur);
                 Refresh_cursor();
-                InvalidateRect(hwnd_, nullptr, FALSE);
+                Request_repaint();
                 return 0;
             }
         }
@@ -3160,15 +3164,14 @@ LRESULT OverlayWindow::On_l_button_down() {
     // A brush or highlighter stroke starts at the press message's point, where its
     // mouse history starts. The cursor may already have moved on.
     core::MouseMoveSample const press_message = Current_message_sample();
-    core::PointPx const press_origin = Client_origin_screen(hwnd_);
+    core::PointPx const press_origin = Desktop_origin_px();
     core::PointPx const cursor_client =
         Is_freehand_tool_armed()
             ? core::PointPx{press_message.screen.x - press_origin.x,
                             press_message.screen.y - press_origin.y}
             : cur;
     core::PointPx const cursor_screen = Get_cursor_pos_px();
-    RECT wr{};
-    GetWindowRect(hwnd_, &wr);
+    core::PointPx const origin = Desktop_origin_px();
 
     // Pre-resolve only the hint relevant to the active preview mode.
     std::optional<HWND> win_handle;
@@ -3194,7 +3197,7 @@ LRESULT OverlayWindow::On_l_button_down() {
 
     Apply_action(controller_.On_primary_press(
         mods, cursor_client, cursor_screen, win_handle, monitor_idx, win_rect, vdesk,
-        Collect_visible_snap_edges(), wr.left, wr.top, window_full_capture_available));
+        Collect_visible_snap_edges(), origin.x, origin.y, window_full_capture_available));
     if (Is_freehand_stroke_active()) {
         stroke_input_ = StrokeInput{.last_consumed = press_message};
     }
@@ -3228,14 +3231,13 @@ LRESULT OverlayWindow::On_l_button_down() {
     bool const hover_changed = Refresh_hover_handle();
     Refresh_cursor();
     if (hover_changed) {
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        Request_repaint();
     }
     if (Should_force_obfuscate_repaint() ||
         (controller_.Selected_annotation() != nullptr &&
          std::holds_alternative<core::ObfuscateAnnotation>(
              controller_.Selected_annotation()->data))) {
-        RedrawWindow(hwnd_, nullptr, nullptr,
-                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+        Repaint_now();
     }
     core::OverlaySelectionState const after_selection = controller_.Selection_state();
     auto const &after_state = controller_.State();
@@ -3259,26 +3261,26 @@ LRESULT OverlayWindow::On_mouse_move() {
 
     if (obfuscate_warning_dialog_.Is_visible()) {
         bool const hover_changed =
-            obfuscate_warning_dialog_.Update_hover(Get_client_cursor_pos_px(hwnd_));
+            obfuscate_warning_dialog_.Update_hover(Cursor_client_px());
         bool const toolbar_changed = Clear_toolbar_hover_states();
         if (last_hover_handle_.has_value()) {
             last_hover_handle_ = std::nullopt;
         }
         if (hover_changed || toolbar_changed) {
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            Request_repaint();
         }
         Refresh_cursor();
         return 0;
     }
     if (selection_wheel_.visible) {
         bool const hover_changed =
-            Update_selection_wheel_hover(Get_client_cursor_pos_px(hwnd_));
+            Update_selection_wheel_hover(Cursor_client_px());
         bool const toolbar_changed = Clear_toolbar_hover_states();
         if (last_hover_handle_.has_value()) {
             last_hover_handle_ = std::nullopt;
         }
         if (hover_changed || toolbar_changed) {
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            Request_repaint();
         }
         Refresh_cursor();
         return 0;
@@ -3359,7 +3361,7 @@ LRESULT OverlayWindow::On_l_button_dbl_clk() {
     if (controller_.Double_press_is_press()) {
         return On_l_button_down();
     }
-    core::PointPx const cursor_client = Get_client_cursor_pos_px(hwnd_);
+    core::PointPx const cursor_client = Cursor_client_px();
     Apply_action(controller_.On_primary_double_press(cursor_client));
     if (controller_.Has_active_text_edit()) {
         Reset_caret_blink();
@@ -3374,7 +3376,7 @@ LRESULT OverlayWindow::On_l_button_up() {
         return 0;
     }
     if (obfuscate_warning_dialog_.Is_visible()) {
-        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        core::PointPx const cur = Cursor_client_px();
         OverlayWarningDialogAction const action =
             obfuscate_warning_dialog_.On_mouse_up(cur);
         if (action == OverlayWarningDialogAction::Accept) {
@@ -3383,7 +3385,7 @@ LRESULT OverlayWindow::On_l_button_up() {
             Reject_obfuscate_warning();
         } else {
             Refresh_cursor();
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            Request_repaint();
         }
         return 0;
     }
@@ -3394,7 +3396,7 @@ LRESULT OverlayWindow::On_l_button_up() {
     // Route release to any toolbar button under the cursor.
     if (controller_.Can_interact_with_annotation_toolbar() &&
         !toolbar_buttons_.empty()) {
-        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        core::PointPx const cur = Cursor_client_px();
         bool const toolbar_hover_changed = Update_toolbar_hover_states(cur);
         for (auto const &btn : toolbar_buttons_) {
             if (btn.button && btn.button->Hit_test(cur)) {
@@ -3417,17 +3419,17 @@ LRESULT OverlayWindow::On_l_button_up() {
                 }
                 bool const hover_changed = Refresh_hover_handle();
                 if (action == core::OverlayAction::None) {
-                    InvalidateRect(hwnd_, nullptr, FALSE);
+                    Request_repaint();
                 }
                 if (hover_changed && action == core::OverlayAction::None) {
-                    InvalidateRect(hwnd_, nullptr, FALSE);
+                    Request_repaint();
                 }
                 Refresh_cursor();
                 return 0;
             }
         }
         if (toolbar_hover_changed) {
-            InvalidateRect(hwnd_, nullptr, FALSE);
+            Request_repaint();
         }
     }
     auto const &s = controller_.State();
@@ -3451,7 +3453,7 @@ LRESULT OverlayWindow::On_l_button_up() {
     mods.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     // A brush or highlighter stroke ends at the release message's point: the cursor may
     // already have moved on, and a point past it would land after the stroke's history.
-    core::PointPx release_client = Get_client_cursor_pos_px(hwnd_);
+    core::PointPx release_client = Cursor_client_px();
     if (Is_freehand_stroke_active()) {
         core::OverlayModifierState stroke_mods = mods;
         stroke_mods.primary_down = true;
@@ -3468,7 +3470,7 @@ LRESULT OverlayWindow::On_l_button_up() {
     bool const hover_changed = Refresh_hover_handle();
     Refresh_cursor();
     if (hover_changed) {
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        Request_repaint();
     }
 
     core::OverlaySelectionState const after = controller_.Selection_state();
@@ -3495,8 +3497,7 @@ LRESULT OverlayWindow::On_l_button_up() {
     }
 
     if (Should_force_obfuscate_repaint()) {
-        RedrawWindow(hwnd_, nullptr, nullptr,
-                     RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
+        Repaint_now();
     }
 
     return 0;
@@ -3510,12 +3511,12 @@ LRESULT OverlayWindow::On_r_button_down() {
         return 0;
     }
     if (Can_show_selection_wheel()) {
-        Show_selection_wheel(Get_client_cursor_pos_px(hwnd_));
+        Show_selection_wheel(Cursor_client_px());
     }
     return 0;
 }
 
-LRESULT OverlayWindow::On_timer(WPARAM wparam) {
+LRESULT OverlayWindow::On_timer(HWND hwnd, WPARAM wparam) {
     if (wparam == kHighlighterStraightenTimerId) {
         Cancel_highlighter_straighten_pending();
         if (controller_.Straighten_highlighter_stroke()) {
@@ -3534,7 +3535,7 @@ LRESULT OverlayWindow::On_timer(WPARAM wparam) {
             return 0;
         }
         caret_blink_visible_ = !caret_blink_visible_;
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
         return 0;
     }
     if (wparam == kSelectedAnnotationMarqueeTimerId) {
@@ -3549,17 +3550,17 @@ LRESULT OverlayWindow::On_timer(WPARAM wparam) {
             (selected_annotation_marquee_phase_px_ +
              kSelectedAnnotationMarqueePhaseStepPx) %
             greenflame::kSelectedAnnotationMarqueePatternLengthPx;
-        InvalidateRect(hwnd_, nullptr, FALSE);
+        Request_repaint();
         return 0;
     }
-    return DefWindowProcW(hwnd_, WM_TIMER, wparam, 0);
+    return DefWindowProcW(hwnd, WM_TIMER, wparam, 0);
 }
 
 bool OverlayWindow::Refresh_hover_handle() {
     auto const &s = controller_.State();
     if (!s.final_selection.Is_empty() && !s.dragging && !s.handle_dragging &&
         !s.move_dragging && !controller_.Has_active_annotation_gesture()) {
-        core::PointPx const cur = Get_client_cursor_pos_px(hwnd_);
+        core::PointPx const cur = Cursor_client_px();
         std::optional<core::SelectionHandle> hover =
             core::Hit_test_border_zone(s.final_selection, cur);
         if (hover != last_hover_handle_) {
@@ -3576,14 +3577,14 @@ bool OverlayWindow::Refresh_hover_handle() {
     return false;
 }
 
-LRESULT OverlayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
+LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
     switch (msg) {
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
-        return On_key_down(wparam, lparam);
+        return On_key_down(hwnd, wparam, lparam);
     case WM_KEYUP:
     case WM_SYSKEYUP:
-        return On_key_up(wparam, lparam);
+        return On_key_up(hwnd, wparam, lparam);
     case WM_CHAR:
         return On_char(wparam);
     case WM_LBUTTONDOWN:
@@ -3601,11 +3602,11 @@ LRESULT OverlayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_CONTEXTMENU:
         return 0;
     case WM_PAINT:
-        return On_paint();
+        return On_paint(hwnd);
     case WM_SETCURSOR:
-        return On_set_cursor(wparam, lparam);
+        return On_set_cursor(hwnd, wparam, lparam);
     case WM_TIMER:
-        return On_timer(wparam);
+        return On_timer(hwnd, wparam);
     case WM_ERASEBKGND:
         return 1;
     case WM_DESTROY:
@@ -3613,7 +3614,7 @@ LRESULT OverlayWindow::Wnd_proc(UINT msg, WPARAM wparam, LPARAM lparam) {
     case WM_CLOSE:
         return On_close();
     default:
-        return DefWindowProcW(hwnd_, msg, wparam, lparam);
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     }
 }
 
@@ -3701,13 +3702,10 @@ core::RectPx OverlayWindow::Selection_screen_rect() const {
 }
 
 core::RectPx OverlayWindow::Selection_visible_screen_rect() const {
-    RECT overlay_rect{};
-    GetWindowRect(hwnd_, &overlay_rect);
+    core::PointPx const origin = Desktop_origin_px();
     core::RectPx const &sel = controller_.State().final_selection;
-    return core::RectPx::From_ltrb(sel.left + static_cast<int32_t>(overlay_rect.left),
-                                   sel.top + static_cast<int32_t>(overlay_rect.top),
-                                   sel.right + static_cast<int32_t>(overlay_rect.left),
-                                   sel.bottom + static_cast<int32_t>(overlay_rect.top));
+    return core::RectPx::From_ltrb(sel.left + origin.x, sel.top + origin.y,
+                                   sel.right + origin.x, sel.bottom + origin.y);
 }
 
 void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
@@ -3910,14 +3908,13 @@ bool OverlayWindow::Build_rendered_selection_capture(GdiCaptureResult &out) cons
         return false;
     }
 
-    RECT overlay_rect{};
-    GetWindowRect(hwnd_, &overlay_rect);
+    core::PointPx const origin = Desktop_origin_px();
     auto const &state = controller_.State();
     core::RectPx const selection =
         state.selection_uses_full_window_capture &&
                 !state.selection_capture_rect_screen.Is_empty()
             ? core::Screen_rect_to_client_rect(state.selection_capture_rect_screen,
-                                               overlay_rect.left, overlay_rect.top)
+                                               origin.x, origin.y)
             : state.final_selection;
     if (!Render_annotations_into_capture(out, controller_.Annotations(), selection)) {
         out.Free();
@@ -3978,64 +3975,32 @@ void OverlayWindow::Pin_to_desktop_and_close() {
                 MB_OK | MB_ICONWARNING);
 }
 
-// ---------------------------------------------------------------------------
-// Shared paint-input state gathering for the Direct2D overlay renderer.
-// ---------------------------------------------------------------------------
-
-namespace {
-
-void Gather_monitor_client_rects(HWND hwnd,
-                                 std::vector<core::MonitorWithBounds> const &monitors,
-                                 std::vector<core::RectPx> &out) {
-    GREENFLAME_PROFILE_FUNCTION();
-
-    out.clear();
-    out.reserve(monitors.size());
-    RECT overlay_rect{};
-    if (GetWindowRect(hwnd, &overlay_rect) == 0) {
-        return;
-    }
-    for (auto const &monitor : monitors) {
-        out.push_back(core::RectPx::From_ltrb(
-            monitor.bounds.left - static_cast<int32_t>(overlay_rect.left),
-            monitor.bounds.top - static_cast<int32_t>(overlay_rect.top),
-            monitor.bounds.right - static_cast<int32_t>(overlay_rect.left),
-            monitor.bounds.bottom - static_cast<int32_t>(overlay_rect.top)));
-    }
-}
-
-} // namespace
-
-LRESULT OverlayWindow::On_paint() {
+LRESULT OverlayWindow::On_paint(HWND hwnd) {
     GREENFLAME_PROFILE_FUNCTION();
 
     PAINTSTRUCT paint{};
-    HDC const hdc = BeginPaint(hwnd_, &paint);
+    HDC const hdc = BeginPaint(hwnd, &paint);
     if (!hdc) {
         return 0;
     }
 
-    RECT rect{};
-    GetClientRect(hwnd_, &rect);
     auto const &s = controller_.State();
 
     hotkey_help_overlay_.Hide_if_selection_unstable(Is_selection_stable_for_help());
 
-    std::vector<core::RectPx> monitor_client_rects;
-    {
-        GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Gather_monitor_rects");
-        Gather_monitor_client_rects(hwnd_, s.cached_monitors, monitor_client_rects);
-    }
+    std::vector<core::RectPx> const monitor_client_rects =
+        core::Monitor_rects_in_client(s.cached_monitors, Desktop_origin_px());
 
-    core::PointPx cursor = Get_client_cursor_pos_px(hwnd_);
+    core::PointPx cursor = Cursor_client_px();
     bool const snap_enabled = (GetKeyState(VK_MENU) & 0x8000) == 0;
     bool const crosshair_mode = s.final_selection.Is_empty() && !s.dragging &&
                                 !s.handle_dragging && !s.modifier_preview;
     if (crosshair_mode && snap_enabled) {
         cursor = core::Snap_point_to_fullscreen_crosshair_edges(
             cursor, s.vertical_edges, s.horizontal_edges, kSnapThresholdPx);
-        if (cursor.x >= rect.right) cursor.x = rect.right - 1;
-        if (cursor.y >= rect.bottom) cursor.y = rect.bottom - 1;
+        core::RectPx const desktop = Desktop_rect_screen();
+        if (cursor.x >= desktop.Width()) cursor.x = desktop.Width() - 1;
+        if (cursor.y >= desktop.Height()) cursor.y = desktop.Height() - 1;
     }
 
     std::vector<IOverlayButton *> btn_ptrs;
@@ -4074,11 +4039,9 @@ LRESULT OverlayWindow::On_paint() {
                     s.selection_capture_offset_px.x + s.final_selection.Width(),
                     s.selection_capture_offset_px.y + s.final_selection.Height());
             } else {
-                RECT overlay_rect{};
-                GetWindowRect(hwnd_, &overlay_rect);
+                core::PointPx const origin = Desktop_origin_px();
                 lifted_view.dest_rect = core::Screen_rect_to_client_rect(
-                    resources_->window_capture.visible_rect_screen, overlay_rect.left,
-                    overlay_rect.top);
+                    resources_->window_capture.visible_rect_screen, origin.x, origin.y);
                 lifted_view.source_rect = core::RectPx::From_ltrb(
                     resources_->window_capture.visible_offset_px.x,
                     resources_->window_capture.visible_offset_px.y,
@@ -4385,12 +4348,12 @@ LRESULT OverlayWindow::On_paint() {
             Handle_device_loss();
         }
 
-        EndPaint(hwnd_, &paint);
+        EndPaint(hwnd, &paint);
         return 0;
     }
 
     // D2D resources unavailable; ensure paint cycle completes.
-    EndPaint(hwnd_, &paint);
+    EndPaint(hwnd, &paint);
     return 0;
 }
 
@@ -4411,7 +4374,7 @@ void OverlayWindow::Handle_device_loss() {
         controller_.Set_spell_check_service(nullptr);
         text_layout_engine_.reset();
         d2d_resources_.reset();
-        InvalidateRect(hwnd_, nullptr, TRUE);
+        Request_repaint();
         return;
     }
     if (resources_->window_capture.display_capture.Is_valid()) {
@@ -4436,7 +4399,7 @@ void OverlayWindow::Handle_device_loss() {
     controller_.Set_text_layout_engine(text_layout_engine_.get());
     controller_.Set_spell_check_service(spell_check_service_.get());
     d2d_resources_->Invalidate_annotations();
-    InvalidateRect(hwnd_, nullptr, FALSE);
+    Request_repaint();
 }
 
 LRESULT OverlayWindow::On_destroy() {
@@ -4487,7 +4450,7 @@ void OverlayWindow::Refresh_cursor() {
         return;
     }
     if (!toolbar_buttons_.empty()) {
-        core::PointPx const cursor = Get_client_cursor_pos_px(hwnd_);
+        core::PointPx const cursor = Cursor_client_px();
         for (auto const &entry : toolbar_buttons_) {
             if (entry.button != nullptr && entry.button->Hit_test(cursor)) {
                 SetCursor(LoadCursorW(nullptr, IDC_ARROW));
@@ -4530,7 +4493,7 @@ void OverlayWindow::Refresh_cursor() {
         return;
     }
     if (!s.final_selection.Is_empty() && !s.dragging) {
-        core::PointPx const cursor = Get_client_cursor_pos_px(hwnd_);
+        core::PointPx const cursor = Cursor_client_px();
         std::optional<core::SelectionHandle> hit =
             core::Hit_test_border_zone(s.final_selection, cursor);
         if (hit.has_value()) {
@@ -4591,9 +4554,9 @@ void OverlayWindow::Refresh_cursor() {
     SetCursor(LoadCursorW(nullptr, IDC_CROSS));
 }
 
-LRESULT OverlayWindow::On_set_cursor(WPARAM wparam, LPARAM lparam) {
+LRESULT OverlayWindow::On_set_cursor(HWND hwnd, WPARAM wparam, LPARAM lparam) {
     if (LOWORD(lparam) != HTCLIENT) {
-        return DefWindowProcW(hwnd_, WM_SETCURSOR, wparam, lparam);
+        return DefWindowProcW(hwnd, WM_SETCURSOR, wparam, lparam);
     }
     Refresh_cursor();
     return TRUE;

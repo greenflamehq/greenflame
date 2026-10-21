@@ -81,6 +81,12 @@ Index_of_monitor_containing(PointPx p,
 Indices_of_monitors_intersecting(RectPx r,
                                  std::span<const MonitorWithBounds> monitors) noexcept;
 
+// Monitor bounds moved to client space, where client pixel (0, 0) is the screen
+// pixel client_origin_screen. One rect per monitor, in the same order.
+[[nodiscard]] std::vector<RectPx>
+Monitor_rects_in_client(std::span<const MonitorWithBounds> monitors,
+                        PointPx client_origin_screen);
+
 // --- Selection policy ---
 // Returns the allowed selection rect: candidate unchanged if cross-monitor is
 // allowed, otherwise candidate clamped to the starting monitor. Empty candidate

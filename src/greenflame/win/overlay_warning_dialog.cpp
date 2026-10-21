@@ -64,6 +64,8 @@ void OverlayWarningDialog::Show_at_cursor(
     visible_ = true;
     monitor_rect_client_ =
         Monitor_rect_in_client(cursor_screen, monitors, overlay_rect_screen);
+    overlay_size_ = D2D1::SizeF(static_cast<float>(overlay_rect_screen.Width()),
+                                static_cast<float>(overlay_rect_screen.Height()));
     core::RectPx const available_rect =
         monitor_rect_client_.value_or(core::RectPx::From_ltrb(
             0, 0, overlay_rect_screen.Width(), overlay_rect_screen.Height()));
@@ -173,7 +175,7 @@ bool OverlayWarningDialog::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwri
     }
 
     D2D1_RECT_F const overlay_bounds =
-        Overlay_panel_bounds(rt->GetSize(), monitor_rect_client_);
+        Overlay_panel_bounds(overlay_size_, monitor_rect_client_);
     D2D1_RECT_F const panel_bounds =
         D2D1::RectF(static_cast<float>(panel_rect_client_.left),
                     static_cast<float>(panel_rect_client_.top),
