@@ -294,6 +294,8 @@ bool D2DOverlayResources::Add_swap_chain_target(HWND hwnd, core::RectPx rect_cli
     if (FAILED(hr)) {
         return false;
     }
+    // Alt+Enter must not flip the overlay into exclusive fullscreen.
+    (void)dxgi_factory->MakeWindowAssociation(hwnd, DXGI_MWA_NO_ALT_ENTER);
     hr = sc1.As(&target.swap_chain);
     if (FAILED(hr)) {
         return false;

@@ -253,6 +253,36 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
 
 #if defined(GREENFLAME_LOG)
 constexpr double kMsPerSecond = 1000.0;
+
+[[nodiscard]] std::wstring_view
+Tool_name_for_log(greenflame::core::AnnotationToolId tool) noexcept {
+    using Tool = greenflame::core::AnnotationToolId;
+    switch (tool) {
+    case Tool::Freehand:
+        return L"brush";
+    case Tool::Highlighter:
+        return L"highlighter";
+    case Tool::Line:
+        return L"line";
+    case Tool::Arrow:
+        return L"arrow";
+    case Tool::Rectangle:
+        return L"rectangle";
+    case Tool::FilledRectangle:
+        return L"filled-rectangle";
+    case Tool::Ellipse:
+        return L"ellipse";
+    case Tool::FilledEllipse:
+        return L"filled-ellipse";
+    case Tool::Obfuscate:
+        return L"obfuscate";
+    case Tool::Text:
+        return L"text";
+    case Tool::Bubble:
+        return L"bubble";
+    }
+    return L"?";
+}
 #endif
 
 // "(left,top)-(right,bottom)", for failure messages in every build.
@@ -874,6 +904,11 @@ class OverlayWindow::ModalScope final {
         if (owner_.modal_depth_ == 0 && owner_.fail_close_pending_) {
             owner_.fail_close_pending_ = false;
             owner_.Post_fail_close(owner_.fail_close_reason_);
+        }
+        if (owner_.modal_depth_ == 0 && owner_.close_after_modal_ &&
+            owner_.primary_hwnd_ != nullptr) {
+            owner_.close_after_modal_ = false;
+            (void)PostMessageW(owner_.primary_hwnd_, WM_CLOSE, 0, 0);
         }
     }
     ModalScope(ModalScope const &) = delete;
@@ -1530,9 +1565,18 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     selection_wheel_ = {};
     text_layout_engine_.reset();
 
+    auto const open_failed = [&](std::wstring_view why) {
+        resources_->Reset();
+        hinstance_ = nullptr;
+        if (events_ != nullptr) {
+            events_->On_overlay_failed(L"the overlay could not open (" +
+                                       std::wstring(why) + L").");
+        }
+        return false;
+    };
     core::RectPx const bounds = Get_virtual_desktop_bounds_px();
     if (!Capture_virtual_desktop(resources_->base_capture)) {
-        return false;
+        return open_failed(L"the screen could not be captured");
     }
     resources_->capture_origin_px = {bounds.left, bounds.top};
     CapturedCursorSnapshot captured_cursor = {};
@@ -1543,8 +1587,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     }
 
     if (!Rebuild_display_capture() || !resources_->Initialize_for_capture(hinstance_)) {
-        resources_->Reset();
-        return false;
+        return open_failed(L"the screenshot could not be prepared");
     }
 
     // One window per monitor, else (setting off, or setup failed before any input)
@@ -1573,13 +1616,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
             GREENFLAME_LOG_WRITE(L"overlay", L"Overlay setup failed: " +
                                                  fallback_reason + L"; span: " +
                                                  span_failure);
-            resources_->Reset();
-            hinstance_ = nullptr;
-            if (events_ != nullptr) {
-                events_->On_overlay_failed(
-                    L"the overlay could not start its graphics.");
-            }
-            return false;
+            return open_failed(L"its graphics could not start");
         }
         layout_ = span;
     }
@@ -1679,6 +1716,10 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     }
     ShowWindow(primary_hwnd_, SW_SHOW);
     Reassert_topmost();
+    // Lock and display-off notices: no frames are taken then (Presentation_paused).
+    (void)WTSRegisterSessionNotification(primary_hwnd_, NOTIFY_FOR_THIS_SESSION);
+    display_state_notify_ = RegisterPowerSettingNotification(
+        primary_hwnd_, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
     return true;
 }
 
@@ -1795,6 +1836,14 @@ void OverlayWindow::Destroy() {
     if (!Is_open() || closing_) {
         return;
     }
+    if (modal_depth_ > 0) {
+        // A Save As dialog or message box is up with its caller on the stack (a
+        // WM_CLOSE, or tray Exit, while it runs): end the dialog; the modal scope
+        // closes the overlay once its caller has returned.
+        close_after_modal_ = true;
+        End_modal_dialog();
+        return;
+    }
     closing_ = true;
     Release_mouse_capture();
     // Swap chains go before their windows.
@@ -1828,6 +1877,9 @@ bool OverlayWindow::Is_surface(HWND hwnd) const noexcept {
 }
 
 void OverlayWindow::Reassert_topmost() const {
+    if (modal_depth_ > 0) {
+        return; // the dialog stays above every overlay window
+    }
     for (OverlaySurface const &surface : surfaces_) {
         if (surface.hwnd != nullptr) {
             (void)SetWindowPos(surface.hwnd, HWND_TOPMOST, 0, 0, 0, 0,
@@ -1858,10 +1910,7 @@ void OverlayWindow::On_fail_close_message() {
         // A Save As dialog or message box is up, with its caller on the stack: end the
         // dialog first. The modal scope posts the close again once it returns.
         fail_close_pending_ = true;
-        HWND const popup = GetLastActivePopup(primary_hwnd_);
-        if (popup != nullptr && popup != primary_hwnd_) {
-            (void)PostMessageW(popup, WM_COMMAND, IDCANCEL, 0);
-        }
+        End_modal_dialog();
         return;
     }
     std::wstring const reason = std::move(fail_close_reason_);
@@ -1873,6 +1922,35 @@ void OverlayWindow::On_fail_close_message() {
     Destroy();
     if (events_ != nullptr) {
         events_->On_overlay_failed(reason);
+    }
+}
+
+void OverlayWindow::End_modal_dialog() const {
+    // IDCANCEL closes the Save As dialog and the message box. A prompt on top of the
+    // dialog (overwrite confirm) ignores it: the close then waits for the user, and
+    // the save is skipped whatever they answer (Close_requested).
+    HWND const popup =
+        primary_hwnd_ != nullptr ? GetLastActivePopup(primary_hwnd_) : nullptr;
+    if (popup != nullptr && popup != primary_hwnd_) {
+        (void)PostMessageW(popup, WM_COMMAND, IDCANCEL, 0);
+    }
+}
+
+bool OverlayWindow::Close_requested() const noexcept {
+    return fail_close_pending_ || fail_close_posted_ || close_after_modal_;
+}
+
+bool OverlayWindow::Presentation_paused() const noexcept {
+    return session_locked_ || display_off_;
+}
+
+void OverlayWindow::Set_presentation_paused(bool session_locked, bool display_off) {
+    bool const was_paused = Presentation_paused();
+    session_locked_ = session_locked;
+    display_off_ = display_off;
+    if (was_paused && !Presentation_paused()) {
+        wait_timeout_streak_ = 0;
+        Request_repaint();
     }
 }
 
@@ -1928,7 +2006,7 @@ void OverlayWindow::On_capture_changed(HWND new_owner) {
     // Lost while the button was held (lock screen, UAC, Ctrl+Alt+Del, a window that
     // took it): get out rather than guess where the gesture ended.
     capture_held_ = false;
-    Post_fail_close(L"the mouse was taken away during a drag.");
+    Post_fail_close(L"mouse input was taken away.");
 }
 
 LRESULT OverlayWindow::On_mouse_activate(HWND hwnd, WPARAM wparam, LPARAM lparam) {
@@ -1969,7 +2047,7 @@ void OverlayWindow::Log_gesture_frames() {
     GREENFLAME_LOG_WRITE(
         L"frames",
         std::wstring(L"gesture: tool=") +
-            (tool.has_value() ? std::to_wstring(static_cast<int>(*tool)) : L"none") +
+            (tool.has_value() ? std::wstring(Tool_name_for_log(*tool)) : L"selection") +
             L" mode=" + (layout_.per_monitor ? L"per-monitor" : L"span") + L" frames=" +
             std::to_wstring(gesture_frame_count_) + L" p50=" +
             std::to_wstring(summary.p50_ms) + L"ms p95=" +
@@ -4010,6 +4088,12 @@ LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         return On_l_button_down();
     case WM_LBUTTONDBLCLK:
         Take_mouse_capture(hwnd);
+#if defined(GREENFLAME_LOG)
+        if (controller_.Double_press_is_press()) {
+            gesture_frame_count_ = 0;
+            gesture_frames_active_ = true;
+        }
+#endif
         return On_l_button_dbl_clk();
     case WM_MOUSEMOVE:
         return On_mouse_move();
@@ -4048,6 +4132,23 @@ LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
     case kOverlayFailCloseMessage:
         On_fail_close_message();
         return 0;
+    case WM_WTSSESSION_CHANGE:
+        if (wparam == WTS_SESSION_LOCK || wparam == WTS_SESSION_UNLOCK) {
+            Set_presentation_paused(wparam == WTS_SESSION_LOCK, display_off_);
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    case WM_POWERBROADCAST:
+        if (wparam == PBT_POWERSETTINGCHANGE && lparam != 0) {
+            auto const *const setting =
+                reinterpret_cast<POWERBROADCAST_SETTING const *>(lparam);
+            if (setting->PowerSetting == GUID_CONSOLE_DISPLAY_STATE &&
+                setting->DataLength >= sizeof(DWORD)) {
+                // A little-endian DWORD: 0 off, 1 on, 2 dimmed (still shown). The
+                // low byte alone tells them apart.
+                Set_presentation_paused(session_locked_, setting->Data[0] == 0);
+            }
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
     case WM_RBUTTONDOWN:
         return On_r_button_down();
     case WM_CONTEXTMENU:
@@ -4272,7 +4373,7 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         ModalScope const modal(*this);
         chosen = GetSaveFileNameW(&ofn) != FALSE;
     }
-    if (!chosen || fail_close_pending_ || fail_close_posted_) {
+    if (!chosen || Close_requested()) {
         // Cancelled, or the overlay is closing under a failure: save nothing.
         cropped.Free();
         return;
@@ -4459,7 +4560,9 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
             (void)ValidateRect(surface.hwnd, nullptr);
         }
     }
-    if (closing_) {
+    if (closing_ || Presentation_paused()) {
+        // Locked or display off: DWM takes no frames, so a paint would only wait out
+        // its timeout. Set_presentation_paused repaints on the way back.
         EndPaint(hwnd, &paint);
         return 0;
     }
@@ -4901,8 +5004,19 @@ LRESULT OverlayWindow::On_destroy() {
     // primary_hwnd_.
     surfaces_.clear();
     capture_held_ = false;
-    modal_depth_ = 0;
     fail_close_pending_ = false;
+    fail_close_posted_ = false;
+    fail_close_reason_.clear();
+    close_after_modal_ = false;
+    if (primary_hwnd_ != nullptr) {
+        (void)WTSUnRegisterSessionNotification(primary_hwnd_);
+    }
+    if (display_state_notify_ != nullptr) {
+        (void)UnregisterPowerSettingNotification(display_state_notify_);
+        display_state_notify_ = nullptr;
+    }
+    session_locked_ = false;
+    display_off_ = false;
     wait_timeout_streak_ = 0;
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
     debug_force_device_lost_ = false;

@@ -2122,9 +2122,20 @@ gesture to `%TEMP%\greenflame-debug.log`.
   1. Open Save As (Ctrl+Shift+S). While it is up, click on every other monitor.
   2. Cancel, then save for real.
   3. If a pin failure can be forced, check the message box the same way.
+  4. Open Save As again. While it is up, change one monitor's resolution.
+  5. Open Save As again, type the name of an existing file and press Save, so the
+     overwrite prompt shows. While the prompt is up, change one monitor's resolution,
+     then answer Yes.
+  6. Open Save As again and choose tray Exit while it is up.
 - Expected:
-  - The dialogs open on the monitor where the overlay opened; clicks elsewhere do
-    nothing; Cancel returns to a working overlay; the save completes.
+  - Steps 1-3: the dialogs open on the monitor where the overlay opened; clicks
+    elsewhere do nothing; Cancel returns to a working overlay; the save completes.
+  - Step 4: Save As closes, nothing is saved, the overlay closes with its "Capture
+    cancelled" balloon, and the next open works.
+  - Step 5: the overwrite prompt ignores the close request, so the overlay waits for
+    the answer. After Yes nothing is saved (the existing file is unchanged), then the
+    overlay closes with its balloon.
+  - Step 6: Save As closes, nothing is saved, Greenflame exits.
 
 ### GF-MAN-PMW-009 - Panels And Widgets At Edges
 
@@ -2247,6 +2258,20 @@ gesture to `%TEMP%\greenflame-debug.log`.
     fps or better (p50 33.3 ms, p95 at or under about 34 ms); the `frames` lines
     agree.
   - No gesture closes the overlay (no frame-wait timeout streak).
+
+### GF-MAN-PMW-021 - No False Closes While Locked Or Asleep
+
+- Priority: `P1`
+- Run on: a debug-log build (to read the log), per-monitor and span
+- Steps:
+  1. Open the overlay, select a region and start a text annotation so the caret
+     blinks. Leave the mouse alone.
+  2. Press Win+L, wait 10 s, unlock.
+  3. Repeat, letting the displays go to sleep (or turning them off), then wake them.
+- Expected:
+  - The overlay is still open with the text edit active, and painting resumes.
+  - The log shows no frame-wait timeout streak. While the session is locked or the
+    display is off the overlay does not paint at all, so no frame waits time out.
 
 ### GF-MAN-PMW-019 - Close Paths
 

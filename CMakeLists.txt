@@ -552,6 +552,7 @@ target_link_libraries(greenflame PRIVATE
     shell32
     advapi32
     dwmapi
+    wtsapi32
     comdlg32
     Windowscodecs
     ole32

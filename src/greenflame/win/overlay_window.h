@@ -163,6 +163,14 @@ class OverlayWindow final {
     // from a posted message, never inside painting or a capture change.
     void Post_fail_close(std::wstring_view reason);
     void On_fail_close_message();
+    // Cancels the Save As dialog or message box that is up, so its caller returns.
+    void End_modal_dialog() const;
+    // True once a close is waiting: the overlay must not save or show anything more.
+    [[nodiscard]] bool Close_requested() const noexcept;
+    // While the session is locked or the display is off, DWM takes no frames: paints
+    // are skipped instead of timing out, and one repaint follows the return.
+    [[nodiscard]] bool Presentation_paused() const noexcept;
+    void Set_presentation_paused(bool session_locked, bool display_off);
     // Closes the overlay when the monitors (if recheck_monitors) or a window moved away
     // from the layout.
     void Check_layout_still_matches(bool recheck_monitors);
@@ -324,6 +332,10 @@ class OverlayWindow final {
     bool fail_close_pending_ = false; // waits for the modal dialog to end
     std::wstring fail_close_reason_ = {};
     int wait_timeout_streak_ = 0;
+    bool close_after_modal_ = false; // Destroy asked for during a modal dialog
+    bool session_locked_ = false;
+    bool display_off_ = false;
+    HPOWERNOTIFY display_state_notify_ = nullptr;
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
     // Debug hooks (Ctrl+Shift+Alt+F11 / F12): the next paints report a lost device or
     // frame-wait timeouts, to exercise the close paths.
