@@ -64,6 +64,20 @@ Indices_of_monitors_intersecting(RectPx r,
     return out;
 }
 
+std::vector<RectPx> Monitor_rects_in_client(std::span<const MonitorWithBounds> monitors,
+                                            PointPx client_origin_screen) {
+    std::vector<RectPx> out;
+    out.reserve(monitors.size());
+    for (MonitorWithBounds const &monitor : monitors) {
+        out.push_back(
+            RectPx::From_ltrb(monitor.bounds.left - client_origin_screen.x,
+                              monitor.bounds.top - client_origin_screen.y,
+                              monitor.bounds.right - client_origin_screen.x,
+                              monitor.bounds.bottom - client_origin_screen.y));
+    }
+    return out;
+}
+
 RectPx Allowed_selection_rect(RectPx candidate, PointPx start,
                               std::span<const MonitorWithBounds> monitors) noexcept {
     if (candidate.Is_empty()) return candidate;

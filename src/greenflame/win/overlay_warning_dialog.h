@@ -41,6 +41,9 @@ class OverlayWarningDialog final : public IOverlayTopLayer {
 
     bool visible_ = false;
     std::optional<core::RectPx> monitor_rect_client_ = std::nullopt;
+    // The whole overlay's size (the virtual desktop), set by Show_at_cursor. A paint
+    // target may cover only part of the overlay, so its size is not this.
+    D2D1_SIZE_F overlay_size_ = {};
     core::RectPx panel_rect_client_ = {};
     OverlayRectButton accept_button_ = {};
     OverlayRectButton reject_button_ = {};

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "greenflame_core/rect_px.h"
+
 namespace greenflame::core {
 
 // Builds a BMP file (with headers) from a 32bpp BGRA pixel buffer.
@@ -31,8 +33,11 @@ struct BmpDiff final {
 };
 
 // Compares two BMP files pixel by pixel. Returns nullopt if either fails to parse
-// or their sizes differ.
-[[nodiscard]] std::optional<BmpDiff>
-Diff_bmp_bytes(std::span<const uint8_t> a, std::span<const uint8_t> b, int tolerance);
+// or their sizes differ. With a mask, only pixels inside one of its rects count; the
+// rects use top-down image coordinates (y = 0 is the top row).
+[[nodiscard]] std::optional<BmpDiff> Diff_bmp_bytes(std::span<const uint8_t> a,
+                                                    std::span<const uint8_t> b,
+                                                    int tolerance,
+                                                    std::span<const RectPx> mask = {});
 
 } // namespace greenflame::core

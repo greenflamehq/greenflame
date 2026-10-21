@@ -12,15 +12,6 @@ core::PointPx Get_cursor_pos_px() {
     return {0, 0};
 }
 
-core::PointPx Get_client_cursor_pos_px(HWND hwnd) {
-    POINT pt{};
-    if (!GetCursorPos(&pt)) {
-        return {0, 0};
-    }
-    ScreenToClient(hwnd, &pt);
-    return {pt.x, pt.y};
-}
-
 core::RectPx Get_virtual_desktop_bounds_px() {
     int const left = GetSystemMetrics(SM_XVIRTUALSCREEN);
     int const top = GetSystemMetrics(SM_YVIRTUALSCREEN);

@@ -162,3 +162,37 @@ TEST(monitor_policy,
     EXPECT_EQ(allowed.right, 500);
     EXPECT_EQ(allowed.bottom, 1080);
 }
+
+// Jocelyn's desk: laptop left of the primary and lower, two panels at the top.
+TEST(monitor_policy, Monitor_rects_in_client_NegativeOriginDesk) {
+    MonitorInfo const info{};
+    std::vector<MonitorWithBounds> const monitors = {
+        {RectPx::From_ltrb(-1920, 137, 0, 1337), info},
+        {RectPx::From_ltrb(0, 0, 2560, 1440), info},
+        {RectPx::From_ltrb(2560, 0, 5120, 1440), info},
+    };
+    std::vector<RectPx> const rects =
+        Monitor_rects_in_client(monitors, PointPx{-1920, 0});
+    ASSERT_EQ(rects.size(), 3u);
+    EXPECT_EQ(rects[0], RectPx::From_ltrb(0, 137, 1920, 1337));
+    EXPECT_EQ(rects[1], RectPx::From_ltrb(1920, 0, 4480, 1440));
+    EXPECT_EQ(rects[2], RectPx::From_ltrb(4480, 0, 7040, 1440));
+}
+
+// A monitor above the primary puts the origin at negative y.
+TEST(monitor_policy, Monitor_rects_in_client_NegativeY) {
+    MonitorInfo const info{};
+    std::vector<MonitorWithBounds> const monitors = {
+        {RectPx::From_ltrb(0, 0, 1920, 1080), info},
+        {RectPx::From_ltrb(0, -1440, 2560, 0), info},
+    };
+    std::vector<RectPx> const rects =
+        Monitor_rects_in_client(monitors, PointPx{0, -1440});
+    ASSERT_EQ(rects.size(), 2u);
+    EXPECT_EQ(rects[0], RectPx::From_ltrb(0, 1440, 1920, 2520));
+    EXPECT_EQ(rects[1], RectPx::From_ltrb(0, 0, 2560, 1440));
+}
+
+TEST(monitor_policy, Monitor_rects_in_client_NoMonitors) {
+    EXPECT_TRUE(Monitor_rects_in_client({}, PointPx{5, 5}).empty());
+}

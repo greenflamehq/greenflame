@@ -297,11 +297,37 @@ struct TextBoxResult {
     return true;
 }
 
+// False when the world-space box [left, top, right, bottom] cannot touch any pixel
+// of rt's target. A per-monitor target sees only its monitor, so its draws of
+// another monitor's widgets are skipped. Draws when the transform is more than a
+// translation (no cheap answer then).
+[[nodiscard]] bool Box_reaches_target(ID2D1RenderTarget *rt, float left, float top,
+                                      float right, float bottom) noexcept {
+    // Exact comparison without == on floats (-Wfloat-equal).
+    auto const is = [](float value, float wanted) noexcept {
+        return !(value < wanted) && !(value > wanted);
+    };
+    D2D1_MATRIX_3X2_F transform{};
+    rt->GetTransform(&transform);
+    if (!is(transform._11, 1.f) || !is(transform._22, 1.f) || !is(transform._12, 0.f) ||
+        !is(transform._21, 0.f)) {
+        return true;
+    }
+    // One pixel of slack for antialiased edges.
+    constexpr float slack = 1.f;
+    D2D1_SIZE_F const size = rt->GetSize();
+    float const view_left = -transform._31;
+    float const view_top = -transform._32;
+    return right + slack > view_left && left - slack < view_left + size.width &&
+           bottom + slack > view_top && top - slack < view_top + size.height;
+}
+
 void Draw_text_box(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                    IDWriteTextFormat *fmt, std::wstring_view text, float box_left,
                    float box_top, float box_w, float box_h, float margin,
                    DWRITE_TEXT_ALIGNMENT text_align = DWRITE_TEXT_ALIGNMENT_CENTER) {
-    if (!rt || !fmt || text.empty()) {
+    if (!rt || !fmt || text.empty() ||
+        !Box_reaches_target(rt, box_left, box_top, box_left + box_w, box_top + box_h)) {
         return;
     }
     // Background
@@ -708,6 +734,9 @@ void Draw_magnifier(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     float const mag_lf = static_cast<float>(mag_l);
     float const mag_tf = static_cast<float>(mag_t);
     float const mag_sz = static_cast<float>(kMagnifierSize);
+    if (!Box_reaches_target(rt, mag_lf, mag_tf, mag_lf + mag_sz, mag_tf + mag_sz)) {
+        return;
+    }
     float const radius = mag_sz / 2.f;
     D2D1_POINT_2F const center = D2D1::Point2F(mag_lf + radius, mag_tf + radius);
 
@@ -3151,20 +3180,51 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
     }
 }
 
-bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_width,
-                     int vd_height, IOverlayTopLayer *top_layer) {
-    GREENFLAME_PROFILE_FUNCTION();
+namespace {
 
-    if (!res.hwnd_rt) {
+// What Prepare work decided for this frame, shared by every target's draw.
+struct FramePlan final {
+    bool freehand_draft = false;
+    FreehandDraftLiveParts freehand_live = {};
+    bool has_live_annotation_draft = false;
+    bool is_steady_state = false;
+    core::LineAnnotation const *line_draft = nullptr;
+};
+
+// True if rect can touch a pixel of target_rect.
+[[nodiscard]] bool Touches(core::RectPx rect, core::RectPx target_rect) noexcept {
+    return core::RectPx::Intersect(rect, target_rect).has_value();
+}
+
+// False when the live annotation draft cannot touch target_rect, so that target skips
+// drawing it: an obfuscate draft uploads a new bitmap on every draw. Text drafts, and
+// drafts with no known bounds, always draw.
+[[nodiscard]] bool Live_annotation_draft_touches(D2DPaintInput const &input,
+                                                 core::RectPx target_rect) noexcept {
+    if (input.draft_text_annotation != nullptr || input.draft_annotation == nullptr) {
         return true;
     }
+    core::RectPx const bounds = core::Annotation_visual_bounds(*input.draft_annotation);
+    if (bounds.Is_empty()) {
+        return true;
+    }
+    core::RectPx const grown =
+        core::RectPx::From_ltrb(bounds.left - kFreehandDraftAntialiasMarginPx,
+                                bounds.top - kFreehandDraftAntialiasMarginPx,
+                                bounds.right + kFreehandDraftAntialiasMarginPx,
+                                bounds.bottom + kFreehandDraftAntialiasMarginPx);
+    return Touches(grown, target_rect);
+}
 
-    bool const freehand_draft = Is_freehand_draft(input);
-    FreehandDraftLiveParts freehand_live{};
+// The once-per-frame work, done before any target draws: the freehand draft and its
+// live_base, the edit-time annotation rebuild, and the choice of paint path.
+void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_width,
+                   int vd_height, FramePlan &plan) {
+    plan.freehand_draft = Is_freehand_draft(input);
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Update_draft_stroke");
-        if (freehand_draft) {
-            Prepare_freehand_draft(res, input, freehand_live, vd_width, vd_height);
+        if (plan.freehand_draft) {
+            Prepare_freehand_draft(res, input, plan.freehand_live, vd_width, vd_height);
         } else {
             // No stroke, or a one-point brush stroke drawn from its draft annotation.
             Clear_draft_stroke_surface(res);
@@ -3173,7 +3233,7 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
 
     // When an annotation edit interaction is active, the annotation under the cursor
     // changes every frame. Rebuild annotations_bitmap with the live state now, before
-    // hwnd_rt->BeginDraw(), so the normal blit path gets the correct multiply-blend
+    // any target's BeginDraw, so the normal blit path gets the correct multiply-blend
     // rendering for highlighters without any mid-frame EndDraw on hwnd_rt.
     if (input.annotation_editing) {
         GREENFLAME_PROFILE_SCOPE(
@@ -3185,73 +3245,65 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     // outside the selection: it never takes the steady path. Freehand drafts and line
     // drafts over a valid frozen frame recomposite around themselves; any other draft
     // takes the dynamic path.
-    bool const has_live_annotation_draft = Has_live_annotation_draft(input);
-    bool const is_steady_state =
+    plan.has_live_annotation_draft = Has_live_annotation_draft(input);
+    plan.is_steady_state =
         res.frozen_valid && !input.dragging && !input.handle_dragging &&
         !input.move_dragging && !input.annotation_editing && !input.modifier_preview &&
-        !has_live_annotation_draft && input.lifted_window_bitmap == nullptr;
-    core::LineAnnotation const *const line_draft =
-        freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
+        !plan.has_live_annotation_draft && input.lifted_window_bitmap == nullptr;
+    plan.line_draft =
+        plan.freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
+}
 
-    // Frame-latency throttle: with FRAME_LATENCY_WAITABLE_OBJECT and max
-    // latency 1, this blocks until DWM has consumed the prior frame, so the
-    // paint pipeline never builds frames faster than the compositor consumes
-    // them. Replaces the implicit backpressure that the legacy
-    // HwndRenderTarget Present path used to apply by stalling inside
-    // CDXGISwapChain::PrepareWindowedBltPresent. INFINITE wait is acceptable
-    // because the only way the waitable does not signal is a full GPU hang.
-    if (res.frame_latency_waitable != nullptr) {
-        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Wait_frame_latency");
-        (void)WaitForSingleObjectEx(res.frame_latency_waitable, INFINITE, FALSE);
-    }
-
-    res.hwnd_rt->BeginDraw();
-    // FLIP_DISCARD does not retain prior content. The steady-state path blits
-    // frozen_bitmap (full virtual-desktop coverage) and the dynamic path blits
-    // the screenshot, so every pixel is overwritten anyway -- but Clear() is
-    // documented as a no-op overlap on the GPU and guards against future paths
-    // that might leave gaps. Cleared to opaque black to match the prior
-    // RETAIN_CONTENTS surface state.
-    res.hwnd_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f));
-
-    if (freehand_draft) {
+// Draws the frame's content into rt, which is inside BeginDraw with the world
+// transform mapping client pixels into the target. target_rect is the client pixels
+// the target shows; draws that cannot touch it are skipped.
+void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                D2DPaintInput const &input, FramePlan const &plan, int vd_width,
+                int vd_height, core::RectPx target_rect, IOverlayTopLayer *top_layer) {
+    bool const draft_here = Live_annotation_draft_touches(input, target_rect);
+    if (plan.freehand_draft) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Freehand_draft");
         // live_base holds everything but the moving end of the stroke; recomposite
         // only around that end. Without live_base, recomposite the whole frame.
         if (res.freehand_draft.live_base_valid && res.draft_stroke_bitmap) {
             // Nearest-neighbor 1:1 copy: a full-surface linear blit rounds differently
             // on very wide desktops.
-            Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.draft_stroke_bitmap.Get(),
+            Draw_bitmap_pixels_1to1(rt, res.draft_stroke_bitmap.Get(),
                                     Desktop_rect(vd_width, vd_height), vd_width,
                                     vd_height);
-            for (core::RectPx const &clip : freehand_live.clips) {
-                Composite_freehand_draft_region(res.hwnd_rt.Get(), res, input, clip,
-                                                &freehand_live, vd_width, vd_height);
+            for (core::RectPx const &clip : plan.freehand_live.clips) {
+                if (Touches(clip, target_rect)) {
+                    Composite_freehand_draft_region(
+                        rt, res, input, clip, &plan.freehand_live, vd_width, vd_height);
+                }
             }
         } else {
-            Composite_freehand_draft_region(res.hwnd_rt.Get(), res, input,
+            Composite_freehand_draft_region(rt, res, input,
                                             Desktop_rect(vd_width, vd_height),
-                                            &freehand_live, vd_width, vd_height);
+                                            &plan.freehand_live, vd_width, vd_height);
         }
-    } else if (line_draft != nullptr) {
+    } else if (plan.line_draft != nullptr) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Line_draft");
-        Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.frozen_bitmap.Get(),
+        Draw_bitmap_pixels_1to1(rt, res.frozen_bitmap.Get(),
                                 Desktop_rect(vd_width, vd_height), vd_width, vd_height);
         for (core::RectPx const &clip : Segment_cover_rects(
-                 line_draft->start, line_draft->end, Line_draft_reach_px(*line_draft),
-                 vd_width, vd_height)) {
-            Composite_draft_region(res.hwnd_rt.Get(), res, input, clip, vd_width,
-                                   vd_height, [&](ID2D1RenderTarget *target, bool) {
+                 plan.line_draft->start, plan.line_draft->end,
+                 Line_draft_reach_px(*plan.line_draft), vd_width, vd_height)) {
+            if (!Touches(clip, target_rect)) {
+                continue;
+            }
+            Composite_draft_region(rt, res, input, clip, vd_width, vd_height,
+                                   [&](ID2D1RenderTarget *target, bool) {
                                        Draw_annotation(target, res,
                                                        *input.draft_annotation);
                                    });
         }
-    } else if (is_steady_state) {
+    } else if (plan.is_steady_state) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Steady_state");
         // Fastest path: one GPU blit of the frozen composite, nearest-neighbor 1:1:
         // a full-surface linear blit shifts channel values by 1 on wide desktops.
         if (res.frozen_bitmap) {
-            Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.frozen_bitmap.Get(),
+            Draw_bitmap_pixels_1to1(rt, res.frozen_bitmap.Get(),
                                     Desktop_rect(vd_width, vd_height), vd_width,
                                     vd_height);
         }
@@ -3262,54 +3314,53 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
         core::RectPx const restore_rect =
             !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
         bool const needs_selection_restore =
-            input.lifted_window_bitmap != nullptr || has_live_annotation_draft;
+            input.lifted_window_bitmap != nullptr || plan.has_live_annotation_draft;
         if (res.screenshot) {
-            Draw_full_bitmap_1to1(res.hwnd_rt.Get(), res.screenshot.Get());
+            Draw_full_bitmap_1to1(rt, res.screenshot.Get());
             if (!needs_selection_restore) {
                 // Retain the selection's pixel-exact sampling. The full-surface
                 // linear blit can round differently on very wide desktops.
-                Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.screenshot.Get(),
-                                        restore_rect, vd_width, vd_height);
+                Draw_bitmap_pixels_1to1(rt, res.screenshot.Get(), restore_rect,
+                                        vd_width, vd_height);
             }
         }
 
         // Composite annotations before dimming so the dim sits on top of them.
         if (res.annotations_bitmap) {
-            Draw_full_bitmap_1to1(res.hwnd_rt.Get(), res.annotations_bitmap.Get());
+            Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
         }
 
         // Draft annotations also draw before the dim for the same reason.
-        if (has_live_annotation_draft) {
-            Draw_live_annotation_draft(res.hwnd_rt.Get(), res, input);
+        if (plan.has_live_annotation_draft && draft_here) {
+            Draw_live_annotation_draft(rt, res, input);
         }
 
         // Live drafts and lifted windows have distinct blend/background passes.
         // Retain their clipped restore, including large-surface sampling behavior.
-        Draw_selection_dim(res.hwnd_rt.Get(), res.solid_brush.Get(),
+        Draw_selection_dim(rt, res.solid_brush.Get(),
                            needs_selection_restore ? core::RectPx{} : restore_rect,
                            vd_width, vd_height);
         if (needs_selection_restore && !restore_rect.Is_empty()) {
             if (input.lifted_window_bitmap != nullptr &&
                 !input.lifted_window_dest_rect.Is_empty() &&
                 !input.lifted_window_source_rect.Is_empty()) {
-                Draw_bitmap_rect(res.hwnd_rt.Get(), input.lifted_window_bitmap,
+                Draw_bitmap_rect(rt, input.lifted_window_bitmap,
                                  input.lifted_window_dest_rect,
                                  input.lifted_window_source_rect);
             } else if (res.screenshot) {
-                Draw_bitmap_pixels_1to1(res.hwnd_rt.Get(), res.screenshot.Get(),
-                                        restore_rect, vd_width, vd_height);
+                Draw_bitmap_pixels_1to1(rt, res.screenshot.Get(), restore_rect,
+                                        vd_width, vd_height);
             }
         }
         if (needs_selection_restore && !restore_rect.Is_empty()) {
-            res.hwnd_rt->PushAxisAlignedClip(Rect(restore_rect),
-                                             D2D1_ANTIALIAS_MODE_ALIASED);
+            rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
             if (res.annotations_bitmap) {
-                Draw_full_bitmap_1to1(res.hwnd_rt.Get(), res.annotations_bitmap.Get());
+                Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
             }
-            if (has_live_annotation_draft) {
-                Draw_live_annotation_draft(res.hwnd_rt.Get(), res, input);
+            if (plan.has_live_annotation_draft && draft_here) {
+                Draw_live_annotation_draft(rt, res, input);
             }
-            res.hwnd_rt->PopAxisAlignedClip();
+            rt->PopAxisAlignedClip();
         }
     }
 
@@ -3317,36 +3368,89 @@ bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input, int v
     // skip them here so Draw_live_layer does not draw them again on top of the dim.
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Live_layer");
-        Draw_live_layer(res.hwnd_rt.Get(), res, input, vd_width, vd_height,
-                        /*draw_annotation_draft=*/!has_live_annotation_draft);
+        Draw_live_layer(rt, res, input, vd_width, vd_height,
+                        /*draw_annotation_draft=*/!plan.has_live_annotation_draft);
     }
 
     if (top_layer != nullptr && top_layer->Is_visible()) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Top_layer");
-        (void)top_layer->Paint_d2d(res.hwnd_rt.Get(), res.dwrite_factory.Get(),
-                                   res.solid_brush.Get());
+        (void)top_layer->Paint_d2d(rt, res.dwrite_factory.Get(), res.solid_brush.Get());
+    }
+}
+
+} // namespace
+
+D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input,
+                               int vd_width, int vd_height, IOverlayTopLayer *top_layer,
+                               DWORD wait_timeout_ms) {
+    GREENFLAME_PROFILE_FUNCTION();
+
+    if (!res.hwnd_rt || res.targets.empty()) {
+        return D2DFrameStatus::Ok;
     }
 
-    HRESULT hr = S_OK;
-    {
-        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::End_draw");
-        hr = res.hwnd_rt->EndDraw();
-    }
-    if (hr == D2DERR_RECREATE_TARGET) {
-        return false;
-    }
-    if (res.swap_chain) {
-        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Present");
-        // SyncInterval=1 pairs with the waitable: DWM picks up the new frame
-        // on the next vsync. With FLIP_DISCARD the present is a pointer swap;
-        // the legacy ~28 ms windowed-blit wait inside Present is gone.
-        HRESULT const present_hr = res.swap_chain->Present(1, 0);
-        if (present_hr == DXGI_ERROR_DEVICE_REMOVED ||
-            present_hr == DXGI_ERROR_DEVICE_RESET) {
-            return false;
+    FramePlan plan{};
+    Prepare_frame(res, input, vd_width, vd_height, plan);
+
+    // Frame-latency throttle: with FRAME_LATENCY_WAITABLE_OBJECT and max latency 1,
+    // this blocks until DWM has consumed every target's prior frame, so the paint
+    // pipeline never builds frames faster than the compositor consumes them. The wait
+    // is bounded: on a timeout nothing is drawn (Present could block too) and the
+    // caller decides what to do.
+    std::vector<HANDLE> waitables;
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (target.frame_latency_waitable != nullptr) {
+            waitables.push_back(target.frame_latency_waitable);
         }
     }
-    return true;
+    if (!waitables.empty()) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Wait_frame_latency");
+        DWORD const wait =
+            WaitForMultipleObjectsEx(static_cast<DWORD>(waitables.size()),
+                                     waitables.data(), TRUE, wait_timeout_ms, FALSE);
+        if (wait == WAIT_TIMEOUT) {
+            return D2DFrameStatus::WaitTimedOut;
+        }
+    }
+
+    for (D2DSurfaceTarget const &target : res.targets) {
+        res.hwnd_rt->SetTarget(target.bitmap.Get());
+        res.hwnd_rt->BeginDraw();
+        // FLIP_DISCARD does not retain prior content. Every path overwrites every
+        // pixel anyway, but Clear() guards against future paths that might leave
+        // gaps. Cleared to opaque black to match the prior RETAIN_CONTENTS surface
+        // state. Clear ignores the transform: it covers the whole target.
+        res.hwnd_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f));
+        res.hwnd_rt->SetTransform(
+            D2D1::Matrix3x2F::Translation(static_cast<float>(-target.rect_client.left),
+                                          static_cast<float>(-target.rect_client.top)));
+        Draw_frame(res.hwnd_rt.Get(), res, input, plan, vd_width, vd_height,
+                   target.rect_client, top_layer);
+        // Identity again before anything else draws with the device context (the
+        // next frame's prepare work records with it).
+        res.hwnd_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+
+        HRESULT hr = S_OK;
+        {
+            GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::End_draw");
+            hr = res.hwnd_rt->EndDraw();
+        }
+        if (hr == D2DERR_RECREATE_TARGET) {
+            return D2DFrameStatus::DeviceLost;
+        }
+        if (target.swap_chain) {
+            GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Present");
+            // SyncInterval=1 pairs with the waitable: DWM picks up the new frame
+            // on the next vsync. With FLIP_DISCARD the present is a pointer swap;
+            // the legacy ~28 ms windowed-blit wait inside Present is gone.
+            HRESULT const present_hr = target.swap_chain->Present(1, 0);
+            if (present_hr == DXGI_ERROR_DEVICE_REMOVED ||
+                present_hr == DXGI_ERROR_DEVICE_RESET) {
+                return D2DFrameStatus::DeviceLost;
+            }
+        }
+    }
+    return D2DFrameStatus::Ok;
 }
 
 } // namespace greenflame

@@ -235,10 +235,21 @@ bool D2DOverlayResources::Create_device(IDXGIAdapter *adapter,
 
 bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height,
                                          IDXGIAdapter *adapter) {
+    // A window holds one swap chain at a time: drop the old targets first.
+    Release_targets();
     if (!Create_device(adapter, adapter != nullptr ? D3D_DRIVER_TYPE_UNKNOWN
                                                    : D3D_DRIVER_TYPE_HARDWARE)) {
         return false;
     }
+    return Add_swap_chain_target(hwnd, core::RectPx::From_ltrb(0, 0, width, height));
+}
+
+bool D2DOverlayResources::Add_swap_chain_target(HWND hwnd, core::RectPx rect_client) {
+    if (!d3d_device || !hwnd_rt || rect_client.Is_empty()) {
+        return false;
+    }
+    D2DSurfaceTarget target{};
+    target.rect_client = rect_client;
 
     // Reach the DXGI factory through the device. Going through the device's
     // adapter (rather than CreateDXGIFactory*) is the documented requirement
@@ -264,8 +275,8 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height,
     // overlay window is fullscreen-borderless and does not perform live resizes,
     // so the visual difference vs. SCALING_NONE is irrelevant here.
     DXGI_SWAP_CHAIN_DESC1 sc_desc{};
-    sc_desc.Width = static_cast<UINT>(width);
-    sc_desc.Height = static_cast<UINT>(height);
+    sc_desc.Width = static_cast<UINT>(rect_client.Width());
+    sc_desc.Height = static_cast<UINT>(rect_client.Height());
     sc_desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
     sc_desc.Stereo = FALSE;
     sc_desc.SampleDesc.Count = 1;
@@ -283,28 +294,32 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height,
     if (FAILED(hr)) {
         return false;
     }
-    hr = sc1.As(&swap_chain);
+    hr = sc1.As(&target.swap_chain);
     if (FAILED(hr)) {
         return false;
     }
     // Latency 1: Paint blocks on the waitable until DWM has consumed the prior
     // frame, then produces exactly one new frame. Replaces the implicit
     // backpressure that Present() used to apply via PrepareWindowedBltPresent.
-    (void)swap_chain->SetMaximumFrameLatency(1);
-    if (frame_latency_waitable != nullptr) {
-        CloseHandle(frame_latency_waitable);
-        frame_latency_waitable = nullptr;
-    }
-    frame_latency_waitable = swap_chain->GetFrameLatencyWaitableObject();
+    (void)target.swap_chain->SetMaximumFrameLatency(1);
+    target.frame_latency_waitable = target.swap_chain->GetFrameLatencyWaitableObject();
+    // A failure below must not leave the waitable open.
+    auto const fail = [&target]() {
+        if (target.frame_latency_waitable != nullptr) {
+            CloseHandle(target.frame_latency_waitable);
+            target.frame_latency_waitable = nullptr;
+        }
+        return false;
+    };
 
     // Wrap the back buffer surface as an ID2D1Bitmap1 marked TARGET. With
     // BufferCount == 2 + FLIP_DISCARD the same DXGI surface object is reused
     // across Present() calls, so a single CreateBitmapFromDxgiSurface call at
     // setup is sufficient — no per-frame rebind required.
     Microsoft::WRL::ComPtr<IDXGISurface> back_surface;
-    hr = swap_chain->GetBuffer(0, IID_PPV_ARGS(back_surface.GetAddressOf()));
+    hr = target.swap_chain->GetBuffer(0, IID_PPV_ARGS(back_surface.GetAddressOf()));
     if (FAILED(hr)) {
-        return false;
+        return fail();
     }
     D2D1_BITMAP_PROPERTIES1 bp{};
     bp.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
@@ -312,19 +327,22 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height,
     bp.dpiX = Target_dpi();
     bp.dpiY = Target_dpi();
     bp.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
-    hr = hwnd_rt->CreateBitmapFromDxgiSurface(
-        back_surface.Get(), &bp, back_buffer_bitmap.ReleaseAndGetAddressOf());
+    hr = hwnd_rt->CreateBitmapFromDxgiSurface(back_surface.Get(), &bp,
+                                              target.bitmap.ReleaseAndGetAddressOf());
     if (FAILED(hr)) {
-        return false;
+        return fail();
     }
-    hwnd_rt->SetTarget(back_buffer_bitmap.Get());
+    hwnd_rt->SetTarget(target.bitmap.Get());
+    targets.push_back(std::move(target));
     return true;
 }
 
-bool D2DOverlayResources::Create_offscreen_target(int width, int height) {
-    if (!hwnd_rt || width <= 0 || height <= 0) {
+bool D2DOverlayResources::Add_offscreen_target(core::RectPx rect_client) {
+    if (!hwnd_rt || rect_client.Is_empty()) {
         return false;
     }
+    D2DSurfaceTarget target{};
+    target.rect_client = rect_client;
     // Same format and alpha mode as the swap-chain back buffer, without
     // CANNOT_DRAW so the render benchmark can copy it out for a pixel dump.
     D2D1_BITMAP_PROPERTIES1 bp{};
@@ -333,14 +351,31 @@ bool D2DOverlayResources::Create_offscreen_target(int width, int height) {
     bp.dpiX = Target_dpi();
     bp.dpiY = Target_dpi();
     bp.bitmapOptions = D2D1_BITMAP_OPTIONS_TARGET;
-    HRESULT const hr = hwnd_rt->CreateBitmap(
-        D2D1::SizeU(static_cast<UINT32>(width), static_cast<UINT32>(height)), nullptr,
-        0, bp, back_buffer_bitmap.ReleaseAndGetAddressOf());
+    HRESULT const hr =
+        hwnd_rt->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(rect_client.Width()),
+                                          static_cast<UINT32>(rect_client.Height())),
+                              nullptr, 0, bp, target.bitmap.ReleaseAndGetAddressOf());
     if (FAILED(hr)) {
         return false;
     }
-    hwnd_rt->SetTarget(back_buffer_bitmap.Get());
+    hwnd_rt->SetTarget(target.bitmap.Get());
+    targets.push_back(std::move(target));
     return true;
+}
+
+void D2DOverlayResources::Release_targets() noexcept {
+    if (hwnd_rt) {
+        hwnd_rt->SetTarget(nullptr);
+    }
+    for (D2DSurfaceTarget &target : targets) {
+        target.bitmap.Reset();
+        if (target.frame_latency_waitable != nullptr) {
+            CloseHandle(target.frame_latency_waitable);
+            target.frame_latency_waitable = nullptr;
+        }
+        target.swap_chain.Reset();
+    }
+    targets.clear();
 }
 
 bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
@@ -737,16 +772,8 @@ void D2DOverlayResources::Release_device_resources() {
     obfuscate_bitmaps.clear();
     text_bitmaps.clear();
     bubble_bitmaps.clear();
-    if (hwnd_rt) {
-        hwnd_rt->SetTarget(nullptr);
-    }
-    back_buffer_bitmap.Reset();
+    Release_targets();
     hwnd_rt.Reset();
-    if (frame_latency_waitable != nullptr) {
-        CloseHandle(frame_latency_waitable);
-        frame_latency_waitable = nullptr;
-    }
-    swap_chain.Reset();
     d2d_device.Reset();
     d3d_device.Reset();
     annotations_valid = false;

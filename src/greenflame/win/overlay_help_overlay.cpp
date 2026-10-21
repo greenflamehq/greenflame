@@ -185,6 +185,8 @@ void OverlayHelpOverlay::Show_at_cursor(
 
     monitor_rect_client_ =
         Monitor_rect_in_client(cursor_screen, monitors, overlay_rect_screen);
+    overlay_size_ = D2D1::SizeF(static_cast<float>(overlay_rect_screen.Width()),
+                                static_cast<float>(overlay_rect_screen.Height()));
     visible_ = true;
 }
 
@@ -252,7 +254,7 @@ bool OverlayHelpOverlay::Paint_d2d(ID2D1RenderTarget *rt, IDWriteFactory *dwrite
         return false;
     }
 
-    D2D1_SIZE_F const rt_size = rt->GetSize();
+    D2D1_SIZE_F const rt_size = overlay_size_;
     float const w = rt_size.width;
     float const h = rt_size.height;
     if (w <= 0.f || h <= 0.f) {

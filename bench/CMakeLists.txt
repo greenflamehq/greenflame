@@ -239,4 +239,59 @@ if(BUILD_TESTING)
     set_tests_properties(greenflame_render_bench_straight_diff
         PROPERTIES FIXTURES_REQUIRED greenflame_bench_straight
     )
+
+    # The per-monitor overlay draws each frame into one target per monitor. On the
+    # jocelyn-desk layout (laptop at negative x and y=137, two panels), those targets
+    # stitched together must match the one-target frame on every monitor pixel, at
+    # tolerance 0. The laptop leaves undrawn strips above and below it, so the diff
+    # masks to monitor pixels. Frame 2 of 4 puts each draft across a boundary.
+    set(greenflame_split_common --adapter warp --layout jocelyn-desk --frames 4)
+    set(greenflame_split_freehand --points-per-frame 64 --step 24)
+    set(greenflame_split_args_hover --scenario hover)
+    set(greenflame_split_args_select --scenario select)
+    set(greenflame_split_args_brush --scenario brush ${greenflame_split_freehand})
+    set(greenflame_split_args_brush_reverse
+        --scenario brush ${greenflame_split_freehand} --reverse)
+    set(greenflame_split_args_highlighter
+        --scenario highlighter ${greenflame_split_freehand})
+    set(greenflame_split_args_highlighter_reverse
+        --scenario highlighter ${greenflame_split_freehand} --reverse)
+    set(greenflame_split_args_straight
+        --scenario highlighter --annotated --diagonal --straighten-at 1)
+    set(greenflame_split_args_line --scenario line --annotated --arrow)
+    set(greenflame_split_args_obfuscate --scenario obfuscate)
+    set(greenflame_split_args_lifted
+        --scenario highlighter --annotated --lifted ${greenflame_split_freehand})
+    set(greenflame_split_args_steady --scenario steady --annotated)
+    foreach(greenflame_split_case hover select brush brush_reverse highlighter
+            highlighter_reverse straight line obfuscate lifted steady)
+        set(greenflame_split_name greenflame_render_bench_split_${greenflame_split_case})
+        set(greenflame_split_span_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/split_${greenflame_split_case}_span.bmp")
+        set(greenflame_split_split_bmp
+            "${CMAKE_CURRENT_BINARY_DIR}/split_${greenflame_split_case}_split.bmp")
+        add_test(
+            NAME ${greenflame_split_name}_span
+            COMMAND greenflame_render_bench ${greenflame_split_common}
+                ${greenflame_split_args_${greenflame_split_case}}
+                --dump-frame 2 "${greenflame_split_span_bmp}"
+        )
+        add_test(
+            NAME ${greenflame_split_name}_split
+            COMMAND greenflame_render_bench ${greenflame_split_common}
+                ${greenflame_split_args_${greenflame_split_case}} --split-monitors
+                --dump-frame 2 "${greenflame_split_split_bmp}"
+        )
+        set_tests_properties(${greenflame_split_name}_span ${greenflame_split_name}_split
+            PROPERTIES FIXTURES_SETUP greenflame_bench_split_${greenflame_split_case}
+        )
+        add_test(
+            NAME ${greenflame_split_name}_diff
+            COMMAND greenflame_render_bench --layout jocelyn-desk --mask-monitors
+                --diff "${greenflame_split_span_bmp}" "${greenflame_split_split_bmp}"
+        )
+        set_tests_properties(${greenflame_split_name}_diff
+            PROPERTIES FIXTURES_REQUIRED greenflame_bench_split_${greenflame_split_case}
+        )
+    endforeach()
 endif()
