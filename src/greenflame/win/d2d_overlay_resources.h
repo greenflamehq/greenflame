@@ -184,6 +184,11 @@ struct D2DOverlayResources final {
     [[nodiscard]] bool Create_hwnd_rt(HWND hwnd, int width, int height,
                                       IDXGIAdapter *adapter = nullptr);
 
+    // Create (or recreate) a swap chain on hwnd on the existing device, and make its
+    // back buffer the target. Replaces swap_chain, back_buffer_bitmap and
+    // frame_latency_waitable (closing the old waitable). Call after Create_device.
+    [[nodiscard]] bool Create_swap_chain(HWND hwnd, int width, int height);
+
     // Target an offscreen bitmap the size of the virtual desktop instead of a swap
     // chain (render benchmark). Call after Create_device.
     [[nodiscard]] bool Create_offscreen_target(int width, int height);

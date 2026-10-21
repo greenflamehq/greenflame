@@ -275,6 +275,9 @@ It puts topmost windows over every monitor for a few seconds (no capture, no inp
 It reports the frame interval p50/p95 and fps of steady frames for two arrangements:
 
 - `span`: one window over the whole desktop, through the app's `Create_hwnd_rt`;
+- `per-monitor-shared`: one window and swap chain per monitor, all on the default
+  adapter with one set of desktop-sized caches; each window draws the same scene
+  translated to its monitor (the planned per-monitor overlay);
 - `per-monitor`: one window and swap chain per monitor, each on the adapter that drives
   that monitor.
 

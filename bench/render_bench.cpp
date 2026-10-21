@@ -5,7 +5,8 @@
 // B1 (default): offscreen render bench. CPU, GPU and frame time per frame on a
 //     chosen monitor layout and adapter. No window, no present.
 // B2 (--probe-present): present floor. Real topmost windows on the real
-//     monitors, same swap chain as the app, frame interval per loop.
+//     monitors, same swap chain as the app, frame interval per loop: span,
+//     per-monitor-shared (one device) and per-monitor (one device per GPU).
 //
 // Known gaps against OverlayWindow::On_paint (keep this list honest):
 // - no toolbar buttons or glyphs, so frames with a selection are slightly cheaper
@@ -1414,9 +1415,24 @@ bool Setup_probe_surface(ProbeSurface &surface, IDXGIAdapter *adapter, int passe
     return true;
 }
 
-// One loop = one steady frame (frozen blit + extra passes) on every surface, each
-// through Paint_d2d_frame's own waitable wait and Present(1, 0).
-std::optional<std::vector<double>> Probe_loop(std::vector<ProbeSurface> &surfaces,
+// One steady frame (frozen blit + extra passes) on every surface, each through
+// Paint_d2d_frame's own waitable wait and Present(1, 0).
+[[nodiscard]] bool Paint_probe_surfaces(std::vector<ProbeSurface> &surfaces) {
+    for (ProbeSurface &s : surfaces) {
+        D2DPaintInput input{};
+        input.monitor_rects_client = s.monitors_client;
+        input.final_selection = core::RectPx::From_ltrb(0, 0, s.screen_rect.Width(),
+                                                        s.screen_rect.Height());
+        if (!Paint_d2d_frame(*s.res, input, s.screen_rect.Width(),
+                             s.screen_rect.Height(), s.extra.get())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// One loop = one call of paint_all, which paints one frame on every window.
+std::optional<std::vector<double>> Probe_loop(std::function<bool()> const &paint_all,
                                               int frames) {
     std::vector<double> intervals;
     LARGE_INTEGER const start = Now();
@@ -1426,15 +1442,8 @@ std::optional<std::vector<double>> Probe_loop(std::vector<ProbeSurface> &surface
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE) != FALSE) {
             (void)DispatchMessageW(&msg);
         }
-        for (ProbeSurface &s : surfaces) {
-            D2DPaintInput input{};
-            input.monitor_rects_client = s.monitors_client;
-            input.final_selection = core::RectPx::From_ltrb(0, 0, s.screen_rect.Width(),
-                                                            s.screen_rect.Height());
-            if (!Paint_d2d_frame(*s.res, input, s.screen_rect.Width(),
-                                 s.screen_rect.Height(), s.extra.get())) {
-                return std::nullopt;
-            }
+        if (!paint_all()) {
+            return std::nullopt;
         }
         LARGE_INTEGER const now = Now();
         if (f >= 0) {
@@ -1459,9 +1468,9 @@ void Destroy_surfaces(std::vector<ProbeSurface> &surfaces) {
     surfaces.clear();
 }
 
-bool Report_probe(std::string_view label, std::vector<ProbeSurface> &surfaces,
-                  int frames) {
-    std::optional<std::vector<double>> const intervals = Probe_loop(surfaces, frames);
+// Prints one arrangement's frame intervals; false if a paint failed.
+bool Report_intervals(std::string_view label, size_t surface_count,
+                      std::optional<std::vector<double>> const &intervals) {
     if (!intervals) {
         Print("{}: paint failed\n", label);
         return false;
@@ -1470,13 +1479,138 @@ bool Report_probe(std::string_view label, std::vector<ProbeSurface> &surfaces,
     double const fps = s.p50_ms > 0.0 ? kMsPerSecond / s.p50_ms : 0.0;
     Print("{}: {} surfaces, frame interval p50 {:.1f} p95 {:.1f} ms ({:.1f} fps), {} "
           "frames\n",
-          label, surfaces.size(), s.p50_ms, s.p95_ms, fps, s.count);
+          label, surface_count, s.p50_ms, s.p95_ms, fps, s.count);
+    return true;
+}
+
+bool Report_probe(std::string_view label, std::vector<ProbeSurface> &surfaces,
+                  int frames) {
+    if (!Report_intervals(
+            label, surfaces.size(),
+            Probe_loop([&surfaces] { return Paint_probe_surfaces(surfaces); },
+                       frames))) {
+        return false;
+    }
     for (ProbeSurface const &surface : surfaces) {
         Print("    ({},{}) {}x{} on {}\n", surface.screen_rect.left,
               surface.screen_rect.top, surface.screen_rect.Width(),
               surface.screen_rect.Height(), Narrow(surface.adapter_name));
     }
     return true;
+}
+
+// One window and swap chain per monitor, all on one device (the default adapter)
+// with one set of desktop-sized caches: each loop paints the same scene into every
+// swap chain, translated to that monitor. This is the layout the per-monitor app
+// ships (gf-ojs.6, option 3a). Until D2DOverlayResources holds several targets, the
+// probe swaps each window's swap chain, back buffer and waitable into it per paint.
+struct SharedWindow final {
+    HWND hwnd = nullptr;
+    core::RectPx rect_client = {};
+    ComPtr<IDXGISwapChain2> swap_chain = {};
+    ComPtr<ID2D1Bitmap1> back_buffer_bitmap = {};
+    HANDLE waitable = nullptr;
+};
+
+struct SharedProbe final {
+    SharedProbe() = default;
+    ~SharedProbe() = default;
+    SharedProbe(SharedProbe const &) = delete;
+    SharedProbe &operator=(SharedProbe const &) = delete;
+    SharedProbe(SharedProbe &&) noexcept = default;
+    SharedProbe &operator=(SharedProbe &&) noexcept = default;
+
+    core::RectPx vd = {};
+    std::vector<core::RectPx> monitors_client = {};
+    std::vector<SharedWindow> windows = {};
+    std::unique_ptr<D2DOverlayResources> res = std::make_unique<D2DOverlayResources>();
+    std::unique_ptr<ExtraPassesLayer> extra = {};
+};
+
+bool Setup_shared_probe(SharedProbe &probe, std::span<const core::RectPx> monitors,
+                        int passes) {
+    D2DOverlayResources &res = *probe.res;
+    if (!res.Initialize_factory() ||
+        !res.Create_device(nullptr, D3D_DRIVER_TYPE_HARDWARE)) {
+        return false;
+    }
+    for (core::RectPx const &m : monitors) {
+        SharedWindow window{};
+        window.rect_client = core::RectPx::From_ltrb(
+            m.left - probe.vd.left, m.top - probe.vd.top, m.right - probe.vd.left,
+            m.bottom - probe.vd.top);
+        window.hwnd = Create_probe_window(m);
+        // The window joins the list first so teardown destroys it on any failure.
+        probe.windows.push_back(window);
+        if (window.hwnd == nullptr ||
+            !res.Create_swap_chain(window.hwnd, m.Width(), m.Height())) {
+            return false;
+        }
+        SharedWindow &added = probe.windows.back();
+        added.swap_chain = std::exchange(res.swap_chain, nullptr);
+        added.back_buffer_bitmap = std::exchange(res.back_buffer_bitmap, nullptr);
+        added.waitable = std::exchange(res.frame_latency_waitable, nullptr);
+    }
+    // The caches come from the device context, which now targets a back buffer.
+    if (!Prepare_resources(res, probe.vd.Width(), probe.vd.Height())) {
+        return false;
+    }
+    Rebuild_frozen_bitmap(res, core::RectPx::From_ltrb(0, 0, probe.vd.Width(),
+                                                       probe.vd.Height()),
+                          probe.vd.Width(), probe.vd.Height());
+    probe.extra = std::make_unique<ExtraPassesLayer>(res.screenshot.Get(), passes - 1);
+    return true;
+}
+
+[[nodiscard]] bool Paint_shared_probe(SharedProbe &probe) {
+    D2DOverlayResources &res = *probe.res;
+    D2DPaintInput input{};
+    input.monitor_rects_client = probe.monitors_client;
+    input.final_selection =
+        core::RectPx::From_ltrb(0, 0, probe.vd.Width(), probe.vd.Height());
+    bool ok = true;
+    for (SharedWindow const &window : probe.windows) {
+        res.swap_chain = window.swap_chain;
+        res.back_buffer_bitmap = window.back_buffer_bitmap;
+        res.frame_latency_waitable = window.waitable;
+        res.hwnd_rt->SetTarget(window.back_buffer_bitmap.Get());
+        res.hwnd_rt->SetTransform(
+            D2D1::Matrix3x2F::Translation(static_cast<float>(-window.rect_client.left),
+                                          static_cast<float>(-window.rect_client.top)));
+        ok = Paint_d2d_frame(res, input, probe.vd.Width(), probe.vd.Height(),
+                             probe.extra.get());
+        res.hwnd_rt->SetTransform(D2D1::Matrix3x2F::Identity());
+        if (!ok) {
+            break;
+        }
+    }
+    // The windows own these; Release_all must not close or release them.
+    res.swap_chain.Reset();
+    res.back_buffer_bitmap.Reset();
+    res.frame_latency_waitable = nullptr;
+    return ok;
+}
+
+void Destroy_shared_probe(SharedProbe &probe) {
+    if (probe.res->hwnd_rt) {
+        probe.res->hwnd_rt->SetTarget(nullptr);
+    }
+    // Swap chains and waitables go before their windows.
+    for (SharedWindow &window : probe.windows) {
+        window.back_buffer_bitmap.Reset();
+        window.swap_chain.Reset();
+        if (window.waitable != nullptr) {
+            CloseHandle(window.waitable);
+            window.waitable = nullptr;
+        }
+    }
+    probe.res->Release_all();
+    for (SharedWindow const &window : probe.windows) {
+        if (window.hwnd != nullptr) {
+            (void)DestroyWindow(window.hwnd);
+        }
+    }
+    probe.windows.clear();
 }
 
 int Run_probe(Args const &args) {
@@ -1497,12 +1631,14 @@ int Run_probe(Args const &args) {
 
     // Span: one window over the virtual desktop on the default adapter (the app).
     core::RectPx const vd = Union_of(monitors);
-    std::vector<ProbeSurface> surfaces(1);
-    surfaces[0].screen_rect = vd;
+    std::vector<core::RectPx> monitors_client;
     for (core::RectPx const &m : monitors) {
-        surfaces[0].monitors_client.push_back(core::RectPx::From_ltrb(
+        monitors_client.push_back(core::RectPx::From_ltrb(
             m.left - vd.left, m.top - vd.top, m.right - vd.left, m.bottom - vd.top));
     }
+    std::vector<ProbeSurface> surfaces(1);
+    surfaces[0].screen_rect = vd;
+    surfaces[0].monitors_client = monitors_client;
     bool ok = Setup_probe_surface(surfaces[0], nullptr, args.passes) &&
               Report_probe("span", surfaces, args.frames);
     Destroy_surfaces(surfaces);
@@ -1510,8 +1646,33 @@ int Run_probe(Args const &args) {
         return static_cast<int>(BenchExit::DeviceFailed);
     }
 
+    // Per-monitor-shared: one window and swap chain per monitor on one device, the
+    // default adapter, with shared desktop-sized caches (the planned app layout).
+    {
+        SharedProbe shared{};
+        shared.vd = vd;
+        shared.monitors_client = monitors_client;
+        ok = Setup_shared_probe(shared, monitors, args.passes) &&
+             Report_intervals(
+                 "per-monitor-shared", shared.windows.size(),
+                 Probe_loop([&shared] { return Paint_shared_probe(shared); },
+                            args.frames));
+        if (ok) {
+            for (SharedWindow const &window : shared.windows) {
+                Print("    ({},{}) {}x{}\n", window.rect_client.left + vd.left,
+                      window.rect_client.top + vd.top, window.rect_client.Width(),
+                      window.rect_client.Height());
+            }
+            Print("    all on {}\n", Narrow(Adapter_name(shared.res->d3d_device.Get())));
+        }
+        Destroy_shared_probe(shared);
+    }
+    if (!ok) {
+        return static_cast<int>(BenchExit::DeviceFailed);
+    }
+
     // Per-monitor: one window and swap chain per monitor, each on the adapter
-    // that drives it (no app equivalent yet; this is the layout step 3 would ship).
+    // that drives it (option 3b: every cache would be duplicated per GPU).
     surfaces.resize(monitors.size());
     for (size_t i = 0; i < monitors.size() && ok; ++i) {
         surfaces[i].screen_rect = monitors[i];

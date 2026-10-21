@@ -239,6 +239,13 @@ bool D2DOverlayResources::Create_hwnd_rt(HWND hwnd, int width, int height,
                                                    : D3D_DRIVER_TYPE_HARDWARE)) {
         return false;
     }
+    return Create_swap_chain(hwnd, width, height);
+}
+
+bool D2DOverlayResources::Create_swap_chain(HWND hwnd, int width, int height) {
+    if (!d3d_device || !hwnd_rt) {
+        return false;
+    }
 
     // Reach the DXGI factory through the device. Going through the device's
     // adapter (rather than CreateDXGIFactory*) is the documented requirement
