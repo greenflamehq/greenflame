@@ -793,6 +793,28 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Record observed responsiveness and any input-to-display timings separately from
     the CPU-only benchmark; do not interpret its result as a frame-rate measurement.
 
+### GF-MAN-ANN-002F - Straight Lines Keep Up And Long Highlighters Undo Quickly
+
+- Priority: `P1`
+- Run on: `ENV-B`, on the widest multi-monitor desk available.
+- Steps:
+  1. Select the whole desktop. With Highlighter, start a stroke in one corner, drag
+     to the far opposite corner, pause until it straightens, then move the mouse
+     fast and in wide circles for several seconds.
+  2. With Line, then with Arrow, drag from one corner of the desktop to the far
+     opposite corner and keep moving the mouse fast for several seconds.
+  3. Set `tools.highlighter.smoothing_mode` to `off`. Draw one Highlighter stroke for
+     at least 10 seconds, release, then press Ctrl+Z and Ctrl+Shift+Z several times.
+  4. Repeat steps 1 and 2 after a Ctrl-click window selection on a window that
+     another window partly covers, drawing across the covered part.
+- Expected:
+  - In steps 1 and 2 the bar, line or arrow stays on the cursor with no visible lag
+    beyond the brush's, on every monitor. Its look matches the committed result.
+  - In step 3 each undo and redo shows no visible pause, and the restored stroke
+    looks the same as while it was drawn.
+  - In step 4 the highlighter tints the lifted window's own pixels, never the
+    covering window's, both while drawing and after release.
+
 ### GF-MAN-ANN-002E - Brush And Highlighter Strokes Keep Every Mouse Position
 
 - Priority: `P1`
@@ -872,7 +894,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   5. Offscreen pixel check, before and after a paint change: run
      `greenflame_render_bench --layout jocelyn-desk --scenario steady --annotated
      --dump-frame 120 FILE.bmp` from both builds, then `--diff` the two dumps. Repeat
-     with `--scenario brush` and `--scenario highlighter`.
+     with `--scenario brush`, `--scenario highlighter` and `--scenario line`.
 - Expected:
   - The selected pixels remain undimmed; all outside pixels and annotations receive
     the same dim exactly once, without seams, flashing or annotation opacity changes.

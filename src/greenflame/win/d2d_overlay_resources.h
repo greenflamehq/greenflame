@@ -8,6 +8,19 @@
 
 namespace greenflame {
 
+// A lifted window capture as the overlay shows it: `bitmap`'s `source_rect` drawn 1:1
+// at `dest_rect`. All null or empty when no window is lifted.
+struct LiftedWindowView final {
+    ID2D1Bitmap *bitmap = nullptr;
+    core::RectPx dest_rect = {};
+    core::RectPx source_rect = {};
+
+    [[nodiscard]] bool Is_shown() const noexcept {
+        return bitmap != nullptr && !dest_rect.Is_empty() && !source_rect.Is_empty();
+    }
+    bool operator==(LiftedWindowView const &) const noexcept = default;
+};
+
 // Holds all Direct2D and DirectWrite resources for the overlay render pipeline.
 // Lifetime: created once per overlay session; released when the overlay closes.
 //
@@ -55,6 +68,12 @@ struct D2DOverlayResources final {
     // highlighter tint the pixels of prior annotations that sit beneath it, rather
     // than only tinting the raw screenshot.
     Microsoft::WRL::ComPtr<ID2D1Effect> base_composite_effect;
+    // A lifted window shows its capture, not the screenshot, so highlighters over it
+    // multiply onto the capture: the capture moved to its dest rect (affine
+    // transform), cut to it (crop), over the screenshot (composite).
+    Microsoft::WRL::ComPtr<ID2D1Effect> lifted_transform_effect;
+    Microsoft::WRL::ComPtr<ID2D1Effect> lifted_crop_effect;
+    Microsoft::WRL::ComPtr<ID2D1Effect> lifted_base_effect;
 
     // Per-session bitmaps
     Microsoft::WRL::ComPtr<ID2D1Bitmap> screenshot;
@@ -141,6 +160,10 @@ struct D2DOverlayResources final {
 
     bool annotations_valid = false;
     bool frozen_valid = false;
+    core::RectPx frozen_selection = {}; // the selection frozen_bitmap was built with
+    // The lifted window the overlay shows. Committed highlighters multiply onto it
+    // inside its dest rect; set it with Set_lifted_view.
+    LiftedWindowView lifted_view = {};
 
     // Initialize the process-lifetime factories (call once).
     [[nodiscard]] bool Initialize_factory();
@@ -169,6 +192,8 @@ struct D2DOverlayResources final {
     [[nodiscard]] bool Upload_screenshot(GdiCaptureResult const &cap);
     [[nodiscard]] bool Upload_lifted_window_capture(GdiCaptureResult const &cap);
     void Clear_lifted_window_capture() noexcept;
+    // Sets lifted_view; a change marks annotations (and frozen) stale.
+    void Set_lifted_view(LiftedWindowView const &view) noexcept;
 
     // Create device-dependent shared resources (brushes, stroke styles, text formats).
     [[nodiscard]] bool Create_shared_resources();

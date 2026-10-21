@@ -199,6 +199,9 @@ bool D2DOverlayResources::Create_device(IDXGIAdapter *adapter,
     // tinting, source-over composite for the highlighter base).
     multiply_effect.Reset();
     base_composite_effect.Reset();
+    lifted_transform_effect.Reset();
+    lifted_crop_effect.Reset();
+    lifted_base_effect.Reset();
     Microsoft::WRL::ComPtr<ID2D1Effect> effect;
     if (SUCCEEDED(hwnd_rt->CreateEffect(CLSID_D2D1ArithmeticComposite, &effect))) {
         // k1=1, k2=k3=k4=0 → O = I1 * I2 (premultiplied multiply).
@@ -210,6 +213,22 @@ bool D2DOverlayResources::Create_device(IDXGIAdapter *adapter,
             CLSID_D2D1Composite, base_composite_effect.ReleaseAndGetAddressOf()))) {
         // SOURCE_OVER: composite committed annotations on top of the screenshot
         // to form the highlighter multiply base.
+    }
+    Microsoft::WRL::ComPtr<ID2D1Effect> transform;
+    Microsoft::WRL::ComPtr<ID2D1Effect> crop;
+    Microsoft::WRL::ComPtr<ID2D1Effect> composite;
+    if (SUCCEEDED(hwnd_rt->CreateEffect(CLSID_D2D12DAffineTransform, &transform)) &&
+        SUCCEEDED(hwnd_rt->CreateEffect(CLSID_D2D1Crop, &crop)) &&
+        SUCCEEDED(hwnd_rt->CreateEffect(CLSID_D2D1Composite, &composite))) {
+        // Whole-pixel moves only: nearest neighbor keeps the capture's pixels exact.
+        (void)transform->SetValue(
+            D2D1_2DAFFINETRANSFORM_PROP_INTERPOLATION_MODE,
+            D2D1_2DAFFINETRANSFORM_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+        crop->SetInputEffect(0, transform.Get());
+        composite->SetInputEffect(1, crop.Get());
+        lifted_transform_effect = std::move(transform);
+        lifted_crop_effect = std::move(crop);
+        lifted_base_effect = std::move(composite);
     }
     return true;
 }
@@ -328,12 +347,24 @@ bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
     return Upload_capture_bitmap(hwnd_rt.Get(), cap, Target_dpi(), screenshot);
 }
 
+void D2DOverlayResources::Set_lifted_view(LiftedWindowView const &view) noexcept {
+    if (view != lifted_view) {
+        lifted_view = view;
+        annotations_valid = false;
+        frozen_valid = false;
+    }
+}
+
+// A new or cleared capture may reuse the old one's address, so the view drops it and
+// annotations drawn over it are rebuilt.
 bool D2DOverlayResources::Upload_lifted_window_capture(GdiCaptureResult const &cap) {
+    Set_lifted_view({});
     return Upload_capture_bitmap(hwnd_rt.Get(), cap, Target_dpi(),
                                  lifted_window_capture);
 }
 
 void D2DOverlayResources::Clear_lifted_window_capture() noexcept {
+    Set_lifted_view({});
     lifted_window_capture.Reset();
 }
 
@@ -686,6 +717,10 @@ void D2DOverlayResources::Release_device_resources() {
     freehand_draft = {};
     multiply_effect.Reset();
     base_composite_effect.Reset();
+    lifted_transform_effect.Reset();
+    lifted_crop_effect.Reset();
+    lifted_base_effect.Reset();
+    lifted_view = {};
     solid_brush.Reset();
     round_cap_style.Reset();
     flat_cap_style.Reset();

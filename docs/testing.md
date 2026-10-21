@@ -77,7 +77,7 @@ Test must be run and must pass before any task is considered complete. This is a
 - Add new test files under `tests/`
 - Register them in `tests/CMakeLists.txt` as sources of `greenflame_tests`
 - Tests must only link against `greenflame_core` and the testable logic library — never against `greenflame` directly
-- `ctest` also runs two non-unit smoke tests of `greenflame_render_bench` on WARP (see [Overlay performance](#overlay-performance-opt-in)). That tool links `greenflame_render`; the rule above is about `greenflame_tests`
+- `ctest` also runs smoke and regression tests of `greenflame_render_bench` on WARP (see [Overlay performance](#overlay-performance-opt-in)). That tool links `greenflame_render`; the rule above is about `greenflame_tests`
 
 ## Source coverage
 
@@ -203,9 +203,10 @@ virtual desktop.
   (the real monitors).
 - `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
   prints the indexes.
-- `--scenario hover|select|brush|highlighter|steady|all`: crosshair sweep, live
+- `--scenario hover|select|brush|highlighter|line|steady|all`: crosshair sweep, live
   selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
-  `--points-per-frame`), idle selection, or all of them.
+  `--points-per-frame`), a line tool drag from the selection's top-left to its
+  bottom-right, idle selection, or all of them.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.
@@ -218,6 +219,19 @@ virtual desktop.
 - `--straighten-at K`: highlighter only. From frame K the stroke is its first and
   newest point, as after a pause-to-straighten. Dump frame F with `--straighten-at K`
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
+- `--diagonal` (freehand): the points run from the selection's top-left to its
+  bottom-right instead of a wave. With `--straighten-at`, the bar is a long diagonal.
+- `--arrow` (line): the line has an arrow head. `--flat` (line): it runs left to
+  right along the selection's middle row. `--line-dynamic` (line): the frozen
+  frame reads stale every frame, so the draft takes the dynamic path instead of
+  recompositing around itself; the two runs' frames must match at tolerance 0
+  (`ctest` runs this on WARP with a diagonal and a flat arrow).
+- `--lifted` (needs `--annotated`): a lifted window capture with its own pixels shown
+  over the selection, as a Ctrl-click window selection does. With
+  `--lifted-as-screenshot` instead, there is no lifted window and the screenshot
+  itself has those pixels inside the selection. The two runs' frames must match at
+  tolerance 0 (highlighters tint the capture, not the screenshot under it); `ctest`
+  runs this on WARP for a live and a committed highlighter.
 - `--dab N` (freehand): before the measured stroke, draw and commit an N-point stroke
   from the same start point, as a quick click followed by a fast stroke. With
   `--dab-no-draft` the short stroke is committed without being drawn. The two runs'
@@ -243,7 +257,10 @@ the cost by stroke length and a `release` line. Next to CPU milliseconds these p
 Cycles leave out time the thread waits or is preempted, so they hold up on a loaded
 machine where milliseconds do not. The `release` line covers committing the stroke,
 rebuilding the caches and painting the frame with no draft (`cpu` until
-`Paint_d2d_frame` returns, `frame` until the GPU has finished). The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
+`Paint_d2d_frame` returns, `frame` until the GPU has finished). The
+`rebuild (undo/redo)` line then rebuilds the annotations from scratch, with no draft
+left to reuse, as undo, redo and edits do (`cpu` and cycles for the rebuild, `gpu done`
+until the GPU has finished it). The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
 
 The bench does not see presentation, the compositor or input coalescing. A `PASS`
 here does not mean the screen keeps up; see the present probe.
@@ -272,8 +289,9 @@ It reports the frame interval p50/p95 and fps of steady frames for two arrangeme
    (`nvidia-smi -q -d PERFORMANCE`); numbers from different sessions do not compare.
 3. Check pixels: `--scenario <s> --dump-frame 150 base.bmp` in one tree and
    `--dump-frame 150 new.bmp` in the other, then
-   `--diff base.bmp new.bmp [--tolerance T]`. It exits non-zero when any channel of
-   any pixel differs by more than T (default 0).
+   `--diff base.bmp new.bmp [--tolerance T] [--max-pixels N]`. It exits non-zero
+   when more than N pixels (default 0) have a channel that differs by more than T
+   (default 0).
 4. Run the present probe once per session.
 
 Interactive coverage is `GF-MAN-PERF-001` in [manual_test_plan.md](manual_test_plan.md).

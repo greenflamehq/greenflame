@@ -50,9 +50,14 @@ constexpr int kFreehandAmplitudeDivisor = 5;
 constexpr double kFreehandRowStepPx = 40.0;
 constexpr int32_t kBrushWidthPx = 11;
 constexpr int32_t kHighlighterWidthPx = 20;
+constexpr int32_t kLineWidthPx = 4;
+constexpr COLORREF kLineColor = RGB(0, 128, 255);
 constexpr COLORREF kBrushColor = RGB(255, 0, 0);
 constexpr COLORREF kHighlighterColor = RGB(255, 255, 0);
 constexpr uint32_t kNoiseSeed = 0x12345678u;
+constexpr uint32_t kLiftedNoiseSeed = 0x9E3779B9u; // --lifted: the window's own pixels
+// --lifted: capture pixels around the shown part, so the source rect is offset.
+constexpr int32_t kLiftedCaptureMarginPx = 32;
 constexpr uint32_t kLcgMultiplier = 1664525u;
 constexpr uint32_t kLcgIncrement = 1013904223u;
 constexpr uint32_t kNoiseShift = 8u;
@@ -173,6 +178,7 @@ struct Args final {
     int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
     bool opacity_given = false;
     int straighten_at = -1;
+    bool diagonal = false;     // --diagonal
     int dab_points = 0;        // --dab N
     bool dab_no_draft = false; // --dab-no-draft
     int frames = kDefaultFrames;
@@ -185,9 +191,15 @@ struct Args final {
     std::string diff_a = {};
     std::string diff_b = {};
     int tolerance = 0;
+    int max_pixels = 0; // --max-pixels: pixels allowed over the tolerance
     bool list_adapters = false;
     bool probe_present = false;
     bool annotated = false;
+    bool lifted = false;               // --lifted
+    bool lifted_as_screenshot = false; // --lifted-as-screenshot
+    bool arrow = false;                // --arrow
+    bool flat = false;                 // --flat
+    bool line_dynamic = false;         // --line-dynamic
 };
 
 void Print_usage() {
@@ -196,7 +208,7 @@ void Print_usage() {
         "  --layout jocelyn-desk|4k-desk|single-1080|current   (default jocelyn-desk)\n"
         "  --adapter default|N|warp     D3D adapter (default: what the app uses)\n"
         "  --list-adapters              print DXGI adapters and exit\n"
-        "  --scenario hover|select|brush|highlighter|steady|all   (default all)\n"
+        "  --scenario hover|select|brush|highlighter|line|steady|all   (default all)\n"
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
@@ -204,17 +216,29 @@ void Print_usage() {
         "brush, 33 highlighter)\n"
         "  --straighten-at K            highlighter: from frame K the stroke is its "
         "first and newest point\n"
+        "  --diagonal                   freehand: points run from the selection's "
+        "top-left to its bottom-right instead of a wave\n"
         "  --dab N [--dab-no-draft]     freehand: first draw and commit an N-point "
         "stroke at the same start, N at most --points-per-frame (--dab-no-draft: "
         "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
+        "  --arrow                      line: draw an arrow head\n"
+        "  --flat                       line: run left to right along the selection's "
+        "middle row\n"
+        "  --line-dynamic               line: skip the frozen-frame path (the frozen "
+        "frame reads stale every frame); frames must match without it\n"
+        "  --lifted                     with --annotated: a lifted window capture with "
+        "its own pixels over the selection\n"
+        "  --lifted-as-screenshot       with --annotated: those pixels in the "
+        "screenshot instead; frames must match --lifted\n"
         "  --frames N                   measured frames per run (default 300)\n"
         "  --repeat N                   runs per scenario (default 1)\n"
         "  --csv FILE                   per-frame rows\n"
         "  --dump-frame K FILE.bmp      write frame K (run 1) as BMP; with 'all', from "
         "select; K = --frames: the freehand release frame\n"
-        "  --diff A.bmp B.bmp [--tolerance T]   compare two dumps\n"
+        "  --diff A.bmp B.bmp [--tolerance T] [--max-pixels N]   compare two dumps; "
+        "fails when more than N pixels (default 0) differ by more than T\n"
         "  --probe-present [--passes N] [--frames N]   present floor on real "
         "monitors\n");
 }
@@ -308,6 +332,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
             args.straighten_at = *v;
+        } else if (key == "--diagonal") {
+            args.diagonal = true;
         } else if (key == "--frames") {
             std::optional<int> const v = next_int(1);
             if (!v) return std::nullopt;
@@ -341,8 +367,22 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
             args.tolerance = *v;
+        } else if (key == "--max-pixels") {
+            std::optional<int> const v = next_int(0);
+            if (!v) return std::nullopt;
+            args.max_pixels = *v;
         } else if (key == "--annotated") {
             args.annotated = true;
+        } else if (key == "--arrow") {
+            args.arrow = true;
+        } else if (key == "--flat") {
+            args.flat = true;
+        } else if (key == "--line-dynamic") {
+            args.line_dynamic = true;
+        } else if (key == "--lifted") {
+            args.lifted = true;
+        } else if (key == "--lifted-as-screenshot") {
+            args.lifted_as_screenshot = true;
         } else if (key == "--list-adapters") {
             args.list_adapters = true;
         } else if (key == "--probe-present") {
@@ -390,8 +430,10 @@ double Median(std::vector<double> values) {
 // Device and resources
 // ---------------------------------------------------------------------------
 
-// Deterministic noise, so GPU colour compression cannot make blits cheap.
-HBITMAP Make_noise_bitmap(int width, int height) {
+// Deterministic noise, so GPU colour compression cannot make blits cheap. Inside
+// `paste`, the noise of a paste-sized bitmap made from `paste_seed` instead.
+HBITMAP Make_noise_bitmap(int width, int height, uint32_t seed, core::RectPx paste = {},
+                          uint32_t paste_seed = 0) {
     BITMAPINFO bmi{};
     bmi.bmiHeader.biSize = sizeof(bmi.bmiHeader);
     bmi.bmiHeader.biWidth = width;
@@ -410,18 +452,64 @@ HBITMAP Make_noise_bitmap(int width, int height) {
                                      static_cast<size_t>(width) *
                                          static_cast<size_t>(height));
     CLANG_WARN_IGNORE_POP()
-    uint32_t state = kNoiseSeed;
-    for (uint32_t &px : pixels) {
+    uint32_t state = seed;
+    uint32_t paste_state = paste_seed;
+    for (size_t i = 0; i < pixels.size(); ++i) {
         state = state * kLcgMultiplier + kLcgIncrement;
-        px = (state >> kNoiseShift) | kOpaqueAlpha;
+        core::PointPx const at = {static_cast<int32_t>(i % static_cast<size_t>(width)),
+                                  static_cast<int32_t>(i / static_cast<size_t>(width))};
+        uint32_t value = state;
+        if (paste.Contains(at)) {
+            paste_state = paste_state * kLcgMultiplier + kLcgIncrement;
+            value = paste_state;
+        }
+        pixels[i] = (value >> kNoiseShift) | kOpaqueAlpha;
     }
     return bitmap;
+}
+
+// The selection --annotated uses: inset by an eighth of the desktop on each side.
+core::RectPx Inset_selection(int width, int height) {
+    return core::RectPx::From_ltrb(width / 8, height / 8, width - width / 8,
+                                   height - height / 8);
+}
+
+// --lifted: a window capture with its own pixels, shown over the selection, as a
+// Ctrl-click window selection lifts it. --lifted-as-screenshot: no lifted window, the
+// screenshot itself carries those pixels; its frames must match --lifted.
+bool Prepare_lifted(D2DOverlayResources &res, int width, int height, Args const &args) {
+    core::RectPx const sel = Inset_selection(width, height);
+    GdiCaptureResult capture{};
+    // The shown part sits kLiftedCaptureMarginPx inside the capture, which has other
+    // pixels around it.
+    core::RectPx const source = core::RectPx::From_ltrb(
+        kLiftedCaptureMarginPx, kLiftedCaptureMarginPx,
+        kLiftedCaptureMarginPx + sel.Width(), kLiftedCaptureMarginPx + sel.Height());
+    capture.width = args.lifted ? sel.Width() + 2 * kLiftedCaptureMarginPx : width;
+    capture.height = args.lifted ? sel.Height() + 2 * kLiftedCaptureMarginPx : height;
+    capture.bitmap =
+        args.lifted
+            ? Make_noise_bitmap(capture.width, capture.height, ~kNoiseSeed, source,
+                                kLiftedNoiseSeed)
+            : Make_noise_bitmap(width, height, kNoiseSeed, sel, kLiftedNoiseSeed);
+    if (capture.bitmap == nullptr) {
+        return false;
+    }
+    bool const ok = args.lifted ? res.Upload_lifted_window_capture(capture)
+                                : res.Upload_screenshot(capture);
+    (void)DeleteObject(capture.bitmap);
+    if (ok && args.lifted) {
+        res.Set_lifted_view(LiftedWindowView{.bitmap = res.lifted_window_capture.Get(),
+                                             .dest_rect = sel,
+                                             .source_rect = source});
+    }
+    return ok;
 }
 
 // Screenshot, shared resources and cache targets, as OverlayWindow sets them up.
 bool Prepare_resources(D2DOverlayResources &res, int width, int height) {
     GdiCaptureResult capture{};
-    capture.bitmap = Make_noise_bitmap(width, height);
+    capture.bitmap = Make_noise_bitmap(width, height, kNoiseSeed);
     capture.width = width;
     capture.height = height;
     if (capture.bitmap == nullptr) {
@@ -575,16 +663,17 @@ int Run_diff(Args const &args) {
     Print("diff: {} pixels differ, {} over tolerance {}, max channel delta {}\n",
           diff->differing_pixels, diff->pixels_over_tolerance, args.tolerance,
           diff->max_channel_delta);
-    return diff->pixels_over_tolerance == 0 ? static_cast<int>(BenchExit::Ok)
-                                            : static_cast<int>(BenchExit::PixelsDiffer);
+    return diff->pixels_over_tolerance <= static_cast<size_t>(args.max_pixels)
+               ? static_cast<int>(BenchExit::Ok)
+               : static_cast<int>(BenchExit::PixelsDiffer);
 }
 
 // ---------------------------------------------------------------------------
 // B1: scenarios
 // ---------------------------------------------------------------------------
 
-constexpr std::array<std::string_view, 5> kAllScenarios = {
-    {"hover", "select", "brush", "highlighter", "steady"}};
+constexpr std::array<std::string_view, 6> kAllScenarios = {
+    {"hover", "select", "brush", "highlighter", "line", "steady"}};
 
 constexpr double kCyclesPerMegacycle = 1'000'000.0;
 
@@ -603,7 +692,17 @@ int Stroke_opacity_percent(std::string_view scenario, Args const &args) {
 struct ScenarioState final {
     std::vector<core::PointPx> points = {};
     std::vector<core::PointPx> straightened = {}; // --straighten-at: first and newest
+    core::Annotation line = {};                   // line: the draft annotation
 };
+
+// Point t of count on the diagonal from the inset top-left to the inset bottom-right.
+core::PointPx Diagonal_point(core::RectPx sel, int64_t t, int64_t count) {
+    int64_t const last = std::max<int64_t>(1, count - 1);
+    int64_t const w = sel.Width() - 2 * kFreehandEdgeInsetPx;
+    int64_t const h = sel.Height() - 2 * kFreehandEdgeInsetPx;
+    return {static_cast<int32_t>(sel.left + kFreehandEdgeInsetPx + w * t / last),
+            static_cast<int32_t>(sel.top + kFreehandEdgeInsetPx + h * t / last)};
+}
 
 // Fills the per-frame fields the way OverlayWindow::On_paint does for this mode.
 void Fill_frame_input(std::string_view scenario, int frame, int frames, int width,
@@ -632,6 +731,26 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         input.cursor_client_px = {x, y};
         input.selection_drag_corner_guide_px =
             core::PointPx{input.live_rect.right, input.live_rect.bottom};
+    } else if (scenario == "line" && frame >= 0) {
+        // Line tool drag: from near the selection's top-left (--flat: left middle) to
+        // the cursor.
+        core::RectPx const sel = input.final_selection;
+        auto const at = [&](int64_t t) {
+            core::PointPx p = Diagonal_point(sel, t, frames);
+            if (args.flat) {
+                p.y = (sel.top + sel.bottom) / 2;
+            }
+            return p;
+        };
+        core::LineAnnotation const line{
+            .start = at(0),
+            .end = at(i),
+            .style = {.width_px = kLineWidthPx, .color = kLineColor},
+            .arrow_head = args.arrow,
+        };
+        state.line = core::Annotation{.id = 1, .data = line};
+        input.draft_annotation = &state.line;
+        input.cursor_client_px = line.end;
     } else if (Is_freehand(scenario) && frame >= 0) {
         // --points-per-frame new input points per frame (default 1). The path wave
         // advances per point, so more points per frame draw a longer stroke that
@@ -650,7 +769,11 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
                 std::sin(static_cast<double>(p) * kFreehandWavePerFrame) *
                     static_cast<double>(sel.Height() / kFreehandAmplitudeDivisor) +
                 row * kFreehandRowStepPx;
-            state.points.push_back({static_cast<int32_t>(x), static_cast<int32_t>(y)});
+            state.points.push_back(
+                args.diagonal
+                    ? Diagonal_point(
+                          sel, p, static_cast<int64_t>(frames) * args.points_per_frame)
+                    : core::PointPx{static_cast<int32_t>(x), static_cast<int32_t>(y)});
         }
         input.draft_freehand_points = state.points;
         // --straighten-at: the highlighter tool keeps the first point and moves the
@@ -697,12 +820,10 @@ std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
 
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
-    if (scenario == "steady" || Is_freehand(scenario)) {
-        // --annotated insets the selection by an eighth of the desktop on each side.
-        int const inset_x = args.annotated ? width / 8 : 0;
-        int const inset_y = args.annotated ? height / 8 : 0;
-        input.final_selection = core::RectPx::From_ltrb(
-            inset_x, inset_y, width - inset_x, height - inset_y);
+    if (scenario == "steady" || scenario == "line" || Is_freehand(scenario)) {
+        input.final_selection = args.annotated
+                                    ? Inset_selection(width, height)
+                                    : core::RectPx::From_ltrb(0, 0, width, height);
         input.cursor_client_px = {width / 2, height / 2};
     }
     if (Is_freehand(scenario)) {
@@ -807,6 +928,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     D2DPaintInput input{};
     input.monitor_rects_client = *ctx.monitors_client;
     Set_scenario_base(scenario, ctx.width, ctx.height, args, input);
+    input.lifted_window_bitmap = ctx.res->lifted_view.bitmap;
+    input.lifted_window_dest_rect = ctx.res->lifted_view.dest_rect;
+    input.lifted_window_source_rect = ctx.res->lifted_view.source_rect;
     std::vector<core::Annotation> annotations =
         args.annotated ? Make_bench_annotations(ctx.width, ctx.height)
                        : std::vector<core::Annotation>{};
@@ -867,6 +991,10 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
         }
+        if (args.line_dynamic) {
+            // A stale frozen frame sends a line draft down the dynamic path.
+            ctx.res->frozen_valid = false;
+        }
         bool const ok =
             Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
         LARGE_INTEGER const t1 = Now();
@@ -922,6 +1050,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     // waiting or preempted, so they hold up on a loaded machine.
     ULONG64 commit_cycles = 0;
     size_t commit_points = 0;
+    std::pair<double, double> rebuild_ms = {};
+    ULONG64 rebuild_cycles = 0;
     if (Is_freehand(scenario) && !input.draft_freehand_points.empty()) {
         std::span<const core::PointPx> const raw = input.draft_freehand_points;
         bool const straightened = raw.size() == 2 && args.straighten_at >= 0;
@@ -979,6 +1109,21 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             }
             Print("dump: rebuilt release frame written to {}\n", rebuild_path);
         }
+        // Undo, redo or an edit: the annotations rebuilt with no draft left to reuse
+        // (the release frame cleared it).
+        ULONG64 rebuild_cycles0 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &rebuild_cycles0);
+        LARGE_INTEGER const rebuild_t0 = Now();
+        Rebuild_annotations_bitmap(*ctx.res, committed);
+        LARGE_INTEGER const rebuild_t1 = Now();
+        ULONG64 rebuild_cycles1 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &rebuild_cycles1);
+        rebuild_cycles = rebuild_cycles1 - rebuild_cycles0;
+        context->End(ctx.queries->done.Get());
+        context->Flush();
+        (void)Wait_query<BOOL>(context, ctx.queries->done.Get());
+        rebuild_ms =
+            std::pair{Qpc_ms(rebuild_t0, rebuild_t1), Qpc_ms(rebuild_t0, Now())};
     }
 
     std::vector<double> cpu, gpu, frame, mpx;
@@ -1002,6 +1147,10 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     double const desktop_mpx =
         static_cast<double>(ctx.width) * static_cast<double>(ctx.height) / kMegapixel;
     double const shaded = Median(mpx);
+    std::vector<double> mcycles;
+    for (FrameSample const &s : samples) {
+        mcycles.push_back(s.cpu_mcycles);
+    }
 
     Print("\nlayout={} vd={}x{} adapter=\"{}\" scenario={} smooth={} "
           "points/frame={} opacity={} frames={} run={}/{}\n",
@@ -1016,8 +1165,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         Print_row("gpu", core::Summarize_frame_times(gpu));
     }
     Print_row("frame", frame_summary);
-    Print("shaded p50 {:.1f} Mpx ({:.2f} x desktop)\n", shaded,
-          desktop_mpx > 0.0 ? shaded / desktop_mpx : 0.0);
+    Print("shaded p50 {:.1f} Mpx ({:.2f} x desktop); cpu p50 {:.1f} Mcycles\n", shaded,
+          desktop_mpx > 0.0 ? shaded / desktop_mpx : 0.0, Median(mcycles));
     if (Is_freehand(scenario)) {
         size_t const per = samples.size() / kFreehandBuckets;
         for (size_t b = 0; per > 0 && b < static_cast<size_t>(kFreehandBuckets); ++b) {
@@ -1042,6 +1191,11 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
               commit_points, commit_ms->first,
               static_cast<double>(commit_cycles) / kCyclesPerMegacycle,
               commit_ms->second);
+        Print("rebuild (undo/redo): cpu {:.2f} ms ({:.1f} Mcycles), gpu done {:.2f} "
+              "ms\n",
+              rebuild_ms.first,
+              static_cast<double>(rebuild_cycles) / kCyclesPerMegacycle,
+              rebuild_ms.second);
     }
     Print("verdict {} (frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
           core::Frame_rate_verdict_label(verdict), frame_summary.p95_ms);
@@ -1085,6 +1239,11 @@ int Run_render_bench(Args const &args) {
         Print("--dab-no-draft needs --dab N\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
+    if ((args.lifted || args.lifted_as_screenshot) &&
+        (!args.annotated || (args.lifted && args.lifted_as_screenshot))) {
+        Print("--lifted and --lifted-as-screenshot need --annotated, one at a time\n");
+        return static_cast<int>(BenchExit::BadArgs);
+    }
 
     core::RectPx const vd = Union_of(layout->monitors_screen);
     std::vector<core::RectPx> monitors_client;
@@ -1098,6 +1257,8 @@ int Run_render_bench(Args const &args) {
     if (!Create_bench_device(res, args) ||
         !res.Create_offscreen_target(vd.Width(), vd.Height()) ||
         !Prepare_resources(res, vd.Width(), vd.Height()) ||
+        ((args.lifted || args.lifted_as_screenshot) &&
+         !Prepare_lifted(res, vd.Width(), vd.Height(), args)) ||
         !Create_queries(res.d3d_device.Get(), queries)) {
         Print("device setup failed\n");
         return static_cast<int>(BenchExit::DeviceFailed);

@@ -4055,6 +4055,40 @@ LRESULT OverlayWindow::On_paint() {
 
     // --- D2D render path ---
     if (d2d_resources_) {
+        bool const has_committed_full_window_capture =
+            s.selection_uses_full_window_capture &&
+            resources_->window_capture.has_full_capture &&
+            !s.selection_capture_rect_screen.Is_empty();
+        bool const has_preview_full_window_capture =
+            s.modifier_preview && resources_->window_capture.has_full_capture &&
+            !resources_->window_capture.visible_rect_screen.Is_empty();
+        // The lifted window capture as drawn; committed highlighters tint it.
+        LiftedWindowView lifted_view{};
+        if ((has_committed_full_window_capture || has_preview_full_window_capture) &&
+            d2d_resources_->lifted_window_capture) {
+            lifted_view.bitmap = d2d_resources_->lifted_window_capture.Get();
+            if (has_committed_full_window_capture) {
+                lifted_view.dest_rect = s.final_selection;
+                lifted_view.source_rect = core::RectPx::From_ltrb(
+                    s.selection_capture_offset_px.x, s.selection_capture_offset_px.y,
+                    s.selection_capture_offset_px.x + s.final_selection.Width(),
+                    s.selection_capture_offset_px.y + s.final_selection.Height());
+            } else {
+                RECT overlay_rect{};
+                GetWindowRect(hwnd_, &overlay_rect);
+                lifted_view.dest_rect = core::Screen_rect_to_client_rect(
+                    resources_->window_capture.visible_rect_screen, overlay_rect.left,
+                    overlay_rect.top);
+                lifted_view.source_rect = core::RectPx::From_ltrb(
+                    resources_->window_capture.visible_offset_px.x,
+                    resources_->window_capture.visible_offset_px.y,
+                    resources_->window_capture.visible_offset_px.x +
+                        resources_->window_capture.visible_rect_screen.Width(),
+                    resources_->window_capture.visible_offset_px.y +
+                        resources_->window_capture.visible_rect_screen.Height());
+            }
+        }
+        d2d_resources_->Set_lifted_view(lifted_view);
         if (!d2d_resources_->annotations_valid) {
             GREENFLAME_PROFILE_SCOPE(
                 "OverlayWindow::On_paint::Rebuild_annotations_cache");
@@ -4163,38 +4197,12 @@ LRESULT OverlayWindow::On_paint() {
         input.live_rect = s.live_rect;
         input.annotation_selection_live_rect = s.annotation_selection_live_rect;
         input.final_selection = s.final_selection;
-        bool const has_committed_full_window_capture =
-            s.selection_uses_full_window_capture &&
-            resources_->window_capture.has_full_capture &&
-            !s.selection_capture_rect_screen.Is_empty();
-        bool const has_preview_full_window_capture =
-            s.modifier_preview && resources_->window_capture.has_full_capture &&
-            !resources_->window_capture.visible_rect_screen.Is_empty();
-        if ((has_committed_full_window_capture || has_preview_full_window_capture) &&
-            d2d_resources_->lifted_window_capture) {
-            input.lifted_window_bitmap = d2d_resources_->lifted_window_capture.Get();
-            if (has_committed_full_window_capture) {
-                input.lifted_window_dest_rect = s.final_selection;
-                input.lifted_window_source_rect = core::RectPx::From_ltrb(
-                    s.selection_capture_offset_px.x, s.selection_capture_offset_px.y,
-                    s.selection_capture_offset_px.x + s.final_selection.Width(),
-                    s.selection_capture_offset_px.y + s.final_selection.Height());
-            } else {
-                RECT overlay_rect{};
-                GetWindowRect(hwnd_, &overlay_rect);
-                core::RectPx const visible_rect_client =
-                    core::Screen_rect_to_client_rect(
-                        resources_->window_capture.visible_rect_screen,
-                        overlay_rect.left, overlay_rect.top);
-                input.live_rect = visible_rect_client;
-                input.lifted_window_dest_rect = visible_rect_client;
-                input.lifted_window_source_rect = core::RectPx::From_ltrb(
-                    resources_->window_capture.visible_offset_px.x,
-                    resources_->window_capture.visible_offset_px.y,
-                    resources_->window_capture.visible_offset_px.x +
-                        resources_->window_capture.visible_rect_screen.Width(),
-                    resources_->window_capture.visible_offset_px.y +
-                        resources_->window_capture.visible_rect_screen.Height());
+        if (lifted_view.bitmap != nullptr) {
+            input.lifted_window_bitmap = lifted_view.bitmap;
+            input.lifted_window_dest_rect = lifted_view.dest_rect;
+            input.lifted_window_source_rect = lifted_view.source_rect;
+            if (!has_committed_full_window_capture) {
+                input.live_rect = lifted_view.dest_rect;
             }
         }
         if (has_committed_full_window_capture) {
