@@ -1719,7 +1719,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     // Lock and display-off notices: no frames are taken then (Presentation_paused).
     (void)WTSRegisterSessionNotification(primary_hwnd_, NOTIFY_FOR_THIS_SESSION);
     display_state_notify_ = RegisterPowerSettingNotification(
-        primary_hwnd_, &GUID_CONSOLE_DISPLAY_STATE, DEVICE_NOTIFY_WINDOW_HANDLE);
+        primary_hwnd_, &GUID_SESSION_DISPLAY_STATUS, DEVICE_NOTIFY_WINDOW_HANDLE);
     return true;
 }
 
@@ -4141,7 +4141,7 @@ LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         if (wparam == PBT_POWERSETTINGCHANGE && lparam != 0) {
             auto const *const setting =
                 reinterpret_cast<POWERBROADCAST_SETTING const *>(lparam);
-            if (setting->PowerSetting == GUID_CONSOLE_DISPLAY_STATE &&
+            if (setting->PowerSetting == GUID_SESSION_DISPLAY_STATUS &&
                 setting->DataLength >= sizeof(DWORD)) {
                 // A little-endian DWORD: 0 off, 1 on, 2 dimmed (still shown). The
                 // low byte alone tells them apart.
