@@ -15,11 +15,6 @@ struct FreehandPreviewPlan final {
     std::vector<PointPx> tail_points = {};
 };
 
-struct FreehandPreviewSegments final {
-    std::vector<PointPx> stable_points = {};
-    std::vector<PointPx> tail_points = {};
-};
-
 [[nodiscard]] std::optional<FreehandSmoothingMode>
 Freehand_smoothing_mode_from_token(std::string_view token) noexcept;
 [[nodiscard]] std::string_view
@@ -32,10 +27,6 @@ Smooth_freehand_points(std::span<const PointPx> points, FreehandSmoothingMode mo
 [[nodiscard]] FreehandPreviewPlan
 Build_freehand_preview_plan(std::span<const PointPx> points, FreehandSmoothingMode mode,
                             int32_t stroke_width_px);
-
-[[nodiscard]] FreehandPreviewSegments
-Build_freehand_preview_segments(std::span<const PointPx> points,
-                                FreehandSmoothingMode mode, int32_t stroke_width_px);
 
 // Smooths a growing stroke at a cost per appended point that does not grow with the
 // stroke. At every point count, Final_points() followed by Provisional_points()

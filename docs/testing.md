@@ -212,8 +212,19 @@ virtual desktop.
 - `--annotated`: steady and freehand scenarios use a selection inset by an eighth of
   the desktop and committed brush and highlighter strokes crossing its edge, so
   frames carry dimmed pixels and annotations.
-- `--opacity N` (default 100): brush opacity percent. Below 100 shows double
-  compositing that an opaque stroke hides.
+- `--opacity N` (default 100 for the brush, 33 for the highlighter): stroke opacity
+  percent, set on the style and as the blit opacity, as the app does. Below 100 shows
+  double compositing that an opaque stroke hides.
+- `--straighten-at K`: highlighter only. From frame K the stroke is its first and
+  newest point, as after a pause-to-straighten. Dump frame F with `--straighten-at K`
+  (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
+- `--dab N` (freehand): before the measured stroke, draw and commit an N-point stroke
+  from the same start point, as a quick click followed by a fast stroke. With
+  `--dab-no-draft` the short stroke is committed without being drawn. The two runs'
+  frames must match at tolerance 0; `ctest` runs this on WARP for both tools.
+- `--dump-frame K FILE.bmp`: writes frame K of run 1. For a freehand scenario,
+  K equal to `--frames` writes the release frame, and `FILE.bmp.rebuild.bmp` the same
+  frame with the annotations rebuilt from scratch (as after undo and redo).
 - `--frames N` (default 300, after 5 warm-up frames), `--repeat N`, `--csv FILE`.
 
 Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 ms and
@@ -227,7 +238,12 @@ Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 m
 
 It also prints the pixels shaded per frame (`PSInvocations`, compared with the desktop
 area; WARP counts only effect passes, so most scenarios read 0 there), and for freehand
-the cost by stroke length. The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
+the cost by stroke length and a `release` line. Next to CPU milliseconds these print
+`(N Mcycles)`: the thread's CPU cycles over the same span (`QueryThreadCycleTime`).
+Cycles leave out time the thread waits or is preempted, so they hold up on a loaded
+machine where milliseconds do not. The `release` line covers committing the stroke,
+rebuilding the caches and painting the frame with no draft (`cpu` until
+`Paint_d2d_frame` returns, `frame` until the GPU has finished). The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
 
 The bench does not see presentation, the compositor or input coalescing. A `PASS`
 here does not mean the screen keeps up; see the present probe.

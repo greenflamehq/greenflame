@@ -15,9 +15,9 @@ namespace greenflame {
 //   screenshot    — uploaded once at capture time, never redrawn
 //   annotations   — rebuilt on annotation commit/undo/redo/delete
 //   frozen        — rebuilt when selection or annotations change
-//   draft_stroke  — rebuilt during freehand gesture from raw or split-tail preview
-//                   segments, depending on the active smoothing mode
-//   live layer    — drawn every frame (draft blit, selection border, handles, UI)
+//   draft_stroke  — during a freehand stroke: the stroke body (append only) and
+//                   live_base, the whole frame as of the last body update
+//   live layer    — drawn every frame (selection border, handles, UI)
 struct D2DOverlayResources final {
     static constexpr float kDefaultTargetDpi = 96.f;
     Microsoft::WRL::ComPtr<ID2D1Factory1> factory;
@@ -46,12 +46,10 @@ struct D2DOverlayResources final {
     // pipeline never builds frames faster than DWM consumes them.
     HANDLE frame_latency_waitable = nullptr;
     float target_dpi = kDefaultTargetDpi;
-    // ArithmeticComposite effect (k1=1, k2=k3=k4=0) for multiply-blend highlighting.
-    // Created by Create_device; null if effect creation failed.
+    // ArithmeticComposite effect (k2=k3=k4=0) for multiply-blend highlighting: input 0
+    // is the base, input 1 the highlighter mask, k1 the opacity (1 when the mask
+    // carries it). Created by Create_device; null if effect creation failed.
     Microsoft::WRL::ComPtr<ID2D1Effect> multiply_effect;
-    // Composite effect used to merge cached highlighter body + live tail masks before
-    // the multiply pass. Created by Create_device; null if effect creation failed.
-    Microsoft::WRL::ComPtr<ID2D1Effect> draft_stroke_composite_effect;
     // Composite effect that combines the screenshot with already-committed annotations
     // to form the base (input 0) of the highlighter multiply. This is what lets a
     // highlighter tint the pixels of prior annotations that sit beneath it, rather
@@ -73,27 +71,20 @@ struct D2DOverlayResources final {
     // draws. Used as input 1 of base_composite_effect so the multiply sees the prior
     // annotations underneath.
     Microsoft::WRL::ComPtr<ID2D1Bitmap> base_composite_bitmap;
-    size_t draft_stroke_point_count = 0; // points rendered into draft_stroke_rt
-    core::PointPx draft_stroke_last_point =
-        {}; // last point rendered into draft_stroke_rt
-    size_t draft_stroke_body_raw_point_count = 0;
-    size_t draft_stroke_body_point_count = 0;
-    size_t draft_stroke_stable_tail_start_index = 0;
-    std::optional<core::StrokeStyle> draft_stroke_style = std::nullopt;
-    core::FreehandTipShape draft_stroke_tip_shape = core::FreehandTipShape::Round;
-    core::FreehandSmoothingMode draft_stroke_smoothing_mode =
-        core::FreehandSmoothingMode::Off;
-    bool draft_stroke_bitmap_uses_cached_body = false;
 
-    // Live brush (round-tip) stroke. The smoother turns the stroke's stable body into
-    // final points, drawn once each into draft_stroke_body_rt (append only, at full
-    // opacity, max blend). draft_stroke_rt holds live_base: the whole overlay frame
-    // (screenshot, annotations, body, dim) as of the last body update, so a frame is
-    // one live_base blit plus a recomposite clipped to the moving tail.
-    struct RoundDraftState final {
+    // Live freehand stroke (brush and highlighter). The smoother turns the stroke's
+    // stable body into final points, drawn once each into draft_stroke_body_rt (append
+    // only, at full opacity, max blend). draft_stroke_rt holds live_base: the whole
+    // overlay frame (screenshot, annotations, body, dim) as of the last body update, so
+    // a frame is one live_base blit plus a recomposite clipped to the moving tail. The
+    // brush composites the body under a layer at its opacity; the highlighter
+    // multiplies by it as an opaque mask, with the opacity as k1.
+    struct FreehandDraftState final {
         bool active = false;
         core::FreehandIncrementalSmoother smoother = {};
         core::StrokeStyle style = {};
+        core::FreehandTipShape tip_shape = core::FreehandTipShape::Round;
+        int32_t blit_opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
         core::PointPx first_point = {};
         size_t raw_point_count = 0;    // raw stroke points seen
         size_t fed_point_count = 0;    // raw points fed to the smoother
@@ -103,7 +94,7 @@ struct D2DOverlayResources final {
         core::RectPx live_base_restore_rect = {};
         ID2D1Bitmap *live_base_lifted_window = nullptr;
     };
-    RoundDraftState round_draft = {};
+    FreehandDraftState freehand_draft = {};
 
     // Reusable shared resources (recreated on device loss)
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solid_brush;

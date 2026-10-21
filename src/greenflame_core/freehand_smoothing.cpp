@@ -349,25 +349,6 @@ FreehandPreviewPlan Build_freehand_preview_plan(std::span<const PointPx> points,
     };
 }
 
-FreehandPreviewSegments Build_freehand_preview_segments(std::span<const PointPx> points,
-                                                        FreehandSmoothingMode mode,
-                                                        int32_t stroke_width_px) {
-    FreehandPreviewPlan plan =
-        Build_freehand_preview_plan(points, mode, stroke_width_px);
-    if (plan.stable_raw_point_count == 0) {
-        return FreehandPreviewSegments{
-            .stable_points = {},
-            .tail_points = std::move(plan.tail_points),
-        };
-    }
-
-    return FreehandPreviewSegments{
-        .stable_points = Smooth_freehand_points(
-            points.first(plan.stable_raw_point_count), mode, stroke_width_px),
-        .tail_points = std::move(plan.tail_points),
-    };
-}
-
 void FreehandIncrementalSmoother::Reset(FreehandSmoothingMode mode,
                                         int32_t stroke_width_px) {
     mode_ = mode;

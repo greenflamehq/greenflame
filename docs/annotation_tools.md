@@ -343,20 +343,21 @@ The in-progress Brush and Highlighter strokes are intentionally different from
 committed annotations:
 
 - raw draft points remain the controller's source of truth during the gesture
-- when freehand smoothing is `off`, the Win32 paint layer draws the full raw draft
-  polyline
-- when freehand smoothing is `smooth`, the Win32 paint layer uses a
-  split-tail preview:
-  - the older stable prefix is smoothed with the same core mode used on commit
-  - the newest tail near the cursor stays raw so the tip remains attached to the
-    pointer without visible lag
-  - the smoothed stable body is cached separately so frames that only change the
-    tail do not need to re-smooth the whole stroke
+- the Win32 paint layer splits the stroke into a body and a moving end:
+  - an incremental smoother turns the body into final points that never change;
+    each is drawn once into a body bitmap (append only, full opacity, max blend)
+  - with smoothing `smooth`, the moving end is the smoother's provisional points
+    plus the newest raw tail, so the tip stays on the pointer without lag; with
+    smoothing `off`, every point is final at once
+  - a straightened highlighter (two points) stays entirely in the moving end
+- a cached frame (`live_base`: screenshot, annotations, body, dim) is updated only
+  where new body pieces land; each paint copies it and recomposites only around the
+  moving end, from the sources, so clip edges cannot show seams
+- the brush draws body and moving end inside one layer at the stroke opacity
+- the highlighter records the body and moving end as one opaque command-list mask
+  and multiplies once, with the opacity as k1, so overlapping pieces do not darken
 - the preview still respects the active stroke style, including round vs square tip
   shape and opacity
-- for square-tip highlighter preview, the smoothed body and raw tail are first drawn
-  into one temporary stroke bitmap and then multiply-blended once, which avoids a
-  dark seam at the join
 - the stroke is rasterized in core only on commit (`mouse-up`)
 - hit-testing and save/copy never use the draft preview path
 

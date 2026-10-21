@@ -171,6 +171,10 @@ struct Args final {
     int step_px = kDefaultStepPx;
     int points_per_frame = 1;
     int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
+    bool opacity_given = false;
+    int straighten_at = -1;
+    int dab_points = 0;        // --dab N
+    bool dab_no_draft = false; // --dab-no-draft
     int frames = kDefaultFrames;
     bool frames_given = false;
     int repeat = 1;
@@ -196,14 +200,20 @@ void Print_usage() {
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
-        "  --opacity N                  brush opacity percent, 0-100 (default 100)\n"
+        "  --opacity N                  stroke opacity percent, 0-100 (default 100 "
+        "brush, 33 highlighter)\n"
+        "  --straighten-at K            highlighter: from frame K the stroke is its "
+        "first and newest point\n"
+        "  --dab N [--dab-no-draft]     freehand: first draw and commit an N-point "
+        "stroke at the same start, N at most --points-per-frame (--dab-no-draft: "
+        "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
         "  --frames N                   measured frames per run (default 300)\n"
         "  --repeat N                   runs per scenario (default 1)\n"
         "  --csv FILE                   per-frame rows\n"
         "  --dump-frame K FILE.bmp      write frame K (run 1) as BMP; with 'all', from "
-        "select\n"
+        "select; K = --frames: the freehand release frame\n"
         "  --diff A.bmp B.bmp [--tolerance T]   compare two dumps\n"
         "  --probe-present [--passes N] [--frames N]   present floor on real "
         "monitors\n");
@@ -287,6 +297,17 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
                 next_int(core::StrokeStyle::kMinOpacityPercent);
             if (!v || *v > core::StrokeStyle::kMaxOpacityPercent) return std::nullopt;
             args.opacity_percent = *v;
+            args.opacity_given = true;
+        } else if (key == "--dab") {
+            std::optional<int> const v = next_int(1);
+            if (!v) return std::nullopt;
+            args.dab_points = *v;
+        } else if (key == "--dab-no-draft") {
+            args.dab_no_draft = true;
+        } else if (key == "--straighten-at") {
+            std::optional<int> const v = next_int(0);
+            if (!v) return std::nullopt;
+            args.straighten_at = *v;
         } else if (key == "--frames") {
             std::optional<int> const v = next_int(1);
             if (!v) return std::nullopt;
@@ -565,12 +586,23 @@ int Run_diff(Args const &args) {
 constexpr std::array<std::string_view, 5> kAllScenarios = {
     {"hover", "select", "brush", "highlighter", "steady"}};
 
+constexpr double kCyclesPerMegacycle = 1'000'000.0;
+
 bool Is_freehand(std::string_view scenario) {
     return scenario == "brush" || scenario == "highlighter";
 }
 
+// --opacity, or the tool's default: 100 for the brush, the app default for the
+// highlighter.
+int Stroke_opacity_percent(std::string_view scenario, Args const &args) {
+    return scenario == "highlighter" && !args.opacity_given
+               ? core::kDefaultHighlighterOpacityPercent
+               : args.opacity_percent;
+}
+
 struct ScenarioState final {
     std::vector<core::PointPx> points = {};
+    std::vector<core::PointPx> straightened = {}; // --straighten-at: first and newest
 };
 
 // Fills the per-frame fields the way OverlayWindow::On_paint does for this mode.
@@ -621,6 +653,13 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
             state.points.push_back({static_cast<int32_t>(x), static_cast<int32_t>(y)});
         }
         input.draft_freehand_points = state.points;
+        // --straighten-at: the highlighter tool keeps the first point and moves the
+        // second to the cursor, as after a pause.
+        if (scenario == "highlighter" && args.straighten_at >= 0 &&
+            frame >= args.straighten_at) {
+            state.straightened = {state.points.front(), state.points.back()};
+            input.draft_freehand_points = state.straightened;
+        }
         input.cursor_client_px = state.points.back();
     }
 }
@@ -671,25 +710,25 @@ void Set_scenario_base(std::string_view scenario, int width, int height,
         core::StrokeStyle style{};
         style.width_px = highlighter ? kHighlighterWidthPx : kBrushWidthPx;
         style.color = highlighter ? kHighlighterColor : kBrushColor;
-        if (!highlighter) {
-            style.opacity_percent = args.opacity_percent;
-        }
+        // The app sets both the style opacity and the blit opacity (k1 for the
+        // highlighter multiply) from the tool opacity.
+        int const opacity_percent = Stroke_opacity_percent(scenario, args);
+        style.opacity_percent = opacity_percent;
         input.draft_freehand_style = style;
         input.draft_freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
                                                      : core::FreehandTipShape::Round;
         input.draft_freehand_smoothing_mode = args.smooth
                                                   ? core::FreehandSmoothingMode::Smooth
                                                   : core::FreehandSmoothingMode::Off;
-        input.draft_freehand_blit_opacity =
-            highlighter ? static_cast<float>(core::kDefaultHighlighterOpacityPercent) /
-                              static_cast<float>(core::StrokeStyle::kMaxOpacityPercent)
-                        : 1.0f;
+        input.draft_freehand_blit_opacity_percent =
+            highlighter ? opacity_percent : core::StrokeStyle::kMaxOpacityPercent;
     }
 }
 
 struct FrameSample final {
     double cpu_ms = 0.0;
-    double gpu_ms = -1.0; // negative: timestamps were disjoint
+    double cpu_mcycles = 0.0; // thread CPU cycles over the same span, in millions
+    double gpu_ms = -1.0;     // negative: timestamps were disjoint
     double frame_ms = 0.0;
     double mpx = 0.0;
     size_t points = 0;
@@ -745,18 +784,67 @@ struct RunContext final {
     std::ofstream *csv = nullptr;
 };
 
+// The annotation the tool commits for these draft points: smoothed when smoothing is
+// on, raw when off or straightened.
+core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
+                                  D2DPaintInput const &input, Args const &args,
+                                  bool straightened, uint64_t id) {
+    core::FreehandStrokeAnnotation stroke{
+        .points =
+            args.smooth && !straightened
+                ? core::Smooth_freehand_points(raw, core::FreehandSmoothingMode::Smooth,
+                                               input.draft_freehand_style->width_px)
+                : std::vector<core::PointPx>(raw.begin(), raw.end()),
+        .style = *input.draft_freehand_style,
+        .freehand_tip_shape = input.draft_freehand_tip_shape,
+    };
+    return core::Annotation{.id = id, .data = stroke};
+}
+
 // Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
 std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                                    Args const &args, int run, bool dump_here) {
     D2DPaintInput input{};
     input.monitor_rects_client = *ctx.monitors_client;
     Set_scenario_base(scenario, ctx.width, ctx.height, args, input);
-    std::vector<core::Annotation> const annotations =
+    std::vector<core::Annotation> annotations =
         args.annotated ? Make_bench_annotations(ctx.width, ctx.height)
                        : std::vector<core::Annotation>{};
     input.annotations = annotations;
     Rebuild_annotations_bitmap(*ctx.res, annotations);
     ctx.res->frozen_valid = false;
+    // --dab N: a short stroke of the same tool, from the same start point, drawn and
+    // committed before the measured stroke (as with a quick click then a fast stroke).
+    // --dab-no-draft commits it without drawing it, so the measured stroke starts from
+    // a fresh draft: the two runs' frames must match.
+    if (Is_freehand(scenario) && args.dab_points > 0) {
+        ScenarioState dab_state;
+        D2DPaintInput dab_input = input;
+        Fill_frame_input(scenario, 0, args.frames, ctx.width, ctx.height, args,
+                         dab_state, dab_input);
+        dab_state.points.resize(
+            std::min(dab_state.points.size(), static_cast<size_t>(args.dab_points)));
+        bool ok = true;
+        if (!args.dab_no_draft) {
+            dab_input.draft_freehand_points = dab_state.points;
+            Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
+                                  ctx.height);
+            ok = Paint_d2d_frame(*ctx.res, dab_input, ctx.width, ctx.height, nullptr);
+        }
+        annotations.push_back(
+            Committed_stroke(dab_state.points, input, args, /*straightened=*/false,
+                             static_cast<uint64_t>(annotations.size() + 1)));
+        input.annotations = annotations;
+        Rebuild_annotations_bitmap(*ctx.res, annotations);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        if (ok && !args.dab_no_draft) {
+            ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+        }
+        if (!ok) {
+            Print("paint failed (device lost?)\n");
+            return std::nullopt;
+        }
+    }
     ScenarioState state;
     std::vector<FrameSample> samples;
     samples.reserve(static_cast<size_t>(args.frames));
@@ -768,6 +856,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         context->Begin(ctx.queries->disjoint.Get());
         context->End(ctx.queries->start.Get());
         context->Begin(ctx.queries->stats.Get());
+        ULONG64 cycles0 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &cycles0);
         LARGE_INTEGER const t0 = Now();
         // Mirror OverlayWindow::On_paint: rebuild invalid caches before the frame.
         if (!ctx.res->annotations_valid) {
@@ -780,6 +870,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         bool const ok =
             Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
         LARGE_INTEGER const t1 = Now();
+        ULONG64 cycles1 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
         context->End(ctx.queries->stats.Get());
         context->End(ctx.queries->end.Get());
         context->End(ctx.queries->disjoint.Get());
@@ -802,6 +894,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         }
         FrameSample sample;
         sample.cpu_ms = Qpc_ms(t0, t1);
+        sample.cpu_mcycles =
+            static_cast<double>(cycles1 - cycles0) / kCyclesPerMegacycle;
         sample.frame_ms = Qpc_ms(t0, t2);
         if (dj.Disjoint == FALSE && dj.Frequency != 0 && ts1 >= ts0) {
             sample.gpu_ms = static_cast<double>(ts1 - ts0) * kMsPerSecond /
@@ -817,6 +911,73 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                 return std::nullopt;
             }
             Print("dump: frame {} of {} written to {}\n", f, scenario, args.dump_path);
+        }
+    }
+
+    // Freehand: the release frame. Commit the stroke the way the tool does (smoothed
+    // when smoothing is on, raw when off or straightened), rebuild the caches and paint
+    // the frame with no draft.
+    std::optional<std::pair<double, double>> commit_ms = std::nullopt;
+    // Thread CPU cycles: unlike QPC milliseconds, they leave out time the thread spends
+    // waiting or preempted, so they hold up on a loaded machine.
+    ULONG64 commit_cycles = 0;
+    size_t commit_points = 0;
+    if (Is_freehand(scenario) && !input.draft_freehand_points.empty()) {
+        std::span<const core::PointPx> const raw = input.draft_freehand_points;
+        bool const straightened = raw.size() == 2 && args.straighten_at >= 0;
+        std::vector<core::Annotation> committed = annotations;
+        committed.push_back(
+            Committed_stroke(raw, input, args, straightened,
+                             static_cast<uint64_t>(annotations.size() + 1)));
+        commit_points = std::get<core::FreehandStrokeAnnotation>(committed.back().data)
+                            .points.size();
+        input.annotations = committed;
+        input.draft_freehand_points = {};
+        ID3D11DeviceContext *const context = ctx.queries->context.Get();
+        ULONG64 cycles0 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &cycles0);
+        LARGE_INTEGER const t0 = Now();
+        Rebuild_annotations_bitmap(*ctx.res, committed);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        bool const ok =
+            Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+        LARGE_INTEGER const t1 = Now();
+        ULONG64 cycles1 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
+        commit_cycles = cycles1 - cycles0;
+        context->End(ctx.queries->done.Get());
+        context->Flush();
+        (void)Wait_query<BOOL>(context, ctx.queries->done.Get());
+        LARGE_INTEGER const t2 = Now();
+        input.annotations = annotations;
+        if (!ok) {
+            Print("paint failed (device lost?)\n");
+            return std::nullopt;
+        }
+        commit_ms = std::pair{Qpc_ms(t0, t1), Qpc_ms(t0, t2)};
+        if (dump_here && args.dump_frame == args.frames) {
+            if (!Dump_target(*ctx.res, ctx.width, ctx.height, args.dump_path)) {
+                Print("dump: failed to write {}\n", args.dump_path);
+                return std::nullopt;
+            }
+            Print("dump: release frame of {} written to {}\n", scenario,
+                  args.dump_path);
+            // The same frame with the annotations rebuilt from scratch, as after an
+            // undo and redo: the draft is gone, so nothing of it can be reused.
+            input.annotations = committed;
+            Rebuild_annotations_bitmap(*ctx.res, committed);
+            Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
+                                  ctx.height);
+            bool const rebuilt =
+                Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+            input.annotations = annotations;
+            std::string const rebuild_path = args.dump_path + ".rebuild.bmp";
+            if (!rebuilt ||
+                !Dump_target(*ctx.res, ctx.width, ctx.height, rebuild_path)) {
+                Print("dump: failed to write {}\n", rebuild_path);
+                return std::nullopt;
+            }
+            Print("dump: rebuilt release frame written to {}\n", rebuild_path);
         }
     }
 
@@ -845,8 +1006,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     Print("\nlayout={} vd={}x{} adapter=\"{}\" scenario={} smooth={} "
           "points/frame={} opacity={} frames={} run={}/{}\n",
           ctx.layout->name, ctx.width, ctx.height, Narrow(*ctx.adapter_name), scenario,
-          args.smooth ? "on" : "off", args.points_per_frame, args.opacity_percent,
-          args.frames, run + 1, args.repeat);
+          args.smooth ? "on" : "off", args.points_per_frame,
+          Stroke_opacity_percent(scenario, args), args.frames, run + 1, args.repeat);
     Print("           p50     p90     p95     p99     max  <=33.3  <=16.7\n");
     Print_row("cpu", core::Summarize_frame_times(cpu));
     if (gpu.empty()) {
@@ -860,17 +1021,27 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     if (Is_freehand(scenario)) {
         size_t const per = samples.size() / kFreehandBuckets;
         for (size_t b = 0; per > 0 && b < static_cast<size_t>(kFreehandBuckets); ++b) {
-            std::vector<double> bc, bg, bm;
+            std::vector<double> bc, by, bg, bm;
             for (size_t k = b * per; k < (b + 1) * per; ++k) {
                 bc.push_back(samples[k].cpu_ms);
+                by.push_back(samples[k].cpu_mcycles);
                 if (samples[k].gpu_ms >= 0.0) bg.push_back(samples[k].gpu_ms);
                 bm.push_back(samples[k].mpx);
             }
-            Print("points {:5}-{:5}  cpu p50 {:6.2f} | gpu p50 {:>6} | {:.1f} Mpx\n",
-                  samples[b * per].points, samples[(b + 1) * per - 1].points,
-                  Median(bc), bg.empty() ? std::string("n/a") : Csv_double(Median(bg)),
-                  Median(bm));
+            Print(
+                "points {:5}-{:5}  cpu p50 {:6.2f} ({:.1f} Mcycles) | gpu p50 {:>6} | "
+                "{:.1f} Mpx\n",
+                samples[b * per].points, samples[(b + 1) * per - 1].points, Median(bc),
+                Median(by), bg.empty() ? std::string("n/a") : Csv_double(Median(bg)),
+                Median(bm));
         }
+    }
+    if (commit_ms.has_value()) {
+        Print("release: {} committed points, cpu {:.2f} ms ({:.1f} Mcycles), frame "
+              "{:.2f} ms\n",
+              commit_points, commit_ms->first,
+              static_cast<double>(commit_cycles) / kCyclesPerMegacycle,
+              commit_ms->second);
     }
     Print("verdict {} (frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
           core::Frame_rate_verdict_label(verdict), frame_summary.p95_ms);
@@ -893,8 +1064,25 @@ int Run_render_bench(Args const &args) {
         Print("unknown scenario: {}\n", args.scenario);
         return static_cast<int>(BenchExit::BadArgs);
     }
-    if (args.dump_frame >= args.frames) {
-        Print("--dump-frame {} is past --frames {}\n", args.dump_frame, args.frames);
+    // --dump-frame equal to --frames dumps a freehand scenario's release frame.
+    std::string_view const dump_scenario =
+        args.scenario == "all" ? std::string_view("select") : scenarios.front();
+    if (args.dump_frame > args.frames ||
+        (args.dump_frame == args.frames && !Is_freehand(dump_scenario))) {
+        Print("--dump-frame {} is past --frames {} (equal is the release frame, brush "
+              "or highlighter only)\n",
+              args.dump_frame, args.frames);
+        return static_cast<int>(BenchExit::BadArgs);
+    }
+
+    // --dab draws its short stroke from the first frame's points.
+    if (args.dab_points > args.points_per_frame) {
+        Print("--dab {} is past --points-per-frame {}\n", args.dab_points,
+              args.points_per_frame);
+        return static_cast<int>(BenchExit::BadArgs);
+    }
+    if (args.dab_no_draft && args.dab_points == 0) {
+        Print("--dab-no-draft needs --dab N\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
 
@@ -936,8 +1124,6 @@ int Run_render_bench(Args const &args) {
     RunContext ctx{
         &res,          &queries,   &*layout,    &monitors_client,
         &adapter_name, vd.Width(), vd.Height(), csv.is_open() ? &csv : nullptr};
-    std::string_view const dump_scenario =
-        args.scenario == "all" ? std::string_view("select") : scenarios.front();
     for (std::string_view const scenario : scenarios) {
         std::vector<double> p95s;
         for (int run = 0; run < args.repeat; ++run) {
