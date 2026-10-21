@@ -168,10 +168,15 @@ core::RectPx Union_of(std::span<const core::RectPx> rects) {
 
 enum class AdapterKind : uint8_t { Default, Index, Warp };
 
+struct AdapterChoice final {
+    AdapterKind kind = AdapterKind::Default;
+    UINT index = 0;
+};
+
 struct Args final {
     std::string layout = "jocelyn-desk";
-    AdapterKind adapter_kind = AdapterKind::Default;
-    UINT adapter_index = 0;
+    AdapterChoice adapter = {};
+    AdapterChoice shared_adapter = {}; // --shared-adapter: the probe's shared device
     std::string scenario = "all";
     bool smooth = true;
     int step_px = kDefaultStepPx;
@@ -241,7 +246,9 @@ void Print_usage() {
         "  --diff A.bmp B.bmp [--tolerance T] [--max-pixels N]   compare two dumps; "
         "fails when more than N pixels (default 0) differ by more than T\n"
         "  --probe-present [--passes N] [--frames N]   present floor on real "
-        "monitors\n");
+        "monitors\n"
+        "  --shared-adapter default|N   the one device of the probe's "
+        "per-monitor-shared arrangement (default: what the app uses)\n");
 }
 
 // Non-negative decimal integer, or nullopt.
@@ -257,6 +264,22 @@ std::optional<int> Parse_int(std::string_view text) {
         value = value * kDecimalBase + (c - '0');
     }
     return value;
+}
+
+// "default", "warp" (when allowed) or a DXGI adapter index; nullopt otherwise.
+std::optional<AdapterChoice> Parse_adapter_choice(std::string_view text,
+                                                  bool allow_warp) {
+    if (text == "default") {
+        return AdapterChoice{};
+    }
+    if (allow_warp && text == "warp") {
+        return AdapterChoice{.kind = AdapterKind::Warp};
+    }
+    std::optional<int> const index = Parse_int(text);
+    if (!index) {
+        return std::nullopt;
+    }
+    return AdapterChoice{.kind = AdapterKind::Index, .index = static_cast<UINT>(*index)};
 }
 
 std::optional<Args> Parse_args(std::span<char *const> argv) {
@@ -291,16 +314,18 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
         } else if (key == "--adapter") {
             std::optional<std::string_view> const v = next();
             if (!v) return std::nullopt;
-            if (*v == "default") {
-                args.adapter_kind = AdapterKind::Default;
-            } else if (*v == "warp") {
-                args.adapter_kind = AdapterKind::Warp;
-            } else {
-                std::optional<int> const index = Parse_int(*v);
-                if (!index) return std::nullopt;
-                args.adapter_kind = AdapterKind::Index;
-                args.adapter_index = static_cast<UINT>(*index);
-            }
+            std::optional<AdapterChoice> const choice =
+                Parse_adapter_choice(*v, /*allow_warp=*/true);
+            if (!choice) return std::nullopt;
+            args.adapter = *choice;
+        } else if (key == "--shared-adapter") {
+            std::optional<std::string_view> const v = next();
+            if (!v) return std::nullopt;
+            // No WARP: it cannot present to a real monitor at a useful rate.
+            std::optional<AdapterChoice> const choice =
+                Parse_adapter_choice(*v, /*allow_warp=*/false);
+            if (!choice) return std::nullopt;
+            args.shared_adapter = *choice;
         } else if (key == "--scenario") {
             std::optional<std::string_view> const v = next();
             if (!v) return std::nullopt;
@@ -563,11 +588,11 @@ int List_adapters() {
     return static_cast<int>(BenchExit::Ok);
 }
 
-bool Create_bench_device(D2DOverlayResources &res, Args const &args) {
+bool Create_bench_device(D2DOverlayResources &res, AdapterChoice const &choice) {
     if (!res.Initialize_factory()) {
         return false;
     }
-    switch (args.adapter_kind) {
+    switch (choice.kind) {
     case AdapterKind::Default:
         return res.Create_device(nullptr, D3D_DRIVER_TYPE_HARDWARE);
     case AdapterKind::Warp:
@@ -578,8 +603,8 @@ bool Create_bench_device(D2DOverlayResources &res, Args const &args) {
     ComPtr<IDXGIFactory1> factory;
     ComPtr<IDXGIAdapter1> adapter;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(factory.GetAddressOf()))) ||
-        factory->EnumAdapters1(args.adapter_index, adapter.GetAddressOf()) != S_OK) {
-        Print("no adapter {} (see --list-adapters)\n", args.adapter_index);
+        factory->EnumAdapters1(choice.index, adapter.GetAddressOf()) != S_OK) {
+        Print("no adapter {} (see --list-adapters)\n", choice.index);
         return false;
     }
     return res.Create_device(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN);
@@ -1255,7 +1280,7 @@ int Run_render_bench(Args const &args) {
 
     D2DOverlayResources res;
     GpuQueries queries;
-    if (!Create_bench_device(res, args) ||
+    if (!Create_bench_device(res, args.adapter) ||
         !res.Create_offscreen_target(vd.Width(), vd.Height()) ||
         !Prepare_resources(res, vd.Width(), vd.Height()) ||
         ((args.lifted || args.lifted_as_screenshot) &&
@@ -1499,7 +1524,7 @@ bool Report_probe(std::string_view label, std::vector<ProbeSurface> &surfaces,
     return true;
 }
 
-// One window and swap chain per monitor, all on one device (the default adapter)
+// One window and swap chain per monitor, all on one device (--shared-adapter)
 // with one set of desktop-sized caches: each loop paints the same scene into every
 // swap chain, translated to that monitor. This is the layout the per-monitor app
 // ships (gf-ojs.6, option 3a). Until D2DOverlayResources holds several targets, the
@@ -1528,10 +1553,9 @@ struct SharedProbe final {
 };
 
 bool Setup_shared_probe(SharedProbe &probe, std::span<const core::RectPx> monitors,
-                        int passes) {
+                        int passes, AdapterChoice const &adapter) {
     D2DOverlayResources &res = *probe.res;
-    if (!res.Initialize_factory() ||
-        !res.Create_device(nullptr, D3D_DRIVER_TYPE_HARDWARE)) {
+    if (!Create_bench_device(res, adapter)) {
         return false;
     }
     for (core::RectPx const &m : monitors) {
@@ -1646,13 +1670,14 @@ int Run_probe(Args const &args) {
         return static_cast<int>(BenchExit::DeviceFailed);
     }
 
-    // Per-monitor-shared: one window and swap chain per monitor on one device, the
-    // default adapter, with shared desktop-sized caches (the planned app layout).
+    // Per-monitor-shared: one window and swap chain per monitor on one device
+    // (--shared-adapter, default what the app uses), with shared desktop-sized caches
+    // (the planned app layout).
     {
         SharedProbe shared{};
         shared.vd = vd;
         shared.monitors_client = monitors_client;
-        ok = Setup_shared_probe(shared, monitors, args.passes) &&
+        ok = Setup_shared_probe(shared, monitors, args.passes, args.shared_adapter) &&
              Report_intervals(
                  "per-monitor-shared", shared.windows.size(),
                  Probe_loop([&shared] { return Paint_shared_probe(shared); },
