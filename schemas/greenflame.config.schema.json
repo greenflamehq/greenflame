@@ -45,6 +45,11 @@
           "$ref": "#/$defs/nonNegativeInteger",
           "default": 800,
           "description": "Centered tool-size overlay visibility duration in milliseconds. Zero disables it."
+        },
+        "overlay_window_per_monitor": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the capture overlay as one window per monitor. False uses one window over the whole desktop."
         }
       }
     },

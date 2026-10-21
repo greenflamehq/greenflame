@@ -114,7 +114,7 @@ Greenflame is controller-centric rather than strict MVC.
 Capture/overlay stack (current):
 
 - Capture: GDI virtual-desktop capture before overlay display (capture-first)
-- Overlay rendering: Direct2D/DirectWrite in a fullscreen borderless topmost window, through a D2D device context on a D3D11 device and a flip-discard DXGI swap chain with a frame-latency waitable
+- Overlay rendering: Direct2D/DirectWrite in one borderless topmost window per monitor (`ui.overlay_window_per_monitor`; one window over the whole desktop when off or when per-monitor setup fails), through one D2D device context on one D3D11 device and a flip-discard DXGI swap chain with a frame-latency waitable per window. Overlay coordinates are virtual-desktop pixels; each window draws the frame translated to its monitor
 - Tray toast rendering: GDI/GDI+ (intentional small Win32 UI path)
 - No DirectComposition in the current path
 

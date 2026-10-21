@@ -46,6 +46,7 @@ class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
                                     std::wstring_view saved_path,
                                     bool file_copied_to_clipboard) override;
     void On_spell_check_languages_unsupported(std::wstring_view warning) override;
+    void On_overlay_failed(std::wstring_view reason) override;
 
     HINSTANCE hinstance_ = nullptr;
     TrayWindow tray_window_;

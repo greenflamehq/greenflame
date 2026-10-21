@@ -368,6 +368,7 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
 | `ui.show_selection_size_side_labels` | `true` | Show selection-size labels outside the selection (width on top/bottom and height on left/right). |
 | `ui.show_selection_size_center_label` | `true` | Show centered `W x H` selection-size label inside the selection. |
 | `ui.tool_size_overlay_duration_ms` | `800` | How long the centered tool-size overlay stays visible after a stroke-width change. `0` disables it. |
+| `ui.overlay_window_per_monitor` | `true` | Show the capture overlay as one window per monitor, which keeps drawing fast on desks with several monitors or GPUs. `false` uses one window over the whole desktop. Read each time the overlay opens. |
 
 ### Tool settings (`tools.*`)
 
@@ -424,7 +425,8 @@ Greenflame reads `~/.config/greenflame/greenflame.json` (i.e. `%USERPROFILE%\.co
     "show_balloons": true,
     "show_selection_size_side_labels": true,
     "show_selection_size_center_label": true,
-    "tool_size_overlay_duration_ms": 800
+    "tool_size_overlay_duration_ms": 800,
+    "overlay_window_per_monitor": true
   },
   "tools": {
     "font": {

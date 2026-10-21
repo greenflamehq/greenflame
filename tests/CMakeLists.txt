@@ -20,6 +20,7 @@ endif()
 add_executable(greenflame_tests
     geometry_tests.cpp
     monitor_policy_tests.cpp
+    overlay_surface_layout_tests.cpp
     rect_from_points_tests.cpp
     virtual_screen_rect_tests.cpp
     pixel_ops_tests.cpp

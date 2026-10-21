@@ -5,6 +5,7 @@
 #include "app_config_store.h"
 #include "greenflame/win/annotation_capture_renderer.h"
 #include "greenflame_core/app_config.h"
+#include "greenflame_core/frame_stats.h"
 #include "greenflame_core/modification_command.h"
 #include "greenflame_core/monitor_rules.h"
 #include "greenflame_core/pixel_ops.h"
@@ -68,6 +69,10 @@ constexpr UINT kSelectedAnnotationMarqueeTimerIntervalMs = 60;
 // Longest wait for the swap chains to take a frame. A frame that waits this long is
 // skipped, never painted late: Present could block too. Vsync waits are 7-17 ms.
 constexpr DWORD kFrameWaitTimeoutMs = 1000;
+// Timed-out frame waits in a row that close the overlay (about 3 s without a frame).
+constexpr int kFrameWaitTimeoutStreak = 3;
+// Posted to the primary window to close the overlay after a failure.
+constexpr UINT kOverlayFailCloseMessage = WM_APP + 1;
 constexpr int32_t kSelectedAnnotationMarqueePhaseStepPx = 1;
 constexpr wchar_t kPinToDesktopFailedMessage[] =
     L"Failed to pin the selection to the desktop.";
@@ -228,6 +233,33 @@ Create_thumbnail_from_capture(greenflame::GdiCaptureResult const &capture) {
         GlobalFree(file_list_memory);
     }
     return copied;
+}
+
+#if defined(GREENFLAME_LOG)
+// The name of the GPU behind a D3D device, for the session log line.
+[[nodiscard]] std::wstring Adapter_description(ID3D11Device *device) {
+    Microsoft::WRL::ComPtr<IDXGIDevice> dxgi_device;
+    Microsoft::WRL::ComPtr<IDXGIAdapter> adapter;
+    DXGI_ADAPTER_DESC desc{};
+    if (device == nullptr ||
+        FAILED(device->QueryInterface(IID_PPV_ARGS(dxgi_device.GetAddressOf()))) ||
+        FAILED(dxgi_device->GetAdapter(adapter.GetAddressOf())) ||
+        FAILED(adapter->GetDesc(&desc))) {
+        return L"?";
+    }
+    return std::wstring(desc.Description);
+}
+#endif
+
+#if defined(GREENFLAME_LOG)
+constexpr double kMsPerSecond = 1000.0;
+#endif
+
+// "(left,top)-(right,bottom)", for failure messages in every build.
+[[nodiscard]] std::wstring Rect_text(greenflame::core::RectPx rect) {
+    return L"(" + std::to_wstring(rect.left) + L"," + std::to_wstring(rect.top) +
+           L")-(" + std::to_wstring(rect.right) + L"," + std::to_wstring(rect.bottom) +
+           L")";
 }
 
 [[nodiscard]] POINT To_point(greenflame::core::PointPx p) {
@@ -818,6 +850,41 @@ struct OverlayWindow::ObfuscateSourceProvider final
     OverlayWindow *owner_ = nullptr;
 };
 
+// While a Save As dialog or message box runs its modal loop, the other overlay
+// windows are disabled too (the dialog disables only its owner, the primary), so a
+// click on another monitor cannot reach the overlay with the dialog's caller on the
+// stack. A fail-close posted meanwhile ends the dialog and runs once it returns.
+class OverlayWindow::ModalScope final {
+  public:
+    explicit ModalScope(OverlayWindow &owner) : owner_(owner) {
+        ++owner_.modal_depth_;
+        for (OverlaySurface const &surface : owner_.surfaces_) {
+            if (surface.hwnd != nullptr && surface.hwnd != owner_.primary_hwnd_) {
+                (void)EnableWindow(surface.hwnd, FALSE);
+            }
+        }
+    }
+    ~ModalScope() {
+        for (OverlaySurface const &surface : owner_.surfaces_) {
+            if (surface.hwnd != nullptr && surface.hwnd != owner_.primary_hwnd_) {
+                (void)EnableWindow(surface.hwnd, TRUE);
+            }
+        }
+        --owner_.modal_depth_;
+        if (owner_.modal_depth_ == 0 && owner_.fail_close_pending_) {
+            owner_.fail_close_pending_ = false;
+            owner_.Post_fail_close(owner_.fail_close_reason_);
+        }
+    }
+    ModalScope(ModalScope const &) = delete;
+    ModalScope &operator=(ModalScope const &) = delete;
+    ModalScope(ModalScope &&) = delete;
+    ModalScope &operator=(ModalScope &&) = delete;
+
+  private:
+    OverlayWindow &owner_;
+};
+
 OverlayWindow::OverlayWindow(IOverlayEvents *events, core::AppConfig *config,
                              IWindowQuery *window_query)
     : events_(events), config_(config), window_query_(window_query),
@@ -911,14 +978,14 @@ core::PointPx OverlayWindow::Cursor_client_px() const {
 }
 
 void OverlayWindow::Request_repaint() const {
-    if (hwnd_ != nullptr) {
-        InvalidateRect(hwnd_, nullptr, FALSE);
+    if (primary_hwnd_ != nullptr) {
+        InvalidateRect(primary_hwnd_, nullptr, FALSE);
     }
 }
 
 void OverlayWindow::Repaint_now() const {
-    if (hwnd_ != nullptr) {
-        RedrawWindow(hwnd_, nullptr, nullptr,
+    if (primary_hwnd_ != nullptr) {
+        RedrawWindow(primary_hwnd_, nullptr, nullptr,
                      RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW);
     }
 }
@@ -940,7 +1007,7 @@ std::optional<HWND> OverlayWindow::Resolve_ctrl_preview_window(
     core::PointPx cursor_screen,
     std::optional<core::RectPx> &window_rect_screen) const {
     window_rect_screen = std::nullopt;
-    if (window_query_ == nullptr || hwnd_ == nullptr || resources_ == nullptr) {
+    if (window_query_ == nullptr || primary_hwnd_ == nullptr || resources_ == nullptr) {
         return std::nullopt;
     }
 
@@ -952,7 +1019,7 @@ std::optional<HWND> OverlayWindow::Resolve_ctrl_preview_window(
     }
 
     std::optional<HWND> const window =
-        window_query_->Get_window_under_cursor(To_point(cursor_screen), hwnd_);
+        window_query_->Get_window_under_cursor(To_point(cursor_screen), primary_hwnd_);
     if (!window.has_value()) {
         return std::nullopt;
     }
@@ -1160,13 +1227,13 @@ void OverlayWindow::Toggle_captured_cursor_visibility() {
     Rebuild_toolbar_buttons();
     if (d2d_resources_ != nullptr) {
         if (!d2d_resources_->Upload_screenshot(resources_->display_capture)) {
-            Handle_device_loss();
+            Post_fail_close(L"the graphics device was lost.");
             return;
         }
         if (resources_->window_capture.display_capture.Is_valid()) {
             if (!d2d_resources_->Upload_lifted_window_capture(
                     resources_->window_capture.display_capture)) {
-                Handle_device_loss();
+                Post_fail_close(L"the graphics device was lost.");
                 return;
             }
         } else {
@@ -1444,6 +1511,13 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
     if (Is_open()) {
         return true;
     }
+    // One overlay at a time: no capture while any overlay window is still around.
+    if (!surfaces_.empty() || primary_hwnd_ != nullptr) {
+        GREENFLAME_LOG_WRITE(L"overlay",
+                             L"Open refused: an overlay window still exists");
+        return false;
+    }
+
     if (window_query_ == nullptr) {
         return false;
     }
@@ -1468,48 +1542,65 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         resources_->captured_cursor.reset();
     }
 
-    HWND const hwnd = CreateWindowExW(
-        WS_EX_TOPMOST, kOverlayWindowClass, L"", WS_POPUP, bounds.left, bounds.top,
-        bounds.Width(), bounds.Height(), nullptr, nullptr, hinstance_, this);
-    if (!hwnd) {
-        resources_->Reset();
-        hinstance_ = nullptr;
-        return false;
-    }
-    // Every overlay coordinate assumes the window sits exactly on the virtual desktop
-    // captured above. Record it if Windows put it anywhere else.
-    if (RECT created{}; GetWindowRect(hwnd, &created) != 0) {
-        core::RectPx const created_px = core::RectPx::From_ltrb(
-            created.left, created.top, created.right, created.bottom);
-        if (created_px != bounds) {
-            GREENFLAME_LOG_WRITE(L"overlay", std::wstring(L"Overlay window rect ") +
-                                                 Format_rect_for_debug_log(created_px) +
-                                                 L" differs from the virtual desktop " +
-                                                 Format_rect_for_debug_log(bounds));
-        }
-    }
     if (!Rebuild_display_capture() || !resources_->Initialize_for_capture(hinstance_)) {
-        DestroyWindow(hwnd);
+        resources_->Reset();
         return false;
     }
 
-    // Initialize D2D render pipeline.
-    d2d_resources_ = std::make_unique<D2DOverlayResources>();
-    if (!d2d_resources_->Initialize_factory() ||
-        !d2d_resources_->Create_hwnd_rt(hwnd, resources_->display_capture.width,
-                                        resources_->display_capture.height) ||
-        !d2d_resources_->Upload_screenshot(resources_->display_capture) ||
-        !d2d_resources_->Create_shared_resources() ||
-        !d2d_resources_->Create_cache_targets(resources_->display_capture.width,
-                                              resources_->display_capture.height)) {
-        d2d_resources_.reset();
-    } else {
-        if (resources_->window_capture.display_capture.Is_valid()) {
-            (void)d2d_resources_->Upload_lifted_window_capture(
-                resources_->window_capture.display_capture);
-        } else {
-            d2d_resources_->Clear_lifted_window_capture();
+    // One window per monitor, else (setting off, or setup failed before any input)
+    // one window over the whole desktop.
+    std::vector<core::MonitorWithBounds> const monitors = Get_monitors_with_bounds();
+    core::PointPx const cursor_screen = Get_cursor_pos_px();
+    bool const per_monitor = config_ == nullptr || config_->overlay_window_per_monitor;
+    std::wstring fallback_reason =
+        per_monitor ? L"" : L"ui.overlay_window_per_monitor is off";
+    bool created = false;
+    if (per_monitor) {
+        core::OverlayLayout const layout =
+            core::Plan_overlay_layout(monitors, bounds, cursor_screen, true);
+        if (!layout.per_monitor) {
+            fallback_reason = L"no monitors to place windows on";
+        } else if (Create_surfaces(layout, fallback_reason)) {
+            layout_ = layout;
+            created = true;
         }
+    }
+    if (!created) {
+        core::OverlayLayout const span =
+            core::Plan_overlay_layout(monitors, bounds, cursor_screen, false);
+        std::wstring span_failure;
+        if (!Create_surfaces(span, span_failure)) {
+            GREENFLAME_LOG_WRITE(L"overlay", L"Overlay setup failed: " +
+                                                 fallback_reason + L"; span: " +
+                                                 span_failure);
+            resources_->Reset();
+            hinstance_ = nullptr;
+            if (events_ != nullptr) {
+                events_->On_overlay_failed(
+                    L"the overlay could not start its graphics.");
+            }
+            return false;
+        }
+        layout_ = span;
+    }
+#if defined(GREENFLAME_LOG)
+    {
+        std::wstring line =
+            std::wstring(L"Overlay session: mode=") +
+            (layout_.per_monitor ? L"per-monitor" : L"span") + L" adapter=\"" +
+            Adapter_description(d2d_resources_->d3d_device.Get()) + L"\" windows=";
+        for (OverlaySurface const &surface : surfaces_) {
+            line += Format_rect_for_debug_log(surface.rect_screen) + L" ";
+        }
+        // surfaces_ starts with the primary.
+        line += L"primary=" + Format_rect_for_debug_log(surfaces_.front().rect_screen);
+        if (!layout_.per_monitor) {
+            line += L" fallback=\"" + fallback_reason + L"\"";
+        }
+        GREENFLAME_LOG_WRITE(L"overlay", line);
+    }
+#endif
+    {
         auto const glyphs = resources_->Glyph_pointers();
         (void)d2d_resources_->Upload_glyph_bitmaps(
             std::span<OverlayButtonGlyph const *const>(glyphs));
@@ -1521,7 +1612,7 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         Rebuild_spell_check_service();
     }
 
-    controller_.Reset_for_session(Get_monitors_with_bounds());
+    controller_.Reset_for_session(monitors);
     controller_.Set_text_layout_engine(text_layout_engine_.get());
     controller_.Set_spell_check_service(spell_check_service_.get());
     controller_.Set_obfuscate_source_provider(obfuscate_source_provider_.get());
@@ -1580,18 +1671,313 @@ bool OverlayWindow::Create_and_show(HINSTANCE hinstance) {
         config_ != nullptr ? config_->text_current_font : core::TextFontChoice::Sans);
     (void)controller_.Set_bubble_current_font(
         config_ != nullptr ? config_->bubble_current_font : core::TextFontChoice::Sans);
-    ShowWindow(hwnd, SW_SHOW);
+    // The others first, without activation; the primary last takes focus.
+    for (OverlaySurface const &surface : surfaces_) {
+        if (surface.hwnd != primary_hwnd_) {
+            ShowWindow(surface.hwnd, SW_SHOWNOACTIVATE);
+        }
+    }
+    ShowWindow(primary_hwnd_, SW_SHOW);
+    Reassert_topmost();
     return true;
 }
 
-void OverlayWindow::Destroy() {
-    if (!Is_open()) {
-        return;
+bool OverlayWindow::Create_surfaces(core::OverlayLayout const &layout,
+                                    std::wstring &failure) {
+    creating_ = true;
+    auto const fail = [&](std::wstring why) {
+        failure = std::move(why);
+        Destroy_surfaces_quietly();
+        creating_ = false;
+        return false;
+    };
+    if (layout.surfaces.empty() || layout.primary >= layout.surfaces.size()) {
+        return fail(L"empty layout");
     }
-    DestroyWindow(hwnd_);
+    d2d_resources_ = std::make_unique<D2DOverlayResources>();
+    if (!d2d_resources_->Initialize_factory() ||
+        !d2d_resources_->Create_device(nullptr, D3D_DRIVER_TYPE_HARDWARE)) {
+        return fail(L"no Direct3D device");
+    }
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+    // Debug hook: GREENFLAME_FORCE_SPAN_FALLBACK=1 fails per-monitor setup after the
+    // first window, to exercise the fallback and its cleanup.
+    std::array<wchar_t, 2> force_fallback = {};
+    bool const force_span_fallback =
+        layout.per_monitor &&
+        GetEnvironmentVariableW(L"GREENFLAME_FORCE_SPAN_FALLBACK",
+                                force_fallback.data(),
+                                static_cast<DWORD>(force_fallback.size())) == 1 &&
+        force_fallback[0] == L'1';
+#endif
+    // The primary first: it owns the others, which keeps them above it, off the
+    // taskbar and Alt-Tab, and on its virtual desktop.
+    std::vector<size_t> order;
+    order.push_back(layout.primary);
+    for (size_t i = 0; i < layout.surfaces.size(); ++i) {
+        if (i != layout.primary) {
+            order.push_back(i);
+        }
+    }
+    for (size_t const index : order) {
+        core::OverlaySurfacePlan const &plan = layout.surfaces[index];
+        core::RectPx const r = plan.rect_screen;
+        HWND const owner = surfaces_.empty() ? nullptr : primary_hwnd_;
+        HWND const hwnd = CreateWindowExW(WS_EX_TOPMOST, kOverlayWindowClass, L"",
+                                          WS_POPUP, r.left, r.top, r.Width(),
+                                          r.Height(), owner, nullptr, hinstance_, this);
+        if (hwnd == nullptr) {
+            return fail(L"CreateWindowEx failed");
+        }
+        if (owner == nullptr) {
+            primary_hwnd_ = hwnd;
+        }
+        surfaces_.push_back(OverlaySurface{.hwnd = hwnd,
+                                           .rect_screen = plan.rect_screen,
+                                           .rect_client = plan.rect_client});
+        RECT window_rect{};
+        RECT client_rect{};
+        (void)GetWindowRect(hwnd, &window_rect);
+        (void)GetClientRect(hwnd, &client_rect);
+        core::RectPx const actual = core::RectPx::From_ltrb(
+            window_rect.left, window_rect.top, window_rect.right, window_rect.bottom);
+        if (!core::Surface_matches_plan(
+                plan.rect_screen, actual,
+                core::SizePx{client_rect.right - client_rect.left,
+                             client_rect.bottom - client_rect.top})) {
+            return fail(L"window at " + Rect_text(actual) + L", planned " +
+                        Rect_text(plan.rect_screen));
+        }
+        if (!d2d_resources_->Add_swap_chain_target(hwnd, plan.rect_client)) {
+            return fail(L"no swap chain for " + Rect_text(plan.rect_screen));
+        }
+        surfaces_.back().target_index = d2d_resources_->targets.size() - 1;
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+        if (force_span_fallback) {
+            return fail(L"GREENFLAME_FORCE_SPAN_FALLBACK=1");
+        }
+#endif
+    }
+    int const width = resources_->display_capture.width;
+    int const height = resources_->display_capture.height;
+    if (!d2d_resources_->Upload_screenshot(resources_->display_capture) ||
+        !d2d_resources_->Create_shared_resources() ||
+        !d2d_resources_->Create_cache_targets(width, height)) {
+        return fail(L"no caches");
+    }
+    if (resources_->window_capture.display_capture.Is_valid()) {
+        (void)d2d_resources_->Upload_lifted_window_capture(
+            resources_->window_capture.display_capture);
+    } else {
+        d2d_resources_->Clear_lifted_window_capture();
+    }
+    creating_ = false;
+    return true;
 }
 
-bool OverlayWindow::Is_open() const { return hwnd_ != nullptr && IsWindow(hwnd_) != 0; }
+void OverlayWindow::Destroy_surfaces_quietly() {
+    // Swap chains go before their windows. creating_ keeps the windows' WM_DESTROY
+    // from tearing down the session.
+    if (d2d_resources_) {
+        d2d_resources_->Release_all();
+        d2d_resources_.reset();
+    }
+    for (auto it = surfaces_.rbegin(); it != surfaces_.rend(); ++it) {
+        if (it->hwnd != nullptr) {
+            DestroyWindow(it->hwnd);
+        }
+    }
+    surfaces_.clear();
+    primary_hwnd_ = nullptr;
+}
+
+void OverlayWindow::Destroy() {
+    if (!Is_open() || closing_) {
+        return;
+    }
+    closing_ = true;
+    Release_mouse_capture();
+    // Swap chains go before their windows.
+    if (d2d_resources_) {
+        d2d_resources_->Release_targets();
+    }
+    for (OverlaySurface const &surface : surfaces_) {
+        if (surface.hwnd != nullptr && surface.hwnd != primary_hwnd_) {
+            DestroyWindow(surface.hwnd);
+        }
+    }
+    // The primary's WM_DESTROY runs the session teardown (On_destroy).
+    if (primary_hwnd_ != nullptr) {
+        DestroyWindow(primary_hwnd_);
+    }
+    surfaces_.clear();
+    primary_hwnd_ = nullptr;
+    closing_ = false;
+}
+
+bool OverlayWindow::Is_open() const {
+    return std::any_of(surfaces_.begin(), surfaces_.end(), [](OverlaySurface const &s) {
+        return s.hwnd != nullptr && IsWindow(s.hwnd) != 0;
+    });
+}
+
+bool OverlayWindow::Is_surface(HWND hwnd) const noexcept {
+    return hwnd != nullptr &&
+           std::any_of(surfaces_.begin(), surfaces_.end(),
+                       [hwnd](OverlaySurface const &s) { return s.hwnd == hwnd; });
+}
+
+void OverlayWindow::Reassert_topmost() const {
+    for (OverlaySurface const &surface : surfaces_) {
+        if (surface.hwnd != nullptr) {
+            (void)SetWindowPos(surface.hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                               SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+        }
+    }
+}
+
+void OverlayWindow::Post_fail_close(std::wstring_view reason) {
+    if (closing_ || creating_ || primary_hwnd_ == nullptr) {
+        return;
+    }
+    if (fail_close_reason_.empty()) {
+        fail_close_reason_ = reason;
+    }
+    if (!fail_close_posted_) {
+        fail_close_posted_ =
+            PostMessageW(primary_hwnd_, kOverlayFailCloseMessage, 0, 0) != FALSE;
+    }
+}
+
+void OverlayWindow::On_fail_close_message() {
+    fail_close_posted_ = false;
+    if (!Is_open() || closing_) {
+        return;
+    }
+    if (modal_depth_ > 0) {
+        // A Save As dialog or message box is up, with its caller on the stack: end the
+        // dialog first. The modal scope posts the close again once it returns.
+        fail_close_pending_ = true;
+        HWND const popup = GetLastActivePopup(primary_hwnd_);
+        if (popup != nullptr && popup != primary_hwnd_) {
+            (void)PostMessageW(popup, WM_COMMAND, IDCANCEL, 0);
+        }
+        return;
+    }
+    std::wstring const reason = std::move(fail_close_reason_);
+    fail_close_reason_.clear();
+    GREENFLAME_LOG_WRITE(L"overlay", L"Overlay closed: " + reason);
+#if defined(GREENFLAME_LOG)
+    Log_gesture_frames();
+#endif
+    Destroy();
+    if (events_ != nullptr) {
+        events_->On_overlay_failed(reason);
+    }
+}
+
+void OverlayWindow::Check_layout_still_matches(bool recheck_monitors) {
+    if (creating_ || closing_ || surfaces_.empty()) {
+        return;
+    }
+    if (recheck_monitors &&
+        !core::Layout_still_matches(layout_, Get_monitors_with_bounds(),
+                                    Get_virtual_desktop_bounds_px())) {
+        Post_fail_close(L"the display layout changed.");
+        return;
+    }
+    for (OverlaySurface const &surface : surfaces_) {
+        RECT window_rect{};
+        RECT client_rect{};
+        if (surface.hwnd == nullptr || GetWindowRect(surface.hwnd, &window_rect) == 0 ||
+            GetClientRect(surface.hwnd, &client_rect) == 0) {
+            continue;
+        }
+        if (!core::Surface_matches_plan(
+                surface.rect_screen,
+                core::RectPx::From_ltrb(window_rect.left, window_rect.top,
+                                        window_rect.right, window_rect.bottom),
+                core::SizePx{client_rect.right - client_rect.left,
+                             client_rect.bottom - client_rect.top})) {
+            Post_fail_close(L"an overlay window moved.");
+            return;
+        }
+    }
+}
+
+void OverlayWindow::Take_mouse_capture(HWND hwnd) {
+    (void)SetCapture(hwnd);
+    capture_held_ = true;
+}
+
+void OverlayWindow::Release_mouse_capture() {
+    if (!capture_held_) {
+        return;
+    }
+    capture_held_ = false;
+    releasing_capture_ = true;
+    (void)ReleaseCapture();
+    releasing_capture_ = false;
+}
+
+void OverlayWindow::On_capture_changed(HWND new_owner) {
+    // Our own release, a teardown, or capture passing between overlay windows: fine.
+    if (releasing_capture_ || closing_ || !capture_held_ || Is_surface(new_owner)) {
+        return;
+    }
+    // Lost while the button was held (lock screen, UAC, Ctrl+Alt+Del, a window that
+    // took it): get out rather than guess where the gesture ended.
+    capture_held_ = false;
+    Post_fail_close(L"the mouse was taken away during a drag.");
+}
+
+LRESULT OverlayWindow::On_mouse_activate(HWND hwnd, WPARAM wparam, LPARAM lparam) {
+    if (hwnd == primary_hwnd_) {
+        return DefWindowProcW(hwnd, WM_MOUSEACTIVATE, wparam, lparam);
+    }
+    // Keyboard focus stays on the primary. A click here still brings the overlay back
+    // to the foreground after Alt-Tab, as one window did: the click is this process's
+    // last input, so Windows allows it.
+    if (GetForegroundWindow() != primary_hwnd_) {
+        (void)SetForegroundWindow(primary_hwnd_);
+    }
+    return MA_NOACTIVATE;
+}
+
+void OverlayWindow::Log_gesture_frames() {
+#if defined(GREENFLAME_LOG)
+    if (!gesture_frames_active_) {
+        return;
+    }
+    gesture_frames_active_ = false;
+    if (gesture_frame_count_ < 2) {
+        return;
+    }
+    LARGE_INTEGER frequency{};
+    (void)QueryPerformanceFrequency(&frequency);
+    std::vector<double> intervals;
+    intervals.reserve(gesture_frame_count_ - 1);
+    std::span<const int64_t> const stamps =
+        std::span(gesture_frame_qpc_).first(gesture_frame_count_);
+    for (size_t i = 1; i < stamps.size(); ++i) {
+        intervals.push_back(static_cast<double>(stamps[i] - stamps[i - 1]) *
+                            kMsPerSecond / static_cast<double>(frequency.QuadPart));
+    }
+    core::FrameTimeSummary const summary = core::Summarize_frame_times(intervals);
+    std::optional<core::AnnotationToolId> const tool =
+        controller_.Active_annotation_tool();
+    GREENFLAME_LOG_WRITE(
+        L"frames",
+        std::wstring(L"gesture: tool=") +
+            (tool.has_value() ? std::to_wstring(static_cast<int>(*tool)) : L"none") +
+            L" mode=" + (layout_.per_monitor ? L"per-monitor" : L"span") + L" frames=" +
+            std::to_wstring(gesture_frame_count_) + L" p50=" +
+            std::to_wstring(summary.p50_ms) + L"ms p95=" +
+            std::to_wstring(summary.p95_ms) + L"ms max=" +
+            std::to_wstring(summary.max_ms) + L"ms within33=" +
+            std::to_wstring(summary.percent_within_30fps) + L"%");
+#endif
+}
 
 void OverlayWindow::Rebuild_spell_check_service() {
     if (config_ == nullptr || config_->spell_check_languages.empty()) {
@@ -1634,8 +2020,9 @@ void OverlayWindow::On_config_updated() {
 
 core::SnapEdges OverlayWindow::Collect_visible_snap_edges() const {
     core::SnapEdges snap_edges;
-    if (window_query_ != nullptr && hwnd_ != nullptr) {
-        window_query_->Get_visible_top_level_window_snap_edges(hwnd_, snap_edges);
+    if (window_query_ != nullptr && primary_hwnd_ != nullptr) {
+        window_query_->Get_visible_top_level_window_snap_edges(primary_hwnd_,
+                                                               snap_edges);
     }
     std::vector<core::RectPx> monitor_rects;
     monitor_rects.reserve(controller_.State().cached_monitors.size());
@@ -1813,14 +2200,14 @@ void OverlayWindow::Show_tool_size_overlay(int32_t step) {
     }
 
     transient_center_label_text_ = std::to_wstring(step);
-    (void)SetTimer(hwnd_, kBrushSizeOverlayTimerId, static_cast<UINT>(duration_ms),
-                   nullptr);
+    (void)SetTimer(primary_hwnd_, kBrushSizeOverlayTimerId,
+                   static_cast<UINT>(duration_ms), nullptr);
     Request_repaint();
 }
 
 void OverlayWindow::Clear_transient_center_label(bool repaint) {
-    if (hwnd_ != nullptr) {
-        (void)KillTimer(hwnd_, kBrushSizeOverlayTimerId);
+    if (primary_hwnd_ != nullptr) {
+        (void)KillTimer(primary_hwnd_, kBrushSizeOverlayTimerId);
     }
     if (transient_center_label_text_.empty()) {
         return;
@@ -1834,7 +2221,8 @@ void OverlayWindow::Clear_transient_center_label(bool repaint) {
 bool OverlayWindow::Read_clipboard_text(std::wstring &out) const {
     out.clear();
     HWND const clipboard_owner =
-        (hwnd_ != nullptr && IsWindow(hwnd_) != 0) ? hwnd_ : nullptr;
+        (primary_hwnd_ != nullptr && IsWindow(primary_hwnd_) != 0) ? primary_hwnd_
+                                                                   : nullptr;
     if (OpenClipboard(clipboard_owner) == 0) {
         return false;
     }
@@ -1892,7 +2280,8 @@ void OverlayWindow::Write_clipboard_text(std::wstring_view text) const {
     GlobalUnlock(clipboard_data);
 
     HWND const clipboard_owner =
-        (hwnd_ != nullptr && IsWindow(hwnd_) != 0) ? hwnd_ : nullptr;
+        (primary_hwnd_ != nullptr && IsWindow(primary_hwnd_) != 0) ? primary_hwnd_
+                                                                   : nullptr;
     if (OpenClipboard(clipboard_owner) == 0) {
         GlobalFree(clipboard_data);
         return;
@@ -1982,7 +2371,8 @@ void OverlayWindow::Write_clipboard_rich_text(std::wstring_view plain_text,
     }
 
     HWND const clipboard_owner =
-        (hwnd_ != nullptr && IsWindow(hwnd_) != 0) ? hwnd_ : nullptr;
+        (primary_hwnd_ != nullptr && IsWindow(primary_hwnd_) != 0) ? primary_hwnd_
+                                                                   : nullptr;
     if (OpenClipboard(clipboard_owner) == 0) {
         if (hglobal_html != nullptr) {
             GlobalFree(hglobal_html);
@@ -2023,7 +2413,8 @@ void OverlayWindow::Write_clipboard_rich_text(std::wstring_view plain_text,
 bool OverlayWindow::Read_clipboard_bytes(UINT fmt, std::string &out) const {
     out.clear();
     HWND const clipboard_owner =
-        (hwnd_ != nullptr && IsWindow(hwnd_) != 0) ? hwnd_ : nullptr;
+        (primary_hwnd_ != nullptr && IsWindow(primary_hwnd_) != 0) ? primary_hwnd_
+                                                                   : nullptr;
     if (OpenClipboard(clipboard_owner) == 0) {
         return false;
     }
@@ -2070,30 +2461,30 @@ bool OverlayWindow::Read_clipboard_html(std::string &out) const {
 
 void OverlayWindow::Cancel_highlighter_straighten_pending() noexcept {
     if (highlighter_straighten_pending_) {
-        (void)KillTimer(hwnd_, kHighlighterStraightenTimerId);
+        (void)KillTimer(primary_hwnd_, kHighlighterStraightenTimerId);
         highlighter_straighten_pending_ = false;
     }
 }
 
 void OverlayWindow::Reset_caret_blink() {
     caret_blink_visible_ = true;
-    if (hwnd_ == nullptr || !controller_.Has_active_text_edit()) {
-        if (hwnd_ != nullptr) {
-            (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+    if (primary_hwnd_ == nullptr || !controller_.Has_active_text_edit()) {
+        if (primary_hwnd_ != nullptr) {
+            (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
         }
         return;
     }
 
     UINT const interval = GetCaretBlinkTime();
     if (interval == 0 || interval == INFINITE) {
-        (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+        (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
         return;
     }
-    (void)SetTimer(hwnd_, kCaretBlinkTimerId, interval, nullptr);
+    (void)SetTimer(primary_hwnd_, kCaretBlinkTimerId, interval, nullptr);
 }
 
 void OverlayWindow::Update_selected_annotation_marquee_timer() noexcept {
-    if (hwnd_ == nullptr) {
+    if (primary_hwnd_ == nullptr) {
         return;
     }
 
@@ -2103,7 +2494,7 @@ void OverlayWindow::Update_selected_annotation_marquee_timer() noexcept {
         // Do not re-arm the timer on every input event; that can indefinitely delay
         // the next tick while the pointer is moving, freezing the marquee during drag.
         if (!selected_annotation_marquee_timer_running_) {
-            (void)SetTimer(hwnd_, kSelectedAnnotationMarqueeTimerId,
+            (void)SetTimer(primary_hwnd_, kSelectedAnnotationMarqueeTimerId,
                            kSelectedAnnotationMarqueeTimerIntervalMs, nullptr);
             selected_annotation_marquee_timer_running_ = true;
         }
@@ -2112,7 +2503,7 @@ void OverlayWindow::Update_selected_annotation_marquee_timer() noexcept {
 
     selected_annotation_marquee_phase_px_ = 0;
     if (selected_annotation_marquee_timer_running_) {
-        (void)KillTimer(hwnd_, kSelectedAnnotationMarqueeTimerId);
+        (void)KillTimer(primary_hwnd_, kSelectedAnnotationMarqueeTimerId);
         selected_annotation_marquee_timer_running_ = false;
     }
 }
@@ -2285,7 +2676,7 @@ void OverlayWindow::Dismiss_selection_wheel(bool repaint) {
     }
     selection_wheel_ =
         {}; // text_mode, highlighter_mode, clamp_nav all reset to defaults
-    if (hwnd_ != nullptr) {
+    if (primary_hwnd_ != nullptr) {
         Refresh_cursor();
     }
     if (repaint) {
@@ -2593,7 +2984,6 @@ LRESULT CALLBACK OverlayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wpar
         if (!self) {
             return FALSE;
         }
-        self->hwnd_ = hwnd;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
         return TRUE;
     }
@@ -2605,7 +2995,14 @@ LRESULT CALLBACK OverlayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wpar
     }
     LRESULT const result = self->Wnd_proc(hwnd, msg, wparam, lparam);
     if (msg == WM_NCDESTROY) {
-        self->hwnd_ = nullptr;
+        for (OverlaySurface &surface : self->surfaces_) {
+            if (surface.hwnd == hwnd) {
+                surface.hwnd = nullptr;
+            }
+        }
+        if (self->primary_hwnd_ == hwnd) {
+            self->primary_hwnd_ = nullptr;
+        }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
     }
     return result;
@@ -2667,6 +3064,20 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
     bool const eff_alt = alt || (wparam == VK_MENU);
     bool const had_text_edit = controller_.Has_active_text_edit();
 
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+    // Debug hooks for the close paths: Ctrl+Shift+Alt+F11 reports a lost device on the
+    // next paint, Ctrl+Shift+Alt+F12 a streak of frame-wait timeouts.
+    if (ctrl && shift && alt && (wparam == VK_F11 || wparam == VK_F12)) {
+        if (wparam == VK_F11) {
+            debug_force_device_lost_ = true;
+        } else {
+            debug_force_wait_timeouts_ = kFrameWaitTimeoutStreak;
+        }
+        Request_repaint();
+        return 0;
+    }
+#endif
+
     if (wparam == VK_ESCAPE) {
         if (obfuscate_warning_dialog_.Is_visible()) {
             Reject_obfuscate_warning();
@@ -2686,9 +3097,9 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
         if (!Is_open()) {
             return 0;
         }
-        if (!controller_.Has_active_text_edit() && hwnd_ != nullptr) {
+        if (!controller_.Has_active_text_edit() && primary_hwnd_ != nullptr) {
             caret_blink_visible_ = true;
-            (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+            (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
         }
         (void)Refresh_hover_handle();
         Refresh_cursor();
@@ -2764,7 +3175,7 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
                     d2d_resources_->Invalidate_annotations();
                 }
                 caret_blink_visible_ = true;
-                (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+                (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
                 (void)Refresh_hover_handle();
                 Refresh_cursor();
                 Request_repaint();
@@ -3147,8 +3558,8 @@ LRESULT OverlayWindow::On_l_button_down() {
                         controller_.Cancel_text_draft();
                     }
                     caret_blink_visible_ = true;
-                    if (hwnd_ != nullptr) {
-                        (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+                    if (primary_hwnd_ != nullptr) {
+                        (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
                     }
                 }
                 (void)Update_toolbar_hover_states(cur);
@@ -3220,15 +3631,15 @@ LRESULT OverlayWindow::On_l_button_down() {
         } else {
             highlighter_straighten_pending_ = true;
             highlighter_straighten_ref_pos_ = cursor_client;
-            (void)SetTimer(hwnd_, kHighlighterStraightenTimerId,
+            (void)SetTimer(primary_hwnd_, kHighlighterStraightenTimerId,
                            static_cast<UINT>(pause_ms), nullptr);
         }
     }
     if (controller_.Has_active_text_edit()) {
         Reset_caret_blink();
-    } else if (had_text_edit && hwnd_ != nullptr) {
+    } else if (had_text_edit && primary_hwnd_ != nullptr) {
         caret_blink_visible_ = true;
-        (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+        (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
     }
     bool const hover_changed = Refresh_hover_handle();
     Refresh_cursor();
@@ -3309,8 +3720,8 @@ LRESULT OverlayWindow::On_mouse_move() {
                 config_ != nullptr
                     ? config_->highlighter_pause_straighten_ms
                     : core::AppConfig::kDefaultHighlighterPauseStraightenMs;
-            (void)KillTimer(hwnd_, kHighlighterStraightenTimerId);
-            (void)SetTimer(hwnd_, kHighlighterStraightenTimerId,
+            (void)KillTimer(primary_hwnd_, kHighlighterStraightenTimerId);
+            (void)SetTimer(primary_hwnd_, kHighlighterStraightenTimerId,
                            static_cast<UINT>(pause_ms), nullptr);
             highlighter_straighten_ref_pos_ = cursor_client;
         }
@@ -3464,9 +3875,9 @@ LRESULT OverlayWindow::On_l_button_up() {
     Apply_action(controller_.On_primary_release(mods, release_client));
     if (controller_.Has_active_text_edit()) {
         Reset_caret_blink();
-    } else if (had_text_edit && hwnd_ != nullptr) {
+    } else if (had_text_edit && primary_hwnd_ != nullptr) {
         caret_blink_visible_ = true;
-        (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+        (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
     }
     bool const hover_changed = Refresh_hover_handle();
     Refresh_cursor();
@@ -3532,7 +3943,7 @@ LRESULT OverlayWindow::On_timer(HWND hwnd, WPARAM wparam) {
     if (wparam == kCaretBlinkTimerId) {
         if (!controller_.Has_active_text_edit()) {
             caret_blink_visible_ = true;
-            (void)KillTimer(hwnd_, kCaretBlinkTimerId);
+            (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
             return 0;
         }
         caret_blink_visible_ = !caret_blink_visible_;
@@ -3543,7 +3954,7 @@ LRESULT OverlayWindow::On_timer(HWND hwnd, WPARAM wparam) {
         if (!controller_.Has_selected_annotations() &&
             !controller_.State().annotation_selection_dragging) {
             selected_annotation_marquee_phase_px_ = 0;
-            (void)KillTimer(hwnd_, kSelectedAnnotationMarqueeTimerId);
+            (void)KillTimer(primary_hwnd_, kSelectedAnnotationMarqueeTimerId);
             selected_annotation_marquee_timer_running_ = false;
             return 0;
         }
@@ -3589,15 +4000,54 @@ LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
     case WM_CHAR:
         return On_char(wparam);
     case WM_LBUTTONDOWN:
+        // Capture keeps a drag's messages coming when the cursor crosses onto another
+        // overlay window or over a foreign window.
+        Take_mouse_capture(hwnd);
+#if defined(GREENFLAME_LOG)
+        gesture_frame_count_ = 0;
+        gesture_frames_active_ = true;
+#endif
         return On_l_button_down();
     case WM_LBUTTONDBLCLK:
+        Take_mouse_capture(hwnd);
         return On_l_button_dbl_clk();
     case WM_MOUSEMOVE:
         return On_mouse_move();
     case WM_MOUSEWHEEL:
         return On_mouse_wheel(wparam);
-    case WM_LBUTTONUP:
-        return On_l_button_up();
+    case WM_LBUTTONUP: {
+        Release_mouse_capture();
+        LRESULT const result = On_l_button_up();
+#if defined(GREENFLAME_LOG)
+        Log_gesture_frames();
+#endif
+        return result;
+    }
+    case WM_CAPTURECHANGED:
+        On_capture_changed(reinterpret_cast<HWND>(lparam));
+        return 0;
+    case WM_MOUSEACTIVATE:
+        return On_mouse_activate(hwnd, wparam, lparam);
+    case WM_ACTIVATEAPP:
+        if (wparam != FALSE) {
+            Reassert_topmost();
+        }
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    case WM_DISPLAYCHANGE:
+        Check_layout_still_matches(/*recheck_monitors=*/true);
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    case WM_DPICHANGED:
+        // Never take the suggested rect: overlay windows stay on their monitor's
+        // physical pixels. Close only if the layout really changed.
+        Check_layout_still_matches(/*recheck_monitors=*/true);
+        return 0;
+    case WM_WINDOWPOSCHANGED:
+        // A move with no display message: compare window rects only.
+        Check_layout_still_matches(/*recheck_monitors=*/false);
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
+    case kOverlayFailCloseMessage:
+        On_fail_close_message();
+        return 0;
     case WM_RBUTTONDOWN:
         return On_r_button_down();
     case WM_CONTEXTMENU:
@@ -3611,7 +4061,17 @@ LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
     case WM_ERASEBKGND:
         return 1;
     case WM_DESTROY:
-        return On_destroy();
+        if (creating_) {
+            return 0; // a failed setup attempt cleaning up: no session yet
+        }
+        if (hwnd == primary_hwnd_) {
+            return On_destroy(); // the primary goes last: tear the session down once
+        }
+        if (!closing_ && primary_hwnd_ != nullptr) {
+            // Another overlay window went away on its own: close the rest.
+            (void)PostMessageW(primary_hwnd_, WM_CLOSE, 0, 0);
+        }
+        return 0;
     case WM_CLOSE:
         return On_close();
     default:
@@ -3755,7 +4215,8 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
     }
     bool file_copied_to_clipboard = false;
     if (copy_saved_file_to_clipboard) {
-        file_copied_to_clipboard = Copy_file_path_to_clipboard(reserved_path, hwnd_);
+        file_copied_to_clipboard =
+            Copy_file_path_to_clipboard(reserved_path, primary_hwnd_);
     }
     if (config_) {
         config_->default_save_dir = save_dir;
@@ -3794,7 +4255,7 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         path_span[n] = L'\0';
     }
     ofn.lStructSize = sizeof(ofn);
-    ofn.hwndOwner = hwnd_;
+    ofn.hwndOwner = primary_hwnd_;
     ofn.lpstrFilter = L"PNG (*.png)\0*.png\0JPEG "
                       L"(*.jpg;*.jpeg)\0*.jpg;*.jpeg\0BMP (*.bmp)\0*.bmp\0\0";
     ofn.lpstrFile = path_buffer.data();
@@ -3806,7 +4267,13 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         ofn.lpstrInitialDir = initial_dir.c_str();
     }
 
-    if (!GetSaveFileNameW(&ofn)) {
+    bool chosen = false;
+    {
+        ModalScope const modal(*this);
+        chosen = GetSaveFileNameW(&ofn) != FALSE;
+    }
+    if (!chosen || fail_close_pending_ || fail_close_posted_) {
+        // Cancelled, or the overlay is closing under a failure: save nothing.
         cropped.Free();
         return;
     }
@@ -3826,8 +4293,8 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
     }
     bool file_copied_to_clipboard = false;
     if (copy_saved_file_to_clipboard) {
-        file_copied_to_clipboard =
-            Copy_file_path_to_clipboard(std::wstring_view(path_buffer.data()), hwnd_);
+        file_copied_to_clipboard = Copy_file_path_to_clipboard(
+            std::wstring_view(path_buffer.data()), primary_hwnd_);
     }
     std::wstring_view const path_view(path_buffer.data());
     size_t const last_slash_pos = path_view.rfind(L'\\');
@@ -3939,7 +4406,7 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
         Destroy();
         return;
     }
-    bool const copied_to_clipboard = Copy_capture_to_clipboard(cropped, hwnd_);
+    bool const copied_to_clipboard = Copy_capture_to_clipboard(cropped, primary_hwnd_);
     cropped.Free();
 
     if (copied_to_clipboard && events_) {
@@ -3959,7 +4426,8 @@ void OverlayWindow::Pin_to_desktop_and_close() {
 
     GdiCaptureResult cropped{};
     if (!Build_rendered_selection_capture(cropped)) {
-        MessageBoxW(hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
+        ModalScope const modal(*this);
+        MessageBoxW(primary_hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
                     MB_OK | MB_ICONWARNING);
         return;
     }
@@ -3972,7 +4440,8 @@ void OverlayWindow::Pin_to_desktop_and_close() {
     }
 
     cropped.Free();
-    MessageBoxW(hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
+    ModalScope const modal(*this);
+    MessageBoxW(primary_hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
                 MB_OK | MB_ICONWARNING);
 }
 
@@ -3982,6 +4451,16 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
     PAINTSTRUCT paint{};
     HDC const hdc = BeginPaint(hwnd, &paint);
     if (!hdc) {
+        return 0;
+    }
+    // One paint draws every window: the others need no WM_PAINT of their own.
+    for (OverlaySurface const &surface : surfaces_) {
+        if (surface.hwnd != nullptr && surface.hwnd != hwnd) {
+            (void)ValidateRect(surface.hwnd, nullptr);
+        }
+    }
+    if (closing_) {
+        EndPaint(hwnd, &paint);
         return 0;
     }
 
@@ -4347,15 +4826,45 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
                                      Active_top_layer(), kFrameWaitTimeoutMs);
         }
         EndPaint(hwnd, &paint);
-        if (status == D2DFrameStatus::DeviceLost) {
-            Handle_device_loss();
-        } else if (status == D2DFrameStatus::WaitTimedOut) {
-            // Nothing was drawn. Ask again; the GPU may still be busy.
-            GREENFLAME_LOG_WRITE(L"overlay",
-                                 std::wstring(L"Frame wait timed out after ") +
-                                     std::to_wstring(kFrameWaitTimeoutMs) +
-                                     L" ms; frame skipped");
-            Request_repaint();
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+        if (debug_force_device_lost_) {
+            debug_force_device_lost_ = false;
+            status = D2DFrameStatus::DeviceLost;
+        } else if (debug_force_wait_timeouts_ > 0) {
+            --debug_force_wait_timeouts_;
+            status = D2DFrameStatus::WaitTimedOut;
+        }
+#endif
+        switch (status) {
+        case D2DFrameStatus::Ok:
+            wait_timeout_streak_ = 0;
+#if defined(GREENFLAME_LOG)
+            if (gesture_frames_active_ &&
+                gesture_frame_count_ < kGestureFrameCapacity) {
+                LARGE_INTEGER now{};
+                (void)QueryPerformanceCounter(&now);
+                gesture_frame_qpc_[gesture_frame_count_++] = now.QuadPart;
+            }
+#endif
+            break;
+        case D2DFrameStatus::DeviceLost:
+            Post_fail_close(L"the graphics device was lost.");
+            break;
+        case D2DFrameStatus::WaitTimedOut:
+            // Nothing was drawn. Ask again; the GPU may still be busy. A streak means
+            // the display stopped taking frames: get out.
+            ++wait_timeout_streak_;
+            GREENFLAME_LOG_WRITE(
+                L"overlay", std::wstring(L"Frame wait timed out after ") +
+                                std::to_wstring(kFrameWaitTimeoutMs) +
+                                L" ms; frame skipped (" +
+                                std::to_wstring(wait_timeout_streak_) + L" in a row)");
+            if (wait_timeout_streak_ >= kFrameWaitTimeoutStreak) {
+                Post_fail_close(L"the display stopped taking frames.");
+            } else {
+                Request_repaint();
+            }
+            break;
         }
         return 0;
     }
@@ -4365,58 +4874,13 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
     return 0;
 }
 
-void OverlayWindow::Handle_device_loss() {
-    if (!d2d_resources_ || resources_ == nullptr ||
-        !resources_->display_capture.Is_valid()) {
-        return;
-    }
-    int const w = resources_->display_capture.width;
-    int const h = resources_->display_capture.height;
-
-    d2d_resources_->Release_device_resources();
-    if (!d2d_resources_->Create_hwnd_rt(hwnd_, w, h) ||
-        !d2d_resources_->Upload_screenshot(resources_->display_capture) ||
-        !d2d_resources_->Create_shared_resources() ||
-        !d2d_resources_->Create_cache_targets(w, h)) {
-        controller_.Set_text_layout_engine(nullptr);
-        controller_.Set_spell_check_service(nullptr);
-        text_layout_engine_.reset();
-        d2d_resources_.reset();
-        Request_repaint();
-        return;
-    }
-    if (resources_->window_capture.display_capture.Is_valid()) {
-        if (!d2d_resources_->Upload_lifted_window_capture(
-                resources_->window_capture.display_capture)) {
-            d2d_resources_->Clear_lifted_window_capture();
-        }
-    } else {
-        d2d_resources_->Clear_lifted_window_capture();
-    }
-    auto const glyphs = resources_->Glyph_pointers();
-    (void)d2d_resources_->Upload_glyph_bitmaps(
-        std::span<OverlayButtonGlyph const *const>(glyphs));
-    if (!text_layout_engine_ && d2d_resources_->factory &&
-        d2d_resources_->dwrite_factory) {
-        text_layout_engine_ = std::make_unique<D2DTextLayoutEngine>(
-            d2d_resources_->factory.Get(), d2d_resources_->dwrite_factory.Get());
-    }
-    if (text_layout_engine_) {
-        text_layout_engine_->Set_font_families(Resolve_text_font_families(config_));
-    }
-    controller_.Set_text_layout_engine(text_layout_engine_.get());
-    controller_.Set_spell_check_service(spell_check_service_.get());
-    d2d_resources_->Invalidate_annotations();
-    Request_repaint();
-}
-
 LRESULT OverlayWindow::On_destroy() {
     Clear_transient_center_label(false);
     caret_blink_visible_ = true;
     selected_annotation_marquee_phase_px_ = 0;
     selected_annotation_marquee_timer_running_ = false;
-    (void)KillTimer(hwnd_, kCaretBlinkTimerId);
-    (void)KillTimer(hwnd_, kSelectedAnnotationMarqueeTimerId);
+    (void)KillTimer(primary_hwnd_, kCaretBlinkTimerId);
+    (void)KillTimer(primary_hwnd_, kSelectedAnnotationMarqueeTimerId);
     Cancel_highlighter_straighten_pending();
     mouse_wheel_delta_remainder_ = 0;
     suppress_next_lbutton_up_ = false;
@@ -4433,6 +4897,20 @@ LRESULT OverlayWindow::On_destroy() {
     }
     resources_->Reset();
     controller_.Reset_for_session({});
+    // Every window is gone or going (the primary goes last); WM_NCDESTROY clears
+    // primary_hwnd_.
+    surfaces_.clear();
+    capture_held_ = false;
+    modal_depth_ = 0;
+    fail_close_pending_ = false;
+    wait_timeout_streak_ = 0;
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+    debug_force_device_lost_ = false;
+    debug_force_wait_timeouts_ = 0;
+#endif
+#if defined(GREENFLAME_LOG)
+    gesture_frames_active_ = false;
+#endif
     if (events_) {
         events_->On_overlay_closed();
     }

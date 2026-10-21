@@ -2006,6 +2006,267 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Window and monitor selection target the correct non-primary monitor content.
   - Clipboard output matches the actual target, not the primary monitor.
 
+### GF-MAN-DPI-004 - Per-Monitor Overlay Windows On Mixed DPI
+
+- Priority: `P1`
+- Run on: `ENV-B`
+- Setup:
+  1. Set one monitor left of the primary to 150% and the others to 100%. Keep the left
+     monitor's top offset from the primary's, so the desktop has an uncovered strip.
+  2. Confirm the monitor rects with `greenflame_render_bench.exe --list-adapters`.
+  3. Restart Greenflame, with `ui.overlay_window_per_monitor` on (the default).
+  4. Optional second pass: the primary at 125%.
+- Steps:
+  1. Open the overlay with the cursor on each monitor.
+  2. Drag a selection across every boundary; draw a brush, a highlighter and a text
+     annotation across the 150% / 100% boundary.
+  3. Save the whole desktop (Ctrl+Shift click) and a cross-boundary selection.
+  4. Re-run `GF-MAN-DPI-001` to `GF-MAN-DPI-003`.
+- Expected:
+  - Every monitor is covered exactly; no seam, offset, gap or scaling at any boundary.
+  - With a debug-log build, the `Overlay session` line says `mode=per-monitor` with
+    no fallback.
+  - The saved images match the visible selection.
+
+## Per-Monitor Overlay Windows
+
+The overlay opens one window per monitor (`ui.overlay_window_per_monitor`, default
+`true`). Run each case in per-monitor mode, and in span mode (setting `false`) where
+it says so, to tell new problems from old ones. A debug-log build
+(`GREENFLAME_ENABLE_DEBUG_LOG`) writes an `Overlay session` line per open (mode,
+adapter, window rects, fallback reason) and a `frames` line per press-to-release
+gesture to `%TEMP%\greenflame-debug.log`.
+
+### GF-MAN-PMW-001 - Open On Each Monitor
+
+- Priority: `P1`
+- Run on: `ENV-B`, or any desk with two or more monitors
+- Steps:
+  1. Open the overlay with the cursor on each monitor in turn; close it with Escape.
+- Expected:
+  - Every monitor is covered; no black flash on open or close, and no refresh, HDR or
+    G-SYNC mode switch on any panel.
+  - Keys work at once (Escape closes).
+
+### GF-MAN-PMW-002 - Selection Drags Across Boundaries
+
+- Priority: `P1`
+- Steps:
+  1. Drag selections across every monitor boundary in both directions, starting on a
+     monitor at negative x, and one across all monitors.
+  2. Resize and move a selection across a boundary.
+- Expected:
+  - Border, dim, handles and labels show no seam at the boundaries.
+
+### GF-MAN-PMW-003 - Every Tool Across Each Boundary
+
+- Priority: `P1`
+- Steps:
+  1. Across each boundary draw: brush, highlighter (and a straightened highlighter),
+     line, arrow, rectangle, ellipse, obfuscate, text and bubble.
+  2. Draw long looping brush and highlighter strokes across a boundary between
+     monitors driven by different GPUs, if the desk has them.
+  3. Press and release Shift, Ctrl, Alt and Escape mid-gesture with the cursor on
+     another monitor than where the gesture started.
+- Expected:
+  - No seam or doubled pixels; committed annotations match the preview.
+
+### GF-MAN-PMW-004 - Keyboard After A Click On Another Monitor
+
+- Priority: `P1`
+- Steps:
+  1. Click a monitor other than the one the overlay opened on, then type text and use
+     Ctrl+Z, Ctrl+K, Ctrl+H, the tool keys and the Tab wheel.
+  2. Repeat after a click on each monitor.
+- Expected:
+  - Keys always act; the window under the clicks never takes the focus away.
+
+### GF-MAN-PMW-005 - Alt-Tab And Start
+
+- Priority: `P1`
+- Steps:
+  1. Alt-Tab away while the overlay is open, then come back by Alt-Tab, and by a
+     click on each monitor.
+  2. Open and close the Start menu.
+- Expected:
+  - The overlay is back on top on every monitor, and the keys work.
+  - Alt-Tab shows one overlay entry.
+
+### GF-MAN-PMW-006 - Fast Second Click Across A Boundary
+
+- Priority: `P2`
+- Steps:
+  1. With a tool armed, click twice quickly on one monitor, then twice 1-2 px apart
+     across a boundary.
+  2. Double-click a text annotation on a monitor other than the primary to re-edit
+     it.
+- Expected:
+  - A second click starts a new stroke; no stuck drag; re-edit works.
+
+### GF-MAN-PMW-007 - Lost Mouse Capture Closes The Overlay
+
+- Priority: `P1`
+- Run in: per-monitor and span
+- Steps:
+  1. Hold the button mid-drag (selection drag, brush stroke, text drag-selection) and
+     trigger in turn: Win+L then unlock; a UAC prompt (from a delayed elevated
+     command); Ctrl+Alt+Del then Escape; Alt+Tab with the button held.
+- Expected:
+  - The overlay closes, a balloon says the capture was cancelled, nothing is saved or
+    left behind, and the next open works.
+
+### GF-MAN-PMW-008 - Save As And The Pin-Failure Box
+
+- Priority: `P1`
+- Steps:
+  1. Open Save As (Ctrl+Shift+S). While it is up, click on every other monitor.
+  2. Cancel, then save for real.
+  3. If a pin failure can be forced, check the message box the same way.
+- Expected:
+  - The dialogs open on the monitor where the overlay opened; clicks elsewhere do
+    nothing; Cancel returns to a working overlay; the save completes.
+
+### GF-MAN-PMW-009 - Panels And Widgets At Edges
+
+- Priority: `P1`
+- Steps:
+  1. Open help and the obfuscate warning on each monitor, at edges and corners.
+  2. Place selections so the toolbar sits at each monitor edge, and one crossing a
+     boundary.
+  3. Move the magnifier and coordinate tooltip along every monitor edge and corner,
+     including the corners of a monitor offset from its neighbours.
+  4. Open the color wheel straddling a boundary.
+- Expected:
+  - Panels, toolbar, magnifier and tooltip stay inside one monitor; the wheel shows
+    both halves with no seam.
+
+### GF-MAN-PMW-010 - Window Capture And Snapping
+
+- Priority: `P1`
+- Steps:
+  1. Ctrl-click a window on each monitor, one spanning two monitors and one partly
+     off-screen. Shift-click each monitor; Ctrl+Shift for the whole desktop.
+  2. Check snapping on each monitor and across boundaries; hold Alt to turn it off.
+- Expected:
+  - Ctrl-click picks the real window under the cursor on every monitor, never an
+    overlay window; snapping works as in span mode.
+
+### GF-MAN-PMW-011 - Taskbars And Topmost Windows
+
+- Priority: `P2`
+- Run in: per-monitor and span (compare)
+- Steps:
+  1. Taskbars on all displays, with auto-hide on and off.
+  2. Open with a fullscreen app on another monitor as the last foreground window.
+  3. Keep Task Manager "always on top" on each monitor in turn.
+  4. Let a notification arrive while the overlay is open.
+  5. Recheck after clicks on each monitor and after Alt-Tab back.
+- Expected:
+  - Same stacking as span mode; the overlay covers the taskbars.
+
+### GF-MAN-PMW-012 - Virtual Desktops
+
+- Priority: `P2`
+- Steps:
+  1. Open on virtual desktop 2; press Win+Ctrl+Left, then Win+Ctrl+Right.
+- Expected:
+  - All overlay windows move with the desktop and come back together.
+
+### GF-MAN-PMW-013 - Display Change Closes The Overlay
+
+- Priority: `P1`
+- Run in: per-monitor and span
+- Steps:
+  1. While open, unplug an external monitor, or change one monitor's resolution.
+  2. If available, change a refresh rate only (no layout change).
+- Expected:
+  - Step 1: the overlay closes with a balloon, nothing is left behind, the next open
+    works.
+  - Step 2: the overlay stays open.
+
+### GF-MAN-PMW-014 - Forced Device Loss And Frame-Wait Timeouts
+
+- Priority: `P1`
+- Run on: a debug or debug-log build; per-monitor and span
+- Steps:
+  1. Mid-gesture on each monitor press Ctrl+Shift+Alt+F11 (the next paint reports a
+     lost device).
+  2. Reopen; mid-gesture press Ctrl+Shift+Alt+F12 (the next paints time out).
+- Expected:
+  - The overlay closes with a balloon each time, nothing is left behind, and the next
+    open works.
+
+### GF-MAN-PMW-015 - Forced Span Fallback
+
+- Priority: `P2`
+- Run on: a debug or debug-log build
+- Steps:
+  1. Start Greenflame with `GREENFLAME_FORCE_SPAN_FALLBACK=1` in its environment and
+     open the overlay.
+- Expected:
+  - The overlay works as one window over the desktop; the debug log's
+    `Overlay session` line names the fallback reason; the next open is clean.
+
+### GF-MAN-PMW-016 - Config Switch
+
+- Priority: `P2`
+- Steps:
+  1. Set `ui.overlay_window_per_monitor` to `false` while the overlay is open; finish
+     the capture; open again. Set it back to `true`; open again.
+- Expected:
+  - The change applies at the next open only; span mode looks as before.
+
+### GF-MAN-PMW-017 - Capture Identity Between Modes
+
+- Priority: `P1`
+- Steps:
+  1. Park the cursor in the same corner before each open. Do each pair (span, then
+     per-monitor) within one minute so the taskbar clock does not change.
+  2. Save as `.bmp`: the whole desktop; a cross-monitor selection from a monitor at
+     negative x; Ctrl-click on a window on a non-primary monitor and on one spanning
+     two monitors; Shift-click on each monitor; an annotated cross-boundary selection
+     (one pair with the captured cursor on); a copy pasted into Paint and saved.
+  3. Compare each pair: `greenflame_render_bench.exe --diff span.bmp per.bmp`.
+  4. Pin each kind once; right after closing, use the whole-desktop hotkey.
+- Expected:
+  - Each pair differs by 0 pixels (hand-drawn annotations aside, say so).
+  - Pins land at the selection's screen rect; the hotkey copies the whole desktop.
+
+### GF-MAN-PMW-018 - Performance
+
+- Priority: `P2`
+- Steps:
+  1. Run `GF-MAN-PERF-001`, with the present probe at `--passes 1`, `3` and `6`,
+     twice each.
+  2. In a debug-log build, draw long strokes and drag selections across monitors in
+     both modes; read the `frames` lines.
+  3. Draw the heaviest gestures across all monitors: a long looping highlighter, a
+     large obfuscate drag.
+- Expected:
+  - The probe's `per-monitor-shared` beats `span` at every pass count and holds 30
+    fps or better (p50 33.3 ms, p95 at or under about 34 ms); the `frames` lines
+    agree.
+  - No gesture closes the overlay (no frame-wait timeout streak).
+
+### GF-MAN-PMW-019 - Close Paths
+
+- Priority: `P1`
+- Steps:
+  1. Close by each path: Escape; Alt+F4 with the cursor on another monitor; save;
+     copy; pin; Save As then Cancel then Escape; tray Exit while open.
+- Expected:
+  - Every overlay window disappears at once; the next open works.
+
+### GF-MAN-PMW-020 - Re-run Existing Cases In Both Modes
+
+- Priority: `P1`
+- Steps:
+  1. Run `GF-MAN-DPI-001` to `GF-MAN-DPI-003`, `GF-MAN-SEL-004`, `GF-MAN-SEL-006`,
+     `GF-MAN-UI-001` to `GF-MAN-UI-003`, `GF-MAN-OUT-001` to `GF-MAN-OUT-006`,
+     `GF-MAN-PIN-005` and `GF-MAN-CURSOR-003` in per-monitor and span mode.
+- Expected:
+  - Same results in both modes.
+
 ### GF-MAN-PERF-001 - Overlay Frame Cost And Present Floor
 
 - Priority: `P2`

@@ -63,6 +63,8 @@ struct AppConfig final {
     bool show_balloons = true;
     bool show_selection_size_side_labels = true;
     bool show_selection_size_center_label = true;
+    // One overlay window per monitor; false is one window over the whole desktop.
+    bool overlay_window_per_monitor = true;
 
     void Normalize();
 };

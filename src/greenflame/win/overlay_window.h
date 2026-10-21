@@ -3,6 +3,7 @@
 #include "greenflame_core/mouse_move_history.h"
 #include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/overlay_help_content.h"
+#include "greenflame_core/overlay_surface_layout.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/selection_wheel.h"
 #include "win/d2d_text_layout_engine.h"
@@ -36,6 +37,10 @@ class IOverlayEvents {
     // Called when one or more language tags in spell_check_languages are not
     // supported by the Windows spell checking API on this machine.
     virtual void On_spell_check_languages_unsupported(std::wstring_view warning) = 0;
+    // The overlay could not open, or closed itself and cancelled the capture because
+    // something went wrong (display change, lost device, lost mouse capture). reason
+    // is one short sentence for the user.
+    virtual void On_overlay_failed(std::wstring_view reason) = 0;
 };
 
 class OverlayWindow final {
@@ -77,6 +82,7 @@ class OverlayWindow final {
 
     struct OverlayResources;
     struct ObfuscateSourceProvider;
+    class ModalScope;
 
     struct ToolbarButtonModel final {
         ToolbarButtonAction action = ToolbarButtonAction::SelectAnnotationTool;
@@ -135,6 +141,36 @@ class OverlayWindow final {
     LRESULT On_paint(HWND hwnd);
     LRESULT On_destroy();
     LRESULT On_close();
+
+    // One overlay window. Each draws its part of the overlay into its own target of
+    // a D2DOverlayResources (one device, so resources_index is 0 for now).
+    struct OverlaySurface final {
+        HWND hwnd = nullptr;
+        core::RectPx rect_screen = {};
+        core::RectPx rect_client = {};
+        size_t resources_index = 0;
+        size_t target_index = 0;
+    };
+    // Creates the windows and render targets for layout. On failure, everything it
+    // made is gone again and failure says why.
+    [[nodiscard]] bool Create_surfaces(core::OverlayLayout const &layout,
+                                       std::wstring &failure);
+    // Undoes a failed Create_surfaces without any session teardown.
+    void Destroy_surfaces_quietly();
+    [[nodiscard]] bool Is_surface(HWND hwnd) const noexcept;
+    void Reassert_topmost() const;
+    // Closes the overlay and cancels the capture, with a balloon saying reason. Runs
+    // from a posted message, never inside painting or a capture change.
+    void Post_fail_close(std::wstring_view reason);
+    void On_fail_close_message();
+    // Closes the overlay when the monitors (if recheck_monitors) or a window moved away
+    // from the layout.
+    void Check_layout_still_matches(bool recheck_monitors);
+    void Take_mouse_capture(HWND hwnd);
+    void Release_mouse_capture();
+    void On_capture_changed(HWND new_owner);
+    LRESULT On_mouse_activate(HWND hwnd, WPARAM wparam, LPARAM lparam);
+    void Log_gesture_frames();
     LRESULT On_set_cursor(HWND hwnd, WPARAM wparam, LPARAM lparam);
     void Refresh_cursor();
     bool Refresh_hover_handle();
@@ -165,7 +201,6 @@ class OverlayWindow final {
     void Reset_caret_blink();
     void Update_selected_annotation_marquee_timer() noexcept;
     void Cancel_highlighter_straighten_pending() noexcept;
-    void Handle_device_loss();
     [[nodiscard]] bool Can_show_selection_wheel() const noexcept;
     [[nodiscard]] std::span<const COLORREF> Current_tool_color_palette() const noexcept;
     [[nodiscard]] size_t Current_annotation_color_index() const noexcept;
@@ -275,7 +310,33 @@ class OverlayWindow final {
     IOverlayEvents *events_ = nullptr;
     core::AppConfig *config_ = nullptr;
     IWindowQuery *window_query_ = nullptr;
-    HWND hwnd_ = nullptr;
+    // The window on the cursor's monitor when the overlay opened: it has keyboard
+    // focus, owns the other windows, the timers, the clipboard and the dialogs.
+    HWND primary_hwnd_ = nullptr;
+    std::vector<OverlaySurface> surfaces_ = {};
+    core::OverlayLayout layout_ = {};
+    bool creating_ = false;     // Create_surfaces is running
+    bool closing_ = false;      // Destroy is running
+    bool capture_held_ = false; // SetCapture since the last press
+    bool releasing_capture_ = false;
+    int modal_depth_ = 0; // a Save As dialog or message box is up
+    bool fail_close_posted_ = false;
+    bool fail_close_pending_ = false; // waits for the modal dialog to end
+    std::wstring fail_close_reason_ = {};
+    int wait_timeout_streak_ = 0;
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+    // Debug hooks (Ctrl+Shift+Alt+F11 / F12): the next paints report a lost device or
+    // frame-wait timeouts, to exercise the close paths.
+    bool debug_force_device_lost_ = false;
+    int debug_force_wait_timeouts_ = 0;
+#endif
+#if defined(GREENFLAME_LOG)
+    // Frame times of the current press-to-release gesture, for the debug log.
+    static constexpr size_t kGestureFrameCapacity = 4096;
+    std::array<int64_t, kGestureFrameCapacity> gesture_frame_qpc_ = {};
+    size_t gesture_frame_count_ = 0;
+    bool gesture_frames_active_ = false;
+#endif
     HINSTANCE hinstance_ = nullptr;
     core::OverlayController controller_;
     std::unique_ptr<OverlayResources> resources_;
