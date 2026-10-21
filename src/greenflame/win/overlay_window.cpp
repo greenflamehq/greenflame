@@ -65,6 +65,9 @@ constexpr UINT_PTR kCaretBlinkTimerId = 2;
 constexpr UINT_PTR kHighlighterStraightenTimerId = 3;
 constexpr UINT_PTR kSelectedAnnotationMarqueeTimerId = 4;
 constexpr UINT kSelectedAnnotationMarqueeTimerIntervalMs = 60;
+// Longest wait for the swap chains to take a frame. A frame that waits this long is
+// skipped, never painted late: Present could block too. Vsync waits are 7-17 ms.
+constexpr DWORD kFrameWaitTimeoutMs = 1000;
 constexpr int32_t kSelectedAnnotationMarqueePhaseStepPx = 1;
 constexpr wchar_t kPinToDesktopFailedMessage[] =
     L"Failed to pin the selection to the desktop.";
@@ -4337,18 +4340,24 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         input.toolbar_buttons = std::span<IOverlayButton *const>(btn_ptrs);
         input.toolbar_button_glyphs = std::span<ID2D1Bitmap *const>(btn_glyphs);
 
-        bool ok = true;
+        D2DFrameStatus status = D2DFrameStatus::Ok;
         {
             GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Paint_d2d_frame");
-            ok = Paint_d2d_frame(
+            status = Paint_d2d_frame(
                 *d2d_resources_, input, resources_->display_capture.width,
-                resources_->display_capture.height, Active_top_layer());
+                resources_->display_capture.height, Active_top_layer(),
+                kFrameWaitTimeoutMs);
         }
-        if (!ok) {
-            Handle_device_loss();
-        }
-
         EndPaint(hwnd, &paint);
+        if (status == D2DFrameStatus::DeviceLost) {
+            Handle_device_loss();
+        } else if (status == D2DFrameStatus::WaitTimedOut) {
+            // Nothing was drawn. Ask again; the GPU may still be busy.
+            GREENFLAME_LOG_WRITE(L"overlay", std::wstring(L"Frame wait timed out after ") +
+                                                 std::to_wstring(kFrameWaitTimeoutMs) +
+                                                 L" ms; frame skipped");
+            Request_repaint();
+        }
         return 0;
     }
 

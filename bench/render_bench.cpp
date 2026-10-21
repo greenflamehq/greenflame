@@ -3,7 +3,9 @@
 // "Overlay performance".
 //
 // B1 (default): offscreen render bench. CPU, GPU and frame time per frame on a
-//     chosen monitor layout and adapter. No window, no present.
+//     chosen monitor layout and adapter. No window, no present. With
+//     --split-monitors each frame goes into one offscreen target per monitor, as the
+//     per-monitor overlay draws it.
 // B2 (--probe-present): present floor. Real topmost windows on the real
 //     monitors, same swap chain as the app, frame interval per loop: span,
 //     per-monitor-shared (one device) and per-monitor (one device per GPU).
@@ -12,7 +14,8 @@
 // - no toolbar buttons or glyphs, so frames with a selection are slightly cheaper
 //   than in the app;
 // - no Alt-free snapping of the crosshair cursor (CPU only, not paint);
-// - no committed annotations, selection wheel, text drafts or obfuscate previews.
+// - no selection wheel or text drafts; committed annotations only with --annotated,
+//   and obfuscate only as the obfuscate scenario's draft.
 
 #include "greenflame/win/d2d_overlay_resources.h"
 #include "greenflame/win/d2d_paint.h"
@@ -67,6 +70,15 @@ constexpr double kMsPerSecond = 1000.0;
 constexpr double kMegapixel = 1e6;
 constexpr int kBytesPerPixel = 4;
 constexpr float kExtraPassOpacity = 0.5f;
+// Frame-latency wait bound passed to Paint_d2d_frame. Offscreen targets have no
+// waitable; the probe's swap chains wait about one vsync.
+constexpr DWORD kFrameWaitTimeoutMs = 1000;
+// obfuscate: the draft's size; it slides across the desktop's middle row.
+constexpr int32_t kObfuscateDraftWidthPx = 512;
+constexpr int32_t kObfuscateDraftHeightPx = 256;
+constexpr int32_t kObfuscateBlockPx = 16;
+constexpr uint8_t kObfuscateDarkGrey = 64;
+constexpr uint8_t kObfuscateLightGrey = 192;
 constexpr size_t kMaxIntDigits = 9;
 constexpr int kDecimalBase = 10;
 
@@ -206,6 +218,9 @@ struct Args final {
     bool arrow = false;                // --arrow
     bool flat = false;                 // --flat
     bool line_dynamic = false;         // --line-dynamic
+    bool reverse = false;              // --reverse: freehand runs right to left
+    bool split_monitors = false;       // --split-monitors: one target per monitor
+    bool mask_monitors = false;        // --mask-monitors: diff only monitor pixels
 };
 
 void Print_usage() {
@@ -214,7 +229,8 @@ void Print_usage() {
         "  --layout jocelyn-desk|4k-desk|single-1080|current   (default jocelyn-desk)\n"
         "  --adapter default|N|warp     D3D adapter (default: what the app uses)\n"
         "  --list-adapters              print DXGI adapters and exit\n"
-        "  --scenario hover|select|brush|highlighter|line|steady|all   (default all)\n"
+        "  --scenario hover|select|brush|highlighter|line|obfuscate|steady|all   "
+        "(default all)\n"
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
@@ -224,6 +240,9 @@ void Print_usage() {
         "first and newest point\n"
         "  --diagonal                   freehand: points run from the selection's "
         "top-left to its bottom-right instead of a wave\n"
+        "  --reverse                    freehand: the stroke runs right to left\n"
+        "  --split-monitors             draw each frame into one offscreen target per "
+        "monitor (the per-monitor overlay); dumps are stitched to the desktop\n"
         "  --dab N [--dab-no-draft]     freehand: first draw and commit an N-point "
         "stroke at the same start, N at most --points-per-frame (--dab-no-draft: "
         "commit it without drawing)\n"
@@ -243,8 +262,9 @@ void Print_usage() {
         "  --csv FILE                   per-frame rows\n"
         "  --dump-frame K FILE.bmp      write frame K (run 1) as BMP; with 'all', from "
         "select; K = --frames: the freehand release frame\n"
-        "  --diff A.bmp B.bmp [--tolerance T] [--max-pixels N]   compare two dumps; "
-        "fails when more than N pixels (default 0) differ by more than T\n"
+        "  --diff A.bmp B.bmp [--tolerance T] [--max-pixels N] [--mask-monitors]   "
+        "compare two dumps; fails when more than N pixels (default 0) differ by more "
+        "than T; --mask-monitors compares only pixels on --layout's monitors\n"
         "  --probe-present [--passes N] [--frames N]   present floor on real "
         "monitors\n"
         "  --shared-adapter default|N   the one device of the probe's "
@@ -403,6 +423,12 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.arrow = true;
         } else if (key == "--flat") {
             args.flat = true;
+        } else if (key == "--reverse") {
+            args.reverse = true;
+        } else if (key == "--split-monitors") {
+            args.split_monitors = true;
+        } else if (key == "--mask-monitors") {
+            args.mask_monitors = true;
         } else if (key == "--line-dynamic") {
             args.line_dynamic = true;
         } else if (key == "--lifted") {
@@ -622,18 +648,32 @@ bool Write_file(std::string const &path, std::span<const uint8_t> bytes) {
 }
 
 std::optional<std::vector<uint8_t>> Read_file(std::string const &path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
     if (!in) {
         return std::nullopt;
     }
-    return std::vector<uint8_t>(std::istreambuf_iterator<char>(in),
-                                std::istreambuf_iterator<char>());
+    // One read: a desktop-sized dump is tens of MB, too slow byte by byte in debug.
+    std::streamoff const size = in.tellg();
+    if (size < 0) {
+        return std::nullopt;
+    }
+    std::vector<uint8_t> bytes(static_cast<size_t>(size));
+    in.seekg(0);
+    in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(size));
+    if (!in) {
+        return std::nullopt;
+    }
+    return bytes;
 }
 
-// Copies the current target to a CPU-readable bitmap and writes it as a bottom-up
-// BMP (Build_bmp_bytes expects BMP row order, tightly packed).
-bool Dump_target(D2DOverlayResources &res, int width, int height,
-                 std::string const &path) {
+// Copies one target into packed, a desktop-sized bottom-up BGRA buffer (BMP row
+// order, tightly packed), at the target's rect.
+bool Read_target_into(D2DOverlayResources &res, D2DSurfaceTarget const &target,
+                      int width, int height, std::span<uint8_t> packed) {
+    core::RectPx const rect = target.rect_client;
+    if (rect.left < 0 || rect.top < 0 || rect.right > width || rect.bottom > height) {
+        return false;
+    }
     D2D1_BITMAP_PROPERTIES1 bp{};
     bp.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
     bp.pixelFormat.alphaMode = D2D1_ALPHA_MODE_IGNORE;
@@ -641,36 +681,64 @@ bool Dump_target(D2DOverlayResources &res, int width, int height,
     bp.dpiY = res.Target_dpi();
     bp.bitmapOptions = D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW;
     ComPtr<ID2D1Bitmap1> readback;
-    D2D1_SIZE_U const size =
-        D2D1::SizeU(static_cast<UINT32>(width), static_cast<UINT32>(height));
+    D2D1_SIZE_U const size = D2D1::SizeU(static_cast<UINT32>(rect.Width()),
+                                         static_cast<UINT32>(rect.Height()));
     if (FAILED(
             res.hwnd_rt->CreateBitmap(size, nullptr, 0, bp, readback.GetAddressOf())) ||
-        FAILED(
-            readback->CopyFromBitmap(nullptr, res.back_buffer_bitmap.Get(), nullptr))) {
+        FAILED(readback->CopyFromBitmap(nullptr, target.bitmap.Get(), nullptr))) {
         return false;
     }
     D2D1_MAPPED_RECT mapped{};
     if (FAILED(readback->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
         return false;
     }
-    size_t const row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+    size_t const desktop_row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+    size_t const target_row_bytes = static_cast<size_t>(rect.Width()) * kBytesPerPixel;
+    size_t const target_rows = static_cast<size_t>(rect.Height());
     size_t const rows = static_cast<size_t>(height);
     CLANG_WARN_IGNORE_PUSH("-Wunsafe-buffer-usage-in-container")
-    std::span<const uint8_t> const source(mapped.bits,
-                                          static_cast<size_t>(mapped.pitch) * rows);
+    std::span<const uint8_t> const source(
+        mapped.bits, static_cast<size_t>(mapped.pitch) * target_rows);
     CLANG_WARN_IGNORE_POP()
-    std::vector<uint8_t> packed(row_bytes * rows);
-    for (size_t y = 0; y < rows; ++y) {
+    for (size_t y = 0; y < target_rows; ++y) {
+        size_t const desktop_y = static_cast<size_t>(rect.top) + y;
         auto const from = source.begin() + static_cast<std::ptrdiff_t>(
                                                y * static_cast<size_t>(mapped.pitch));
-        auto const to =
-            packed.begin() + static_cast<std::ptrdiff_t>((rows - 1 - y) * row_bytes);
-        std::copy_n(from, row_bytes, to);
+        auto const to = packed.begin() +
+                        static_cast<std::ptrdiff_t>(
+                            (rows - 1 - desktop_y) * desktop_row_bytes +
+                            static_cast<size_t>(rect.left) * kBytesPerPixel);
+        std::copy_n(from, target_row_bytes, to);
     }
     (void)readback->Unmap();
+    return true;
+}
+
+// Writes every target, stitched at its rect into one desktop-sized image, as a
+// bottom-up BMP. Pixels no target covers stay black.
+bool Dump_target(D2DOverlayResources &res, int width, int height,
+                 std::string const &path) {
+    size_t const row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+    std::vector<uint8_t> packed(row_bytes * static_cast<size_t>(height));
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, packed)) {
+            return false;
+        }
+    }
     std::vector<uint8_t> const bmp =
         core::Build_bmp_bytes(packed, width, height, static_cast<int>(row_bytes));
     return !bmp.empty() && Write_file(path, bmp);
+}
+
+// --layout's monitors in client pixels (the desktop's top-left is 0, 0).
+std::vector<core::RectPx> Monitors_client(Layout const &layout) {
+    core::RectPx const vd = Union_of(layout.monitors_screen);
+    std::vector<core::RectPx> monitors_client;
+    for (core::RectPx const &m : layout.monitors_screen) {
+        monitors_client.push_back(core::RectPx::From_ltrb(
+            m.left - vd.left, m.top - vd.top, m.right - vd.left, m.bottom - vd.top));
+    }
+    return monitors_client;
 }
 
 int Run_diff(Args const &args) {
@@ -680,8 +748,17 @@ int Run_diff(Args const &args) {
         Print("diff: cannot read {} or {}\n", args.diff_a, args.diff_b);
         return static_cast<int>(BenchExit::FileError);
     }
+    std::vector<core::RectPx> mask;
+    if (args.mask_monitors) {
+        std::optional<Layout> const layout = Find_layout(args.layout);
+        if (!layout) {
+            Print("unknown layout: {}\n", args.layout);
+            return static_cast<int>(BenchExit::BadArgs);
+        }
+        mask = Monitors_client(*layout);
+    }
     std::optional<core::BmpDiff> const diff =
-        core::Diff_bmp_bytes(*a, *b, args.tolerance);
+        core::Diff_bmp_bytes(*a, *b, args.tolerance, mask);
     if (!diff) {
         Print("diff: not comparable (not 32bpp BMPs, or sizes differ)\n");
         return static_cast<int>(BenchExit::FileError);
@@ -698,8 +775,8 @@ int Run_diff(Args const &args) {
 // B1: scenarios
 // ---------------------------------------------------------------------------
 
-constexpr std::array<std::string_view, 6> kAllScenarios = {
-    {"hover", "select", "brush", "highlighter", "line", "steady"}};
+constexpr std::array<std::string_view, 7> kAllScenarios = {
+    {"hover", "select", "brush", "highlighter", "line", "obfuscate", "steady"}};
 
 constexpr double kCyclesPerMegacycle = 1'000'000.0;
 
@@ -719,7 +796,36 @@ struct ScenarioState final {
     std::vector<core::PointPx> points = {};
     std::vector<core::PointPx> straightened = {}; // --straighten-at: first and newest
     core::Annotation line = {};                   // line: the draft annotation
+    core::Annotation obfuscate = {};              // obfuscate: the draft annotation
 };
+
+// obfuscate: a block pattern of kObfuscateDraftWidthPx x kObfuscateDraftHeightPx, as
+// the tool's raster, at bounds.
+core::ObfuscateAnnotation Make_obfuscate_draft(core::RectPx bounds) {
+    core::ObfuscateAnnotation draft{};
+    draft.bounds = bounds;
+    draft.block_size = kObfuscateBlockPx;
+    draft.bitmap_width_px = bounds.Width();
+    draft.bitmap_height_px = bounds.Height();
+    draft.bitmap_row_bytes = bounds.Width() * kBytesPerPixel;
+    draft.premultiplied_bgra.resize(static_cast<size_t>(draft.bitmap_row_bytes) *
+                                    static_cast<size_t>(draft.bitmap_height_px));
+    std::span<uint8_t> const pixels(draft.premultiplied_bgra);
+    for (int32_t y = 0; y < draft.bitmap_height_px; ++y) {
+        for (int32_t x = 0; x < draft.bitmap_width_px; ++x) {
+            bool const dark = ((x / kObfuscateBlockPx) + (y / kObfuscateBlockPx)) % 2 == 0;
+            uint8_t const grey = dark ? kObfuscateDarkGrey : kObfuscateLightGrey;
+            size_t const at = static_cast<size_t>(y) *
+                                  static_cast<size_t>(draft.bitmap_row_bytes) +
+                              static_cast<size_t>(x) * kBytesPerPixel;
+            pixels[at] = grey;
+            pixels[at + 1] = grey;
+            pixels[at + 2] = grey;
+            pixels[at + 3] = 255;
+        }
+    }
+    return draft;
+}
 
 // Point t of count on the diagonal from the inset top-left to the inset bottom-right.
 core::PointPx Diagonal_point(core::RectPx sel, int64_t t, int64_t count) {
@@ -777,6 +883,24 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         state.line = core::Annotation{.id = 1, .data = line};
         input.draft_annotation = &state.line;
         input.cursor_client_px = line.end;
+    } else if (scenario == "obfuscate" && frame >= 0) {
+        // An obfuscate draft sliding left to right across the desktop's middle row,
+        // over every monitor boundary. Its raster stays the same; only bounds move.
+        int32_t const travel = width - 2 * kSweepMarginPx - kObfuscateDraftWidthPx;
+        int32_t const left =
+            kSweepMarginPx +
+            static_cast<int32_t>(static_cast<int64_t>(std::max(travel, 0)) * i / last);
+        int32_t const top = (height - kObfuscateDraftHeightPx) / 2;
+        core::RectPx const bounds = core::RectPx::From_ltrb(
+            left, top, left + kObfuscateDraftWidthPx, top + kObfuscateDraftHeightPx);
+        auto *const draft = std::get_if<core::ObfuscateAnnotation>(&state.obfuscate.data);
+        if (draft == nullptr) {
+            state.obfuscate = core::Annotation{.id = 1, .data = Make_obfuscate_draft(bounds)};
+        } else {
+            draft->bounds = bounds;
+        }
+        input.draft_annotation = &state.obfuscate;
+        input.cursor_client_px = bounds.Bottom_right();
     } else if (Is_freehand(scenario) && frame >= 0) {
         // --points-per-frame new input points per frame (default 1). The path wave
         // advances per point, so more points per frame draw a longer stroke that
@@ -795,11 +919,15 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
                 std::sin(static_cast<double>(p) * kFreehandWavePerFrame) *
                     static_cast<double>(sel.Height() / kFreehandAmplitudeDivisor) +
                 row * kFreehandRowStepPx;
-            state.points.push_back(
+            core::PointPx point =
                 args.diagonal
                     ? Diagonal_point(
                           sel, p, static_cast<int64_t>(frames) * args.points_per_frame)
-                    : core::PointPx{static_cast<int32_t>(x), static_cast<int32_t>(y)});
+                    : core::PointPx{static_cast<int32_t>(x), static_cast<int32_t>(y)};
+            if (args.reverse) {
+                point.x = sel.left + sel.right - point.x;
+            }
+            state.points.push_back(point);
         }
         input.draft_freehand_points = state.points;
         // --straighten-at: the highlighter tool keeps the first point and moves the
@@ -846,7 +974,8 @@ std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
 
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
-    if (scenario == "steady" || scenario == "line" || Is_freehand(scenario)) {
+    if (scenario == "steady" || scenario == "line" || scenario == "obfuscate" ||
+        Is_freehand(scenario)) {
         input.final_selection = args.annotated
                                     ? Inset_selection(width, height)
                                     : core::RectPx::From_ltrb(0, 0, width, height);
@@ -979,7 +1108,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             dab_input.draft_freehand_points = dab_state.points;
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
-            ok = Paint_d2d_frame(*ctx.res, dab_input, ctx.width, ctx.height, nullptr);
+            ok = Paint_d2d_frame(*ctx.res, dab_input, ctx.width, ctx.height, nullptr,
+                                 kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
         }
         annotations.push_back(
             Committed_stroke(dab_state.points, input, args, /*straightened=*/false,
@@ -988,7 +1118,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         Rebuild_annotations_bitmap(*ctx.res, annotations);
         Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
         if (ok && !args.dab_no_draft) {
-            ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+            ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr,
+                                 kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
         }
         if (!ok) {
             Print("paint failed (device lost?)\n");
@@ -1021,8 +1152,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             // A stale frozen frame sends a line draft down the dynamic path.
             ctx.res->frozen_valid = false;
         }
-        bool const ok =
-            Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+        bool const ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height,
+                                        nullptr, kFrameWaitTimeoutMs) ==
+                        D2DFrameStatus::Ok;
         LARGE_INTEGER const t1 = Now();
         ULONG64 cycles1 = 0;
         (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
@@ -1095,8 +1227,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         LARGE_INTEGER const t0 = Now();
         Rebuild_annotations_bitmap(*ctx.res, committed);
         Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
-        bool const ok =
-            Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+        bool const ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height,
+                                        nullptr, kFrameWaitTimeoutMs) ==
+                        D2DFrameStatus::Ok;
         LARGE_INTEGER const t1 = Now();
         ULONG64 cycles1 = 0;
         (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
@@ -1125,7 +1258,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
             bool const rebuilt =
-                Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr);
+                Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr,
+                                kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
             input.annotations = annotations;
             std::string const rebuild_path = args.dump_path + ".rebuild.bmp";
             if (!rebuilt ||
@@ -1272,16 +1406,20 @@ int Run_render_bench(Args const &args) {
     }
 
     core::RectPx const vd = Union_of(layout->monitors_screen);
-    std::vector<core::RectPx> monitors_client;
-    for (core::RectPx const &m : layout->monitors_screen) {
-        monitors_client.push_back(core::RectPx::From_ltrb(
-            m.left - vd.left, m.top - vd.top, m.right - vd.left, m.bottom - vd.top));
-    }
+    std::vector<core::RectPx> const monitors_client = Monitors_client(*layout);
 
     D2DOverlayResources res;
     GpuQueries queries;
-    if (!Create_bench_device(res, args.adapter) ||
-        !res.Create_offscreen_target(vd.Width(), vd.Height()) ||
+    bool targets_ok = Create_bench_device(res, args.adapter);
+    if (targets_ok && args.split_monitors) {
+        for (core::RectPx const &m : monitors_client) {
+            targets_ok = targets_ok && res.Add_offscreen_target(m);
+        }
+    } else if (targets_ok) {
+        targets_ok = res.Add_offscreen_target(
+            core::RectPx::From_ltrb(0, 0, vd.Width(), vd.Height()));
+    }
+    if (!targets_ok ||
         !Prepare_resources(res, vd.Width(), vd.Height()) ||
         ((args.lifted || args.lifted_as_screenshot) &&
          !Prepare_lifted(res, vd.Width(), vd.Height(), args)) ||
@@ -1308,6 +1446,7 @@ int Run_render_bench(Args const &args) {
 #else
     Print("build: release\n");
 #endif
+    Print("targets: {}\n", args.split_monitors ? "one per monitor" : "one (desktop)");
     RunContext ctx{
         &res,          &queries,   &*layout,    &monitors_client,
         &adapter_name, vd.Width(), vd.Height(), csv.is_open() ? &csv : nullptr};
@@ -1448,8 +1587,9 @@ bool Setup_probe_surface(ProbeSurface &surface, IDXGIAdapter *adapter, int passe
         input.monitor_rects_client = s.monitors_client;
         input.final_selection = core::RectPx::From_ltrb(0, 0, s.screen_rect.Width(),
                                                         s.screen_rect.Height());
-        if (!Paint_d2d_frame(*s.res, input, s.screen_rect.Width(),
-                             s.screen_rect.Height(), s.extra.get())) {
+        if (Paint_d2d_frame(*s.res, input, s.screen_rect.Width(),
+                            s.screen_rect.Height(), s.extra.get(),
+                            kFrameWaitTimeoutMs) != D2DFrameStatus::Ok) {
             return false;
         }
     }
@@ -1525,29 +1665,19 @@ bool Report_probe(std::string_view label, std::vector<ProbeSurface> &surfaces,
 }
 
 // One window and swap chain per monitor, all on one device (--shared-adapter)
-// with one set of desktop-sized caches: each loop paints the same scene into every
-// swap chain, translated to that monitor. This is the layout the per-monitor app
-// ships (gf-ojs.6, option 3a). Until D2DOverlayResources holds several targets, the
-// probe swaps each window's swap chain, back buffer and waitable into it per paint.
-struct SharedWindow final {
-    HWND hwnd = nullptr;
-    core::RectPx rect_client = {};
-    ComPtr<IDXGISwapChain2> swap_chain = {};
-    ComPtr<ID2D1Bitmap1> back_buffer_bitmap = {};
-    HANDLE waitable = nullptr;
-};
-
+// with one set of desktop-sized caches: each loop is one Paint_d2d_frame over every
+// window's target, the per-monitor overlay's own path (gf-ojs.6, option 3a).
 struct SharedProbe final {
     SharedProbe() = default;
     ~SharedProbe() = default;
     SharedProbe(SharedProbe const &) = delete;
     SharedProbe &operator=(SharedProbe const &) = delete;
-    SharedProbe(SharedProbe &&) noexcept = default;
-    SharedProbe &operator=(SharedProbe &&) noexcept = default;
+    SharedProbe(SharedProbe &&) = delete;
+    SharedProbe &operator=(SharedProbe &&) = delete;
 
     core::RectPx vd = {};
     std::vector<core::RectPx> monitors_client = {};
-    std::vector<SharedWindow> windows = {};
+    std::vector<HWND> windows = {};
     std::unique_ptr<D2DOverlayResources> res = std::make_unique<D2DOverlayResources>();
     std::unique_ptr<ExtraPassesLayer> extra = {};
 };
@@ -1559,21 +1689,18 @@ bool Setup_shared_probe(SharedProbe &probe, std::span<const core::RectPx> monito
         return false;
     }
     for (core::RectPx const &m : monitors) {
-        SharedWindow window{};
-        window.rect_client = core::RectPx::From_ltrb(
-            m.left - probe.vd.left, m.top - probe.vd.top, m.right - probe.vd.left,
-            m.bottom - probe.vd.top);
-        window.hwnd = Create_probe_window(m);
-        // The window joins the list first so teardown destroys it on any failure.
-        probe.windows.push_back(window);
-        if (window.hwnd == nullptr ||
-            !res.Create_swap_chain(window.hwnd, m.Width(), m.Height())) {
+        HWND const hwnd = Create_probe_window(m);
+        if (hwnd == nullptr) {
             return false;
         }
-        SharedWindow &added = probe.windows.back();
-        added.swap_chain = std::exchange(res.swap_chain, nullptr);
-        added.back_buffer_bitmap = std::exchange(res.back_buffer_bitmap, nullptr);
-        added.waitable = std::exchange(res.frame_latency_waitable, nullptr);
+        // Listed first, so teardown destroys it on any failure below.
+        probe.windows.push_back(hwnd);
+        core::RectPx const rect_client = core::RectPx::From_ltrb(
+            m.left - probe.vd.left, m.top - probe.vd.top, m.right - probe.vd.left,
+            m.bottom - probe.vd.top);
+        if (!res.Add_swap_chain_target(hwnd, rect_client)) {
+            return false;
+        }
     }
     // The caches come from the device context, which now targets a back buffer.
     if (!Prepare_resources(res, probe.vd.Width(), probe.vd.Height())) {
@@ -1587,52 +1714,20 @@ bool Setup_shared_probe(SharedProbe &probe, std::span<const core::RectPx> monito
 }
 
 [[nodiscard]] bool Paint_shared_probe(SharedProbe &probe) {
-    D2DOverlayResources &res = *probe.res;
     D2DPaintInput input{};
     input.monitor_rects_client = probe.monitors_client;
     input.final_selection =
         core::RectPx::From_ltrb(0, 0, probe.vd.Width(), probe.vd.Height());
-    bool ok = true;
-    for (SharedWindow const &window : probe.windows) {
-        res.swap_chain = window.swap_chain;
-        res.back_buffer_bitmap = window.back_buffer_bitmap;
-        res.frame_latency_waitable = window.waitable;
-        res.hwnd_rt->SetTarget(window.back_buffer_bitmap.Get());
-        res.hwnd_rt->SetTransform(
-            D2D1::Matrix3x2F::Translation(static_cast<float>(-window.rect_client.left),
-                                          static_cast<float>(-window.rect_client.top)));
-        ok = Paint_d2d_frame(res, input, probe.vd.Width(), probe.vd.Height(),
-                             probe.extra.get());
-        res.hwnd_rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        if (!ok) {
-            break;
-        }
-    }
-    // The windows own these; Release_all must not close or release them.
-    res.swap_chain.Reset();
-    res.back_buffer_bitmap.Reset();
-    res.frame_latency_waitable = nullptr;
-    return ok;
+    return Paint_d2d_frame(*probe.res, input, probe.vd.Width(), probe.vd.Height(),
+                           probe.extra.get(),
+                           kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
 }
 
 void Destroy_shared_probe(SharedProbe &probe) {
-    if (probe.res->hwnd_rt) {
-        probe.res->hwnd_rt->SetTarget(nullptr);
-    }
     // Swap chains and waitables go before their windows.
-    for (SharedWindow &window : probe.windows) {
-        window.back_buffer_bitmap.Reset();
-        window.swap_chain.Reset();
-        if (window.waitable != nullptr) {
-            CloseHandle(window.waitable);
-            window.waitable = nullptr;
-        }
-    }
     probe.res->Release_all();
-    for (SharedWindow const &window : probe.windows) {
-        if (window.hwnd != nullptr) {
-            (void)DestroyWindow(window.hwnd);
-        }
+    for (HWND const hwnd : probe.windows) {
+        (void)DestroyWindow(hwnd);
     }
     probe.windows.clear();
 }
@@ -1683,10 +1778,10 @@ int Run_probe(Args const &args) {
                  Probe_loop([&shared] { return Paint_shared_probe(shared); },
                             args.frames));
         if (ok) {
-            for (SharedWindow const &window : shared.windows) {
-                Print("    ({},{}) {}x{}\n", window.rect_client.left + vd.left,
-                      window.rect_client.top + vd.top, window.rect_client.Width(),
-                      window.rect_client.Height());
+            for (D2DSurfaceTarget const &target : shared.res->targets) {
+                Print("    ({},{}) {}x{}\n", target.rect_client.left + vd.left,
+                      target.rect_client.top + vd.top, target.rect_client.Width(),
+                      target.rect_client.Height());
             }
             Print("    all on {}\n", Narrow(Adapter_name(shared.res->d3d_device.Get())));
         }

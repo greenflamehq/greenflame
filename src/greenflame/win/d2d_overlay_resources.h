@@ -21,6 +21,21 @@ struct LiftedWindowView final {
     bool operator==(LiftedWindowView const &) const noexcept = default;
 };
 
+// One surface a frame is drawn into: a window's flip-model swap chain, or an offscreen
+// bitmap (render benchmark). It shows the client pixels inside rect_client, so the
+// frame draws into it translated by minus rect_client's top-left.
+struct D2DSurfaceTarget final {
+    core::RectPx rect_client = {};
+    // Null for an offscreen target.
+    Microsoft::WRL::ComPtr<IDXGISwapChain2> swap_chain;
+    // The swap chain's back buffer (made once: FLIP_DISCARD with BufferCount 2 keeps
+    // the same surface object across Present calls), or the offscreen bitmap.
+    Microsoft::WRL::ComPtr<ID2D1Bitmap1> bitmap;
+    // Frame-latency waitable (swap chain only). Waited on before drawing so frames
+    // are never built faster than DWM consumes them.
+    HANDLE frame_latency_waitable = nullptr;
+};
+
 // Holds all Direct2D and DirectWrite resources for the overlay render pipeline.
 // Lifetime: created once per overlay session; released when the overlay closes.
 //
@@ -43,21 +58,15 @@ struct D2DOverlayResources final {
     // waitable handle before producing a frame, instead of stalling inside
     // Present.
     Microsoft::WRL::ComPtr<ID3D11Device> d3d_device;
-    Microsoft::WRL::ComPtr<IDXGISwapChain2> swap_chain;
     Microsoft::WRL::ComPtr<ID2D1Device> d2d_device;
     // The "hwnd_rt" name is kept for blast-radius reasons: every Draw_*
     // helper and offscreen-rt creator already takes an ID2D1RenderTarget*.
     // ID2D1DeviceContext IS-A ID2D1RenderTarget so existing callsites keep
     // working unchanged.
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> hwnd_rt;
-    // The render target bitmap. With a swap chain (Create_hwnd_rt) it wraps
-    // swap_chain->GetBuffer(0), made once at swap-chain creation; FLIP_DISCARD with
-    // BufferCount==2 keeps the same surface object across Present() calls. With
-    // Create_offscreen_target (render benchmark) it is a plain offscreen bitmap.
-    Microsoft::WRL::ComPtr<ID2D1Bitmap1> back_buffer_bitmap;
-    // Frame-latency waitable. Wait on this BEFORE BeginDraw so the paint
-    // pipeline never builds frames faster than DWM consumes them.
-    HANDLE frame_latency_waitable = nullptr;
+    // The surfaces each frame is drawn into, all on this device. The caches below are
+    // desktop-sized and shared by every target.
+    std::vector<D2DSurfaceTarget> targets;
     float target_dpi = kDefaultTargetDpi;
     // ArithmeticComposite effect (k2=k3=k4=0) for multiply-blend highlighting: input 0
     // is the base, input 1 the highlighter mask, k1 the opacity (1 when the mask
@@ -178,20 +187,22 @@ struct D2DOverlayResources final {
     [[nodiscard]] bool Create_device(IDXGIAdapter *adapter,
                                      D3D_DRIVER_TYPE driver_type);
 
-    // Create (or recreate) the device and a swap chain on hwnd. A null adapter means
-    // the default hardware adapter (the app always passes null). Call after
-    // Initialize_factory.
+    // Create (or recreate) the device and one swap-chain target on hwnd covering
+    // client pixels (0, 0)-(width, height). A null adapter means the default hardware
+    // adapter (the app always passes null). Call after Initialize_factory.
     [[nodiscard]] bool Create_hwnd_rt(HWND hwnd, int width, int height,
                                       IDXGIAdapter *adapter = nullptr);
 
-    // Create (or recreate) a swap chain on hwnd on the existing device, and make its
-    // back buffer the target. Replaces swap_chain, back_buffer_bitmap and
-    // frame_latency_waitable (closing the old waitable). Call after Create_device.
-    [[nodiscard]] bool Create_swap_chain(HWND hwnd, int width, int height);
+    // Add a target: a swap chain on hwnd, on this device, sized to rect_client. Call
+    // after Create_device.
+    [[nodiscard]] bool Add_swap_chain_target(HWND hwnd, core::RectPx rect_client);
 
-    // Target an offscreen bitmap the size of the virtual desktop instead of a swap
-    // chain (render benchmark). Call after Create_device.
-    [[nodiscard]] bool Create_offscreen_target(int width, int height);
+    // Add an offscreen target sized to rect_client (render benchmark). Call after
+    // Create_device.
+    [[nodiscard]] bool Add_offscreen_target(core::RectPx rect_client);
+
+    // Release every target (swap chains, bitmaps, waitables).
+    void Release_targets() noexcept;
 
     // Upload the GDI capture as a D2D bitmap.
     [[nodiscard]] bool Upload_screenshot(GdiCaptureResult const &cap);

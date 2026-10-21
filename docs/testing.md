@@ -196,17 +196,18 @@ build\x64-release-pdb\bin\greenflame_render_bench.exe --layout jocelyn-desk --sc
 ### Render bench (offscreen)
 
 No window and no present: each frame paints into an offscreen bitmap the size of the
-virtual desktop.
+virtual desktop, or with `--split-monitors` into one offscreen bitmap per monitor.
 
 - `--layout`: `jocelyn-desk` (1920x1200 laptop left of two 2560x1440 panels, 7040x1440),
   `4k-desk` (same with 3840x2160 panels, 9600x2160), `single-1080`, or `current`
   (the real monitors).
 - `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
   prints the indexes.
-- `--scenario hover|select|brush|highlighter|line|steady|all`: crosshair sweep, live
-  selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
+- `--scenario hover|select|brush|highlighter|line|obfuscate|steady|all`: crosshair
+  sweep, live selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
   `--points-per-frame`), a line tool drag from the selection's top-left to its
-  bottom-right, idle selection, or all of them.
+  bottom-right, an obfuscate draft sliding across the desktop's middle row, idle
+  selection, or all of them.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.
@@ -221,6 +222,14 @@ virtual desktop.
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
 - `--diagonal` (freehand): the points run from the selection's top-left to its
   bottom-right instead of a wave. With `--straighten-at`, the bar is a long diagonal.
+- `--reverse` (freehand): the stroke runs right to left.
+- `--split-monitors`: each frame goes through `Paint_d2d_frame`'s target loop into
+  one offscreen target per monitor of the layout, as the per-monitor overlay draws
+  it. `--dump-frame` stitches the targets into one desktop-sized image (pixels no
+  monitor covers stay black). On `jocelyn-desk` the stitched frames must match the
+  one-target frames on every monitor pixel at tolerance 0: `ctest` runs this on WARP
+  for hover, select, brush and highlighter in both directions, a straightened
+  highlighter, an arrow, obfuscate, `--annotated --lifted` and steady.
 - `--arrow` (line): the line has an arrow head. `--flat` (line): it runs left to
   right along the selection's middle row. `--line-dynamic` (line): the frozen
   frame reads stale every frame, so the draft takes the dynamic path instead of
@@ -277,8 +286,9 @@ It reports the frame interval p50/p95 and fps of steady frames for two arrangeme
 - `span`: one window over the whole desktop, through the app's `Create_hwnd_rt`;
 - `per-monitor-shared`: one window and swap chain per monitor, all on one adapter
   (`--shared-adapter default|N`, default what the app uses; indexes from
-  `--list-adapters`) with one set of desktop-sized caches; each window draws the same
-  scene translated to its monitor (the planned per-monitor overlay);
+  `--list-adapters`), one `Paint_d2d_frame` over all of them per frame: one wait on
+  every waitable, then each window draws the same scene translated to its monitor
+  (the per-monitor overlay's own path);
 - `per-monitor`: one window and swap chain per monitor, each on the adapter that drives
   that monitor.
 
@@ -295,7 +305,7 @@ It reports the frame interval p50/p95 and fps of steady frames for two arrangeme
    `--dump-frame 150 new.bmp` in the other, then
    `--diff base.bmp new.bmp [--tolerance T] [--max-pixels N]`. It exits non-zero
    when more than N pixels (default 0) have a channel that differs by more than T
-   (default 0).
+   (default 0). `--mask-monitors` compares only pixels on `--layout`'s monitors.
 4. Run the present probe once per session.
 
 Interactive coverage is `GF-MAN-PERF-001` in [manual_test_plan.md](manual_test_plan.md).

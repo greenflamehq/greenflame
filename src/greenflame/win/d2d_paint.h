@@ -114,11 +114,24 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
 void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
                            int vd_width, int vd_height);
 
-// Draw one complete frame. Returns false on D2DERR_RECREATE_TARGET (device lost).
-// If top_layer is non-null and visible, it is drawn on top of everything else within
-// the same BeginDraw/EndDraw pair.
-[[nodiscard]] bool Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &input,
-                                   int vd_width, int vd_height,
-                                   IOverlayTopLayer *top_layer = nullptr);
+enum class D2DFrameStatus : uint8_t {
+    Ok,
+    // EndDraw reported D2DERR_RECREATE_TARGET, or Present reported the device removed
+    // or reset. Later targets of the frame were not drawn.
+    DeviceLost,
+    // The frame-latency wait timed out; nothing was drawn or presented.
+    WaitTimedOut,
+};
+
+// Draws one complete frame into every target of res. The work shared by all targets
+// (freehand draft, live_base, cache rebuilds) runs once; then, after one wait of at
+// most wait_timeout_ms on every target's frame-latency waitable, each target gets the
+// frame translated to its rect_client and is presented. Stops at the first failed
+// EndDraw or Present. If top_layer is non-null and visible, it is drawn on top of
+// everything else in each target.
+[[nodiscard]] D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res,
+                                             D2DPaintInput const &input, int vd_width,
+                                             int vd_height, IOverlayTopLayer *top_layer,
+                                             DWORD wait_timeout_ms);
 
 } // namespace greenflame

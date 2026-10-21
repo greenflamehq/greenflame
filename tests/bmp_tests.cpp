@@ -138,3 +138,52 @@ TEST(bmp, Diff_bmp_bytes_SizeMismatchOrGarbage_IsNullopt) {
     std::vector<uint8_t> const garbage(64, 0x42);
     EXPECT_FALSE(Diff_bmp_bytes(base, garbage, 0).has_value());
 }
+
+// Pixel (x, y) in top-down coordinates of a kDiffWidth x kDiffHeight BMP buffer.
+static size_t Pixel_offset(int x, int y) {
+    return static_cast<size_t>((kDiffHeight - 1 - y) * kDiffRowBytes + x * 4);
+}
+
+TEST(bmp, Diff_bmp_bytes_MaskSkipsPixelsOutsideIt) {
+    std::vector<uint8_t> const base = Bmp_of(Grey_pixels());
+    std::vector<uint8_t> changed = Grey_pixels();
+    changed[Pixel_offset(2, 0)] = static_cast<uint8_t>(kGrey + kChangedDelta);
+    std::vector<uint8_t> const other = Bmp_of(changed);
+
+    std::array<RectPx, 1> const left_two = {RectPx::From_ltrb(0, 0, 2, kDiffHeight)};
+    std::optional<BmpDiff> const outside = Diff_bmp_bytes(base, other, 0, left_two);
+    ASSERT_TRUE(outside.has_value());
+    if (outside.has_value()) {
+        EXPECT_EQ(outside->differing_pixels, 0u);
+    }
+
+    std::array<RectPx, 1> const top_right = {RectPx::From_ltrb(2, 0, 3, 1)};
+    std::optional<BmpDiff> const inside = Diff_bmp_bytes(base, other, 0, top_right);
+    ASSERT_TRUE(inside.has_value());
+    if (inside.has_value()) {
+        EXPECT_EQ(inside->differing_pixels, 1u);
+        EXPECT_EQ(inside->max_channel_delta, kChangedDelta);
+    }
+
+    // The bottom row of the same column does not see the top-row change.
+    std::array<RectPx, 1> const bottom_right = {RectPx::From_ltrb(2, 1, 3, 2)};
+    std::optional<BmpDiff> const below = Diff_bmp_bytes(base, other, 0, bottom_right);
+    ASSERT_TRUE(below.has_value());
+    if (below.has_value()) {
+        EXPECT_EQ(below->differing_pixels, 0u);
+    }
+}
+
+TEST(bmp, Diff_bmp_bytes_OverlappingMaskRectsCountOnce) {
+    std::vector<uint8_t> const base = Bmp_of(Grey_pixels());
+    std::vector<uint8_t> changed = Grey_pixels();
+    changed[Pixel_offset(1, 1)] = static_cast<uint8_t>(kGrey + kChangedDelta);
+    std::array<RectPx, 2> const overlapping = {RectPx::From_ltrb(0, 0, 2, kDiffHeight),
+                                               RectPx::From_ltrb(1, 0, 3, kDiffHeight)};
+    std::optional<BmpDiff> const diff =
+        Diff_bmp_bytes(base, Bmp_of(changed), 0, overlapping);
+    ASSERT_TRUE(diff.has_value());
+    if (diff.has_value()) {
+        EXPECT_EQ(diff->differing_pixels, 1u);
+    }
+}

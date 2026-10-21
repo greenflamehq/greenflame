@@ -101,7 +101,8 @@ std::optional<BmpImage> Parse_bmp_bytes(std::span<const uint8_t> bytes) {
 }
 
 std::optional<BmpDiff> Diff_bmp_bytes(std::span<const uint8_t> a,
-                                      std::span<const uint8_t> b, int tolerance) {
+                                      std::span<const uint8_t> b, int tolerance,
+                                      std::span<const RectPx> mask) {
     std::optional<BmpImage> const image_a = Parse_bmp_bytes(a);
     std::optional<BmpImage> const image_b = Parse_bmp_bytes(b);
     if (!image_a || !image_b || image_a->width != image_b->width ||
@@ -111,16 +112,58 @@ std::optional<BmpDiff> Diff_bmp_bytes(std::span<const uint8_t> a,
     BmpDiff diff;
     std::span<const uint8_t> const pa(image_a->pixels);
     std::span<const uint8_t> const pb(image_b->pixels);
-    for (size_t px = 0; px + kBytesPerPixel <= pa.size(); px += kBytesPerPixel) {
-        int pixel_max = 0;
-        for (size_t c = 0; c < kBytesPerPixel; ++c) {
-            int const delta =
-                std::abs(static_cast<int>(pa[px + c]) - static_cast<int>(pb[px + c]));
-            pixel_max = std::max(pixel_max, delta);
+    int32_t const width = image_a->width;
+    size_t const row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+    // Columns [begin, end) of one row to compare.
+    std::vector<std::pair<int32_t, int32_t>> spans;
+    for (int32_t row = 0; row < image_a->height; ++row) {
+        // BMP rows run bottom-up; the mask is top-down.
+        int32_t const y = image_a->height - 1 - row;
+        spans.clear();
+        if (mask.empty()) {
+            spans.emplace_back(0, width);
+        } else {
+            for (RectPx const &r : mask) {
+                RectPx const n = r.Normalized();
+                int32_t const begin = std::max(n.left, 0);
+                int32_t const end = std::min(n.right, width);
+                if (y >= n.top && y < n.bottom && begin < end) {
+                    spans.emplace_back(begin, end);
+                }
+            }
+            // Overlapping rects must not count a pixel twice: merge them.
+            std::sort(spans.begin(), spans.end());
+            size_t merged = 0;
+            for (size_t i = 1; i < spans.size(); ++i) {
+                if (spans[i].first <= spans[merged].second) {
+                    spans[merged].second = std::max(spans[merged].second, spans[i].second);
+                } else {
+                    spans[++merged] = spans[i];
+                }
+            }
+            spans.resize(spans.empty() ? 0 : merged + 1);
         }
-        if (pixel_max > 0) ++diff.differing_pixels;
-        if (pixel_max > tolerance) ++diff.pixels_over_tolerance;
-        diff.max_channel_delta = std::max(diff.max_channel_delta, pixel_max);
+        for (auto const &[begin, end] : spans) {
+            size_t const offset = static_cast<size_t>(row) * row_bytes +
+                                  static_cast<size_t>(begin) * kBytesPerPixel;
+            size_t const count = static_cast<size_t>(end - begin) * kBytesPerPixel;
+            std::span<const uint8_t> const ra = pa.subspan(offset, count);
+            std::span<const uint8_t> const rb = pb.subspan(offset, count);
+            if (std::equal(ra.begin(), ra.end(), rb.begin())) {
+                continue; // the common case: nothing to count
+            }
+            for (size_t px = 0; px < count; px += kBytesPerPixel) {
+                int pixel_max = 0;
+                for (size_t c = 0; c < kBytesPerPixel; ++c) {
+                    int const delta = std::abs(static_cast<int>(ra[px + c]) -
+                                               static_cast<int>(rb[px + c]));
+                    pixel_max = std::max(pixel_max, delta);
+                }
+                if (pixel_max > 0) ++diff.differing_pixels;
+                if (pixel_max > tolerance) ++diff.pixels_over_tolerance;
+                diff.max_channel_delta = std::max(diff.max_channel_delta, pixel_max);
+            }
+        }
     }
     return diff;
 }
