@@ -2865,6 +2865,30 @@ void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     Draw_selection_wheel(rt, res, input);
 }
 
+// Points per geometry when a committed highlighter is drawn as its opaque mask. One
+// geometry of a whole long stroke costs about 0.1 Mcycles per point: D2D unions every
+// overlapping segment hull. Pieces drawn with max blending cover the same pixels, as
+// the live draft's body does.
+constexpr size_t kSquareStrokeMaskPiecePoints = 4;
+
+// Draws a square-tip stroke in pieces of kSquareStrokeMaskPiecePoints points, each
+// starting on the last point of the one before. dc must be drawing with max blending.
+void Draw_square_stroke_mask_pieces(ID2D1DeviceContext *dc, D2DOverlayResources &res,
+                                    std::span<const core::PointPx> points,
+                                    core::StrokeStyle style) {
+    if (points.size() <= kSquareStrokeMaskPiecePoints) {
+        Draw_freehand_points(dc, res, points, style, core::FreehandTipShape::Square);
+        return;
+    }
+    for (size_t begin = 0; begin + 1 < points.size();
+         begin += kSquareStrokeMaskPiecePoints - 1) {
+        size_t const count =
+            std::min(kSquareStrokeMaskPiecePoints, points.size() - begin);
+        Draw_freehand_points(dc, res, points.subspan(begin, count), style,
+                             core::FreehandTipShape::Square);
+    }
+}
+
 // Draws all annotations to rt using multiply blend for square-tip freehand.
 // rt must be in BeginDraw state on entry and will remain so on return.
 // Temporarily EndDraw/BeginDraw's rt around each highlighter so draft_stroke_rt
@@ -2933,9 +2957,8 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
             // A stroke committed just now still has its live draft's body bitmap:
             // the smoother's final points, which the committed points start with.
-            // Reuse it and draw only the rest, as the opaque mask the draft uses.
-            // Drawing a long square-tip stroke from scratch costs over half a second
-            // per 10,000 points.
+            // Reuse it and draw only the rest. Drawing a long stroke from scratch,
+            // even in pieces, costs tens of milliseconds per 10,000 points.
             D2DOverlayResources::FreehandDraftState const &draft = res.freehand_draft;
             std::span<const core::PointPx> const body_points =
                 draft.smoother.Final_points().first(std::min(
@@ -2954,20 +2977,20 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                 res.draft_stroke_rt->BeginDraw();
                 res.draft_stroke_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
                 Microsoft::WRL::ComPtr<ID2D1DeviceContext> scratch_dc;
-                if (reuse_body && SUCCEEDED(res.draft_stroke_rt->QueryInterface(
-                                      IID_PPV_ARGS(&scratch_dc)))) {
+                if (SUCCEEDED(res.draft_stroke_rt->QueryInterface(
+                        IID_PPV_ARGS(&scratch_dc)))) {
                     scratch_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_MAX);
-                    Draw_full_bitmap_1to1(scratch_dc.Get(),
-                                          res.draft_stroke_body_bitmap.Get());
-                    // From the last body point, so the rest joins the body.
-                    Draw_freehand_points(
-                        scratch_dc.Get(), res,
-                        std::span<const core::PointPx>(fh.points).subspan(
-                            body_points.size() - 1),
-                        Opaque_style(fh.style), fh.freehand_tip_shape);
+                    std::span<const core::PointPx> rest = fh.points;
+                    if (reuse_body) {
+                        Draw_full_bitmap_1to1(scratch_dc.Get(),
+                                              res.draft_stroke_body_bitmap.Get());
+                        // From the last body point, so the rest joins the body.
+                        rest = rest.subspan(body_points.size() - 1);
+                    }
+                    Draw_square_stroke_mask_pieces(scratch_dc.Get(), res, rest,
+                                                   Opaque_style(fh.style));
                     scratch_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
                 } else {
-                    scratch_dc.Reset();
                     Draw_freehand_points(res.draft_stroke_rt.Get(), res, fh.points,
                                          fh.style, fh.freehand_tip_shape);
                 }

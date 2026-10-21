@@ -954,6 +954,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     // waiting or preempted, so they hold up on a loaded machine.
     ULONG64 commit_cycles = 0;
     size_t commit_points = 0;
+    std::pair<double, double> rebuild_ms = {};
+    ULONG64 rebuild_cycles = 0;
     if (Is_freehand(scenario) && !input.draft_freehand_points.empty()) {
         std::span<const core::PointPx> const raw = input.draft_freehand_points;
         bool const straightened = raw.size() == 2 && args.straighten_at >= 0;
@@ -1011,6 +1013,21 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             }
             Print("dump: rebuilt release frame written to {}\n", rebuild_path);
         }
+        // Undo, redo or an edit: the annotations rebuilt with no draft left to reuse
+        // (the release frame cleared it).
+        ULONG64 rebuild_cycles0 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &rebuild_cycles0);
+        LARGE_INTEGER const rebuild_t0 = Now();
+        Rebuild_annotations_bitmap(*ctx.res, committed);
+        LARGE_INTEGER const rebuild_t1 = Now();
+        ULONG64 rebuild_cycles1 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &rebuild_cycles1);
+        rebuild_cycles = rebuild_cycles1 - rebuild_cycles0;
+        context->End(ctx.queries->done.Get());
+        context->Flush();
+        (void)Wait_query<BOOL>(context, ctx.queries->done.Get());
+        rebuild_ms =
+            std::pair{Qpc_ms(rebuild_t0, rebuild_t1), Qpc_ms(rebuild_t0, Now())};
     }
 
     std::vector<double> cpu, gpu, frame, mpx;
@@ -1078,8 +1095,13 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
               commit_points, commit_ms->first,
               static_cast<double>(commit_cycles) / kCyclesPerMegacycle,
               commit_ms->second);
+        Print("rebuild (undo/redo): cpu {:.2f} ms ({:.1f} Mcycles), gpu done {:.2f} "
+              "ms\n",
+              rebuild_ms.first,
+              static_cast<double>(rebuild_cycles) / kCyclesPerMegacycle,
+              rebuild_ms.second);
     }
-    Print("verdict {} (frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
+    Print("verdict {}(frame p95 {:.2f} ms; budgets 33.3 / 16.7)\n",
           core::Frame_rate_verdict_label(verdict), frame_summary.p95_ms);
     return frame_summary.p95_ms;
 }

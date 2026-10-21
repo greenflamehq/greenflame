@@ -246,7 +246,10 @@ the cost by stroke length and a `release` line. Next to CPU milliseconds these p
 Cycles leave out time the thread waits or is preempted, so they hold up on a loaded
 machine where milliseconds do not. The `release` line covers committing the stroke,
 rebuilding the caches and painting the frame with no draft (`cpu` until
-`Paint_d2d_frame` returns, `frame` until the GPU has finished). The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
+`Paint_d2d_frame` returns, `frame` until the GPU has finished). The
+`rebuild (undo/redo)` line then rebuilds the annotations from scratch, with no draft
+left to reuse, as undo, redo and edits do (`cpu` and cycles for the rebuild, `gpu done`
+until the GPU has finished it). The verdict uses the `frame` p95: `PASS-60` at or under 16.7 ms, `PASS-30` at or under 33.3 ms, else `FAIL`.
 
 The bench does not see presentation, the compositor or input coalescing. A `PASS`
 here does not mean the screen keeps up; see the present probe.
