@@ -53,7 +53,8 @@ struct D2DPaintInput {
     std::optional<core::TextAnnotationBaseStyle> text_cursor_preview_style =
         std::nullopt;
     std::array<std::wstring_view, 4> selection_wheel_font_families = {};
-    float draft_freehand_blit_opacity = 1.0f;
+    // Opacity applied when the freehand draft composites (the highlighter's k1).
+    int32_t draft_freehand_blit_opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
     int32_t highlighter_wheel_current_opacity_percent = 0;
     int32_t selected_annotation_marquee_phase_px = 0;
     COLORREF highlighter_wheel_current_color = 0;

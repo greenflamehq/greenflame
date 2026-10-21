@@ -2300,11 +2300,12 @@ void Draw_freehand_draft_stroke(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                 FreehandDraftLiveParts const *live) {
     D2DOverlayResources::FreehandDraftState const &state = res.freehand_draft;
     bool const square = state.tip_shape == core::FreehandTipShape::Square;
+    float const blit_opacity = Alpha_from_opacity_percent(state.blit_opacity_percent);
     float const opacity =
-        square ? state.blit_opacity
+        square ? blit_opacity
                : static_cast<float>(state.style.opacity_percent) /
                      static_cast<float>(core::StrokeStyle::kMaxOpacityPercent) *
-                     state.blit_opacity;
+                     blit_opacity;
 
     Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
     bool const has_dc = SUCCEEDED(rt->QueryInterface(IID_PPV_ARGS(&dc)));
@@ -2425,7 +2426,7 @@ void Reset_freehand_draft(D2DOverlayResources &res, D2DPaintInput const &input) 
     state.active = true;
     state.style = *input.draft_freehand_style;
     state.tip_shape = input.draft_freehand_tip_shape;
-    state.blit_opacity = input.draft_freehand_blit_opacity;
+    state.blit_opacity_percent = input.draft_freehand_blit_opacity_percent;
     state.smoother.Reset(input.draft_freehand_smoothing_mode, state.style.width_px);
     state.first_point = input.draft_freehand_points.front();
 }
@@ -2575,7 +2576,7 @@ void Update_freehand_draft_live_base(D2DOverlayResources &res,
     bool const restart =
         !state.active || state.style != style || state.smoother.Mode() != mode ||
         state.tip_shape != tip_shape ||
-        state.blit_opacity != input.draft_freehand_blit_opacity ||
+        state.blit_opacity_percent != input.draft_freehand_blit_opacity_percent ||
         points.size() < state.raw_point_count || points.front() != state.first_point ||
         body_source.size() < state.fed_point_count;
     if (restart) {

@@ -4228,15 +4228,14 @@ LRESULT OverlayWindow::On_paint() {
             controller_.Active_annotation_tool() == core::AnnotationToolId::Highlighter
                 ? core::FreehandTipShape::Square
                 : core::FreehandTipShape::Round;
-        input.draft_freehand_blit_opacity =
+        input.draft_freehand_blit_opacity_percent =
             controller_.Active_annotation_tool() == core::AnnotationToolId::Highlighter
-                ? static_cast<float>(std::clamp(
-                      config_ != nullptr ? config_->highlighter_opacity_percent
-                                         : core::kDefaultHighlighterOpacityPercent,
-                      core::StrokeStyle::kMinOpacityPercent,
-                      core::StrokeStyle::kMaxOpacityPercent)) /
-                      100.f
-                : 1.0f;
+                ? std::clamp(config_ != nullptr
+                                 ? config_->highlighter_opacity_percent
+                                 : core::kDefaultHighlighterOpacityPercent,
+                             core::StrokeStyle::kMinOpacityPercent,
+                             core::StrokeStyle::kMaxOpacityPercent)
+                : core::StrokeStyle::kMaxOpacityPercent;
         input.selected_annotation_marquee_phase_px =
             selected_annotation_marquee_phase_px_;
         input.selected_annotation_bounds = controller_.Selected_annotation_bounds();

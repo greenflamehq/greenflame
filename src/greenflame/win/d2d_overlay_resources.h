@@ -84,7 +84,7 @@ struct D2DOverlayResources final {
         core::FreehandIncrementalSmoother smoother = {};
         core::StrokeStyle style = {};
         core::FreehandTipShape tip_shape = core::FreehandTipShape::Round;
-        float blit_opacity = 1.0f;
+        int32_t blit_opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
         core::PointPx first_point = {};
         size_t raw_point_count = 0;    // raw stroke points seen
         size_t fed_point_count = 0;    // raw points fed to the smoother

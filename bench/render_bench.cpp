@@ -720,10 +720,8 @@ void Set_scenario_base(std::string_view scenario, int width, int height,
         input.draft_freehand_smoothing_mode = args.smooth
                                                   ? core::FreehandSmoothingMode::Smooth
                                                   : core::FreehandSmoothingMode::Off;
-        input.draft_freehand_blit_opacity =
-            highlighter ? static_cast<float>(opacity_percent) /
-                              static_cast<float>(core::StrokeStyle::kMaxOpacityPercent)
-                        : 1.0f;
+        input.draft_freehand_blit_opacity_percent =
+            highlighter ? opacity_percent : core::StrokeStyle::kMaxOpacityPercent;
     }
 }
 
