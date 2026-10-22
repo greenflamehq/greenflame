@@ -355,6 +355,11 @@ void GreenflameApp::On_selection_saved_to_file(core::RectPx screen_rect,
     }
 }
 
+void GreenflameApp::On_overlay_failed(std::wstring_view reason) {
+    std::wstring const message = L"Capture cancelled: " + std::wstring(reason);
+    tray_window_.Show_balloon(TrayBalloonIcon::Warning, message.c_str());
+}
+
 void GreenflameApp::On_spell_check_languages_unsupported(std::wstring_view warning) {
     tray_window_.Show_balloon(TrayBalloonIcon::Warning, std::wstring(warning).c_str());
 }

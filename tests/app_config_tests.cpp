@@ -949,3 +949,48 @@ TEST(app_config_json, Serialize_WritesUiAndToolSizeOverridesWhenNonDefault) {
     EXPECT_EQ(parsed_value.text_size, 9);
     EXPECT_EQ(parsed_value.bubble_size, 11);
 }
+
+TEST(app_config, Defaults_UseOneOverlayWindowPerMonitor) {
+    EXPECT_TRUE(AppConfig{}.overlay_window_per_monitor);
+}
+
+TEST(app_config_json, Parse_OverlayWindowPerMonitor) {
+    std::optional<AppConfig> const off =
+        Parse_app_config_json(R"json({"ui":{"overlay_window_per_monitor":false}})json");
+    ASSERT_TRUE(off.has_value());
+    if (off.has_value()) {
+        EXPECT_FALSE(off->overlay_window_per_monitor);
+    }
+    std::optional<AppConfig> const on =
+        Parse_app_config_json(R"json({"ui":{"overlay_window_per_monitor":true}})json");
+    ASSERT_TRUE(on.has_value());
+    if (on.has_value()) {
+        EXPECT_TRUE(on->overlay_window_per_monitor);
+    }
+    std::optional<AppConfig> const missing =
+        Parse_app_config_json(R"json({"ui":{"show_balloons":true}})json");
+    ASSERT_TRUE(missing.has_value());
+    if (missing.has_value()) {
+        EXPECT_TRUE(missing->overlay_window_per_monitor);
+    }
+}
+
+TEST(app_config_json, Parse_RejectsNonBooleanOverlayWindowPerMonitor) {
+    EXPECT_FALSE(
+        Parse_app_config_json(R"json({"ui":{"overlay_window_per_monitor":"no"}})json")
+            .has_value());
+}
+
+TEST(app_config_json, Serialize_OverlayWindowPerMonitor_OnlyWhenOffAndRoundTrips) {
+    AppConfig config{};
+    EXPECT_EQ(Serialize_app_config_json(config).find("overlay_window_per_monitor"),
+              std::string::npos);
+    config.overlay_window_per_monitor = false;
+    std::string const json = Serialize_app_config_json(config);
+    EXPECT_NE(json.find(R"json("overlay_window_per_monitor")json"), std::string::npos);
+    std::optional<AppConfig> const parsed = Parse_app_config_json(json);
+    ASSERT_TRUE(parsed.has_value());
+    if (parsed.has_value()) {
+        EXPECT_FALSE(parsed->overlay_window_per_monitor);
+    }
+}

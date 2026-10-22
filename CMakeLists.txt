@@ -259,6 +259,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/window_capture_backend.h
     src/greenflame_core/monitor_rules.cpp
     src/greenflame_core/monitor_rules.h
+    src/greenflame_core/overlay_surface_layout.cpp
+    src/greenflame_core/overlay_surface_layout.h
     src/greenflame_core/pixel_ops.cpp
     src/greenflame_core/pixel_ops.h
     src/greenflame_core/bmp.cpp
@@ -550,6 +552,7 @@ target_link_libraries(greenflame PRIVATE
     shell32
     advapi32
     dwmapi
+    wtsapi32
     comdlg32
     Windowscodecs
     ole32

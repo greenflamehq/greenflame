@@ -32,9 +32,10 @@ constexpr int32_t kMaxHighlighterColorIndex =
 constexpr std::array<std::string_view, 5> kRootKeys = {
     {"$schema", "capture", "ui", "tools", "save"}};
 constexpr std::array<std::string_view, 1> kCaptureKeys = {{"include_cursor"}};
-constexpr std::array<std::string_view, 4> kUiKeys = {
+constexpr std::array<std::string_view, 5> kUiKeys = {
     {"show_balloons", "show_selection_size_side_labels",
-     "show_selection_size_center_label", "tool_size_overlay_duration_ms"}};
+     "show_selection_size_center_label", "tool_size_overlay_duration_ms",
+     "overlay_window_per_monitor"}};
 constexpr std::array<std::string_view, 12> kToolsKeys = {
     {"brush", "line", "arrow", "rect", "ellipse", "colors", "current_color", "font",
      "highlighter", "text", "bubble", "obfuscate"}};
@@ -860,6 +861,8 @@ void Apply_ui_object(Json const &object, ParseContext &ctx) {
     Apply_integer_property(object, "tool_size_overlay_duration_ms", k_path, 0,
                            std::numeric_limits<int32_t>::max(),
                            ctx.result.config.tool_size_overlay_duration_ms, ctx);
+    Apply_bool_property(object, "overlay_window_per_monitor", k_path,
+                        ctx.result.config.overlay_window_per_monitor, ctx);
 }
 
 void Apply_font_object(Json const &object, ParseContext &ctx) {
@@ -1164,7 +1167,8 @@ std::string Serialize_app_config_json(AppConfig const &config) {
     if (!config.show_balloons || !config.show_selection_size_side_labels ||
         !config.show_selection_size_center_label ||
         config.tool_size_overlay_duration_ms !=
-            defaults.tool_size_overlay_duration_ms) {
+            defaults.tool_size_overlay_duration_ms ||
+        config.overlay_window_per_monitor != defaults.overlay_window_per_monitor) {
         root["ui"] = easyjson::object();
         if (!config.show_balloons) {
             root["ui"]["show_balloons"] = false;
@@ -1179,6 +1183,10 @@ std::string Serialize_app_config_json(AppConfig const &config) {
             defaults.tool_size_overlay_duration_ms) {
             root["ui"]["tool_size_overlay_duration_ms"] =
                 config.tool_size_overlay_duration_ms;
+        }
+        if (config.overlay_window_per_monitor != defaults.overlay_window_per_monitor) {
+            root["ui"]["overlay_window_per_monitor"] =
+                config.overlay_window_per_monitor;
         }
     }
 

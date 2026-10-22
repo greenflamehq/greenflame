@@ -111,6 +111,24 @@ Each brush stroke writes one `freehand` line: `raw_points`, `history_points` (po
 recovered from the mouse history), `gaps` (history overflowed, movement lost) and
 `fallbacks` (no history, message point only).
 
+Each overlay open writes one `overlay` line, `Overlay session: mode=per-monitor|span
+adapter="..." windows=... primary=...`, with the fallback reason when the overlay fell
+back to one window over the desktop. Each press-to-release gesture writes one `frames`
+line: the active tool, the mode, the frame count, frame-interval p50/p95/max in ms and
+the share of frames within 33.3 ms. A close after a failure writes
+`Overlay closed: ...`.
+
+### Overlay debug hooks
+
+Debug builds, and builds with `GREENFLAME_ENABLE_DEBUG_LOG`, have hooks for the
+overlay's close paths (`GF-MAN-PMW-014`, `GF-MAN-PMW-015`). Release builds do not.
+
+- Ctrl+Shift+Alt+F11: the next paint reports a lost graphics device.
+- Ctrl+Shift+Alt+F12: the next paints report frame-wait timeouts, enough to close.
+- `GREENFLAME_FORCE_SPAN_FALLBACK=1` in Greenflame's environment: per-monitor setup
+  fails after its first window, so the overlay falls back to one window over the
+  desktop.
+
 ## Writing a test
 
 Use GoogleTest macros for plain logic tests:
