@@ -58,6 +58,49 @@ FrameRateVerdict Judge_frame_times(FrameTimeSummary const &summary) noexcept {
     return FrameRateVerdict::Fail;
 }
 
+FrameSpikeKind Classify_frame_spike(FrameIntervalParts const &parts) noexcept {
+    if (parts.input_to_end_ms <= kFrameSpikeMs) {
+        return FrameSpikeKind::Idle;
+    }
+    double const late_ms = parts.input_to_end_ms - parts.wait_ms - parts.paint_ms;
+    if (parts.wait_ms >= parts.paint_ms && parts.wait_ms >= late_ms) {
+        return FrameSpikeKind::Wait;
+    }
+    if (parts.paint_ms >= late_ms) {
+        return FrameSpikeKind::Paint;
+    }
+    return FrameSpikeKind::Late;
+}
+
+std::string_view Frame_spike_kind_label(FrameSpikeKind kind) noexcept {
+    switch (kind) {
+    case FrameSpikeKind::Idle:
+        return "idle";
+    case FrameSpikeKind::Wait:
+        return "wait";
+    case FrameSpikeKind::Paint:
+        return "paint";
+    case FrameSpikeKind::Late:
+        break;
+    }
+    return "late";
+}
+
+FrameSpikeSummary
+Summarize_frame_spikes(std::span<FrameIntervalParts const> frames) noexcept {
+    FrameSpikeSummary summary{};
+    for (FrameIntervalParts const &parts : frames) {
+        if (parts.interval_ms <= kFrameSpikeMs) {
+            continue;
+        }
+        FrameSpikeCount &slot =
+            summary.by_kind[static_cast<size_t>(Classify_frame_spike(parts))];
+        ++slot.count;
+        slot.max_ms = std::max(slot.max_ms, parts.interval_ms);
+    }
+    return summary;
+}
+
 std::string_view Frame_rate_verdict_label(FrameRateVerdict verdict) noexcept {
     switch (verdict) {
     case FrameRateVerdict::Pass60:

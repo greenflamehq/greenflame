@@ -263,8 +263,9 @@ if(BUILD_TESTING)
     set(greenflame_split_args_lifted
         --scenario highlighter --annotated --lifted ${greenflame_split_freehand})
     set(greenflame_split_args_steady --scenario steady --annotated)
+    set(greenflame_split_args_resize --scenario select --annotated --resize)
     foreach(greenflame_split_case hover select brush brush_reverse highlighter
-            highlighter_reverse straight line obfuscate lifted steady)
+            highlighter_reverse straight line obfuscate lifted steady resize)
         set(greenflame_split_name greenflame_render_bench_split_${greenflame_split_case})
         set(greenflame_split_span_bmp
             "${CMAKE_CURRENT_BINARY_DIR}/split_${greenflame_split_case}_span.bmp")
@@ -294,4 +295,84 @@ if(BUILD_TESTING)
             PROPERTIES FIXTURES_REQUIRED greenflame_bench_split_${greenflame_split_case}
         )
     endforeach()
+
+    # A selection drag, resize or move draws the fully dimmed frozen frame outside the
+    # selection and the screenshot and annotations inside it. Its frames must match
+    # the same frames drawn through the dynamic path, in one target and in one per
+    # monitor, at tolerance 0. Frame 2 of 4 puts the selection across a boundary.
+    set(greenflame_gesture_common --adapter warp --layout jocelyn-desk --frames 4)
+    set(greenflame_gesture_args_drag --scenario select)
+    set(greenflame_gesture_args_annotated --scenario select --annotated)
+    set(greenflame_gesture_args_resize --scenario select --annotated --resize)
+    foreach(greenflame_gesture_case drag annotated resize)
+        foreach(greenflame_gesture_targets span split)
+            set(greenflame_gesture_id
+                ${greenflame_gesture_case}_${greenflame_gesture_targets})
+            set(greenflame_gesture_name
+                greenflame_render_bench_gesture_${greenflame_gesture_id})
+            set(greenflame_gesture_args ${greenflame_gesture_common}
+                ${greenflame_gesture_args_${greenflame_gesture_case}})
+            if(greenflame_gesture_targets STREQUAL "split")
+                list(APPEND greenflame_gesture_args --split-monitors)
+            endif()
+            set(greenflame_gesture_fast_bmp
+                "${CMAKE_CURRENT_BINARY_DIR}/gesture_${greenflame_gesture_id}_fast.bmp")
+            set(greenflame_gesture_dynamic_bmp
+                "${CMAKE_CURRENT_BINARY_DIR}/gesture_${greenflame_gesture_id}_dynamic.bmp")
+            add_test(
+                NAME ${greenflame_gesture_name}_fast
+                COMMAND greenflame_render_bench ${greenflame_gesture_args}
+                    --dump-frame 2 "${greenflame_gesture_fast_bmp}"
+            )
+            add_test(
+                NAME ${greenflame_gesture_name}_dynamic
+                COMMAND greenflame_render_bench ${greenflame_gesture_args}
+                    --dump-frame 2 "${greenflame_gesture_dynamic_bmp}" --select-dynamic
+            )
+            set_tests_properties(
+                ${greenflame_gesture_name}_fast ${greenflame_gesture_name}_dynamic
+                PROPERTIES FIXTURES_SETUP greenflame_bench_gesture_${greenflame_gesture_id}
+            )
+            add_test(
+                NAME ${greenflame_gesture_name}_diff
+                COMMAND greenflame_render_bench --layout jocelyn-desk --mask-monitors
+                    --diff "${greenflame_gesture_fast_bmp}"
+                    "${greenflame_gesture_dynamic_bmp}"
+            )
+            set_tests_properties(${greenflame_gesture_name}_diff
+                PROPERTIES
+                    FIXTURES_REQUIRED greenflame_bench_gesture_${greenflame_gesture_id}
+            )
+        endforeach()
+    endforeach()
+
+    # After a selection drag the frozen frame is still built for no selection. A
+    # steady frame must rebuild it for its own selection, not show it dimmed all over.
+    set(greenflame_stale_args
+        --adapter warp --layout single-1080 --scenario steady --annotated --frames 4
+        --dump-frame 2)
+    set(greenflame_stale_bmp "${CMAKE_CURRENT_BINARY_DIR}/stale_frozen.bmp")
+    set(greenflame_stale_ref_bmp "${CMAKE_CURRENT_BINARY_DIR}/stale_frozen_ref.bmp")
+    add_test(
+        NAME greenflame_render_bench_stale_frozen
+        COMMAND greenflame_render_bench ${greenflame_stale_args}
+            "${greenflame_stale_bmp}" --stale-frozen
+    )
+    add_test(
+        NAME greenflame_render_bench_stale_frozen_ref
+        COMMAND greenflame_render_bench ${greenflame_stale_args}
+            "${greenflame_stale_ref_bmp}"
+    )
+    set_tests_properties(
+        greenflame_render_bench_stale_frozen greenflame_render_bench_stale_frozen_ref
+        PROPERTIES FIXTURES_SETUP greenflame_bench_stale_frozen
+    )
+    add_test(
+        NAME greenflame_render_bench_stale_frozen_diff
+        COMMAND greenflame_render_bench
+            --diff "${greenflame_stale_bmp}" "${greenflame_stale_ref_bmp}"
+    )
+    set_tests_properties(greenflame_render_bench_stale_frozen_diff
+        PROPERTIES FIXTURES_REQUIRED greenflame_bench_stale_frozen
+    )
 endif()

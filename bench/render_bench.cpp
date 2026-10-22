@@ -218,6 +218,9 @@ struct Args final {
     bool arrow = false;                // --arrow
     bool flat = false;                 // --flat
     bool line_dynamic = false;         // --line-dynamic
+    bool select_dynamic = false;       // --select-dynamic
+    bool stale_frozen = false;         // --stale-frozen
+    bool resize = false;               // --resize
     bool reverse = false;              // --reverse: freehand runs right to left
     bool split_monitors = false;       // --split-monitors: one target per monitor
     bool mask_monitors = false;        // --mask-monitors: diff only monitor pixels
@@ -248,11 +251,17 @@ void Print_usage() {
         "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
+        "  --resize                     select: resize a committed selection, inset "
+        "by an eighth of the desktop, by a handle\n"
         "  --arrow                      line: draw an arrow head\n"
         "  --flat                       line: run left to right along the selection's "
         "middle row\n"
         "  --line-dynamic               line: skip the frozen-frame path (the frozen "
         "frame reads stale every frame); frames must match without it\n"
+        "  --select-dynamic             select: skip the selection-gesture path (the "
+        "frozen frame reads stale every frame); frames must match without it\n"
+        "  --stale-frozen               build the frozen frame for no selection before "
+        "the run, as a drag leaves it; frames must match without it\n"
         "  --lifted                     with --annotated: a lifted window capture with "
         "its own pixels over the selection\n"
         "  --lifted-as-screenshot       with --annotated: those pixels in the "
@@ -432,6 +441,12 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.mask_monitors = true;
         } else if (key == "--line-dynamic") {
             args.line_dynamic = true;
+        } else if (key == "--select-dynamic") {
+            args.select_dynamic = true;
+        } else if (key == "--stale-frozen") {
+            args.stale_frozen = true;
+        } else if (key == "--resize") {
+            args.resize = true;
         } else if (key == "--lifted") {
             args.lifted = true;
         } else if (key == "--lifted-as-screenshot") {
@@ -859,13 +874,19 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         int const y = kSelectStartPx +
                       static_cast<int>(
                           static_cast<int64_t>(height - 2 * kSelectStartPx) * i / last);
-        input.dragging = true;
         input.live_rect = core::RectPx::From_ltrb(kSelectStartPx, kSelectStartPx,
                                                   std::max(x, kSelectStartPx + 1),
                                                   std::max(y, kSelectStartPx + 1));
         input.cursor_client_px = {x, y};
-        input.selection_drag_corner_guide_px =
-            core::PointPx{input.live_rect.right, input.live_rect.bottom};
+        if (args.resize) {
+            // As On_paint during a handle drag: the dragged handle's edges highlight.
+            input.handle_dragging = true;
+            input.highlight_handle = core::SelectionHandle::BottomRight;
+        } else {
+            input.dragging = true;
+            input.selection_drag_corner_guide_px =
+                core::PointPx{input.live_rect.right, input.live_rect.bottom};
+        }
     } else if (scenario == "line" && frame >= 0) {
         // Line tool drag: from near the selection's top-left (--flat: left middle) to
         // the cursor.
@@ -980,8 +1001,8 @@ std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
     if (scenario == "steady" || scenario == "line" || scenario == "obfuscate" ||
-        Is_freehand(scenario)) {
-        input.final_selection = args.annotated
+        Is_freehand(scenario) || (scenario == "select" && args.resize)) {
+        input.final_selection = args.annotated || args.resize
                                     ? Inset_selection(width, height)
                                     : core::RectPx::From_ltrb(0, 0, width, height);
         input.cursor_client_px = {width / 2, height / 2};
@@ -1131,6 +1152,11 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             return std::nullopt;
         }
     }
+    if (args.stale_frozen) {
+        // As a selection drag leaves it: valid, but built for no selection. The paint
+        // must rebuild it for the frame's selection.
+        Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
+    }
     ScenarioState state;
     std::vector<FrameSample> samples;
     samples.reserve(static_cast<size_t>(args.frames));
@@ -1153,8 +1179,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
         }
-        if (args.line_dynamic) {
-            // A stale frozen frame sends a line draft down the dynamic path.
+        if (args.line_dynamic || (args.select_dynamic && scenario == "select")) {
+            // A stale frozen frame sends a line draft or a selection gesture down the
+            // dynamic path.
             ctx.res->frozen_valid = false;
         }
         bool const ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr,

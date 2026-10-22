@@ -2022,26 +2022,71 @@ LRESULT OverlayWindow::On_mouse_activate(HWND hwnd, WPARAM wparam, LPARAM lparam
     return MA_NOACTIVATE;
 }
 
+void OverlayWindow::Start_gesture_frames() {
+#if defined(GREENFLAME_LOG)
+    gesture_frames_.clear();
+    gesture_frames_.reserve(kGestureFrameCapacity);
+    gesture_frames_active_ = true;
+    LARGE_INTEGER now{};
+    (void)QueryPerformanceCounter(&now);
+    gesture_pending_input_qpc_ = now.QuadPart;
+#endif
+}
+
+void OverlayWindow::Note_gesture_input() {
+#if defined(GREENFLAME_LOG)
+    if (gesture_frames_active_ && gesture_pending_input_qpc_ == 0) {
+        LARGE_INTEGER now{};
+        (void)QueryPerformanceCounter(&now);
+        gesture_pending_input_qpc_ = now.QuadPart;
+    }
+#endif
+}
+
 void OverlayWindow::Log_gesture_frames() {
 #if defined(GREENFLAME_LOG)
     if (!gesture_frames_active_) {
         return;
     }
     gesture_frames_active_ = false;
-    if (gesture_frame_count_ < 2) {
+    if (gesture_frames_.size() < 2) {
         return;
     }
     LARGE_INTEGER frequency{};
     (void)QueryPerformanceFrequency(&frequency);
+    auto const to_ms = [&](int64_t ticks) {
+        return static_cast<double>(ticks) * kMsPerSecond /
+               static_cast<double>(frequency.QuadPart);
+    };
     std::vector<double> intervals;
-    intervals.reserve(gesture_frame_count_ - 1);
-    std::span<const int64_t> const stamps =
-        std::span(gesture_frame_qpc_).first(gesture_frame_count_);
-    for (size_t i = 1; i < stamps.size(); ++i) {
-        intervals.push_back(static_cast<double>(stamps[i] - stamps[i - 1]) *
-                            kMsPerSecond / static_cast<double>(frequency.QuadPart));
+    std::vector<core::FrameIntervalParts> parts;
+    intervals.reserve(gesture_frames_.size() - 1);
+    parts.reserve(gesture_frames_.size() - 1);
+    for (size_t i = 1; i < gesture_frames_.size(); ++i) {
+        GestureFrame const &frame = gesture_frames_[i];
+        double const interval_ms =
+            to_ms(frame.end_qpc - gesture_frames_[i - 1].end_qpc);
+        intervals.push_back(interval_ms);
+        double const wait_ms = to_ms(frame.wait_qpc);
+        parts.push_back(core::FrameIntervalParts{
+            .interval_ms = interval_ms,
+            .input_to_end_ms = to_ms(frame.end_qpc - frame.input_qpc),
+            .wait_ms = wait_ms,
+            .paint_ms = to_ms(frame.end_qpc - frame.paint_start_qpc) - wait_ms,
+        });
     }
     core::FrameTimeSummary const summary = core::Summarize_frame_times(intervals);
+    // Why each interval over kFrameSpikeMs was long: idle (no input), wait
+    // (frame-latency wait), paint (drawing) or late (message loop).
+    std::wstring spikes;
+    auto const spike_counts = core::Summarize_frame_spikes(parts).by_kind;
+    for (size_t kind = 0; kind < spike_counts.size(); ++kind) {
+        std::string_view const label =
+            core::Frame_spike_kind_label(static_cast<core::FrameSpikeKind>(kind));
+        spikes += L" " + std::wstring(label.begin(), label.end()) + L"=" +
+                  std::to_wstring(spike_counts[kind].count) + L"/" +
+                  std::to_wstring(spike_counts[kind].max_ms) + L"ms";
+    }
     std::optional<core::AnnotationToolId> const tool =
         controller_.Active_annotation_tool();
     GREENFLAME_LOG_WRITE(
@@ -2049,11 +2094,13 @@ void OverlayWindow::Log_gesture_frames() {
         std::wstring(L"gesture: tool=") +
             (tool.has_value() ? std::wstring(Tool_name_for_log(*tool)) : L"selection") +
             L" mode=" + (layout_.per_monitor ? L"per-monitor" : L"span") + L" frames=" +
-            std::to_wstring(gesture_frame_count_) + L" p50=" +
+            std::to_wstring(gesture_frames_.size()) + L" p50=" +
             std::to_wstring(summary.p50_ms) + L"ms p95=" +
             std::to_wstring(summary.p95_ms) + L"ms max=" +
             std::to_wstring(summary.max_ms) + L"ms within33=" +
-            std::to_wstring(summary.percent_within_30fps) + L"%");
+            std::to_wstring(summary.percent_within_30fps) + L"% spikes>" +
+            std::to_wstring(static_cast<int>(core::kFrameSpikeMs)) +
+            L"ms (count/max):" + spikes);
 #endif
 }
 
@@ -4081,21 +4128,16 @@ LRESULT OverlayWindow::Wnd_proc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lpara
         // Capture keeps a drag's messages coming when the cursor crosses onto another
         // overlay window or over a foreign window.
         Take_mouse_capture(hwnd);
-#if defined(GREENFLAME_LOG)
-        gesture_frame_count_ = 0;
-        gesture_frames_active_ = true;
-#endif
+        Start_gesture_frames();
         return On_l_button_down();
     case WM_LBUTTONDBLCLK:
         Take_mouse_capture(hwnd);
-#if defined(GREENFLAME_LOG)
         if (controller_.Double_press_is_press()) {
-            gesture_frame_count_ = 0;
-            gesture_frames_active_ = true;
+            Start_gesture_frames();
         }
-#endif
         return On_l_button_dbl_clk();
     case WM_MOUSEMOVE:
+        Note_gesture_input();
         return On_mouse_move();
     case WM_MOUSEWHEEL:
         return On_mouse_wheel(wparam);
@@ -4549,6 +4591,10 @@ void OverlayWindow::Pin_to_desktop_and_close() {
 LRESULT OverlayWindow::On_paint(HWND hwnd) {
     GREENFLAME_PROFILE_FUNCTION();
 
+#if defined(GREENFLAME_LOG)
+    LARGE_INTEGER paint_start{};
+    (void)QueryPerformanceCounter(&paint_start);
+#endif
     PAINTSTRUCT paint{};
     HDC const hdc = BeginPaint(hwnd, &paint);
     if (!hdc) {
@@ -4943,10 +4989,21 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
             wait_timeout_streak_ = 0;
 #if defined(GREENFLAME_LOG)
             if (gesture_frames_active_ &&
-                gesture_frame_count_ < kGestureFrameCapacity) {
+                gesture_frames_.size() < kGestureFrameCapacity) {
                 LARGE_INTEGER now{};
                 (void)QueryPerformanceCounter(&now);
-                gesture_frame_qpc_[gesture_frame_count_++] = now.QuadPart;
+                // A paint with no input since the last frame (a timer, a repaint)
+                // counts from its own start.
+                int64_t const input_qpc = gesture_pending_input_qpc_ != 0
+                                              ? gesture_pending_input_qpc_
+                                              : paint_start.QuadPart;
+                gesture_frames_.push_back(GestureFrame{
+                    .end_qpc = now.QuadPart,
+                    .input_qpc = input_qpc,
+                    .paint_start_qpc = paint_start.QuadPart,
+                    .wait_qpc = d2d_resources_->last_frame_wait_qpc,
+                });
+                gesture_pending_input_qpc_ = 0;
             }
 #endif
             break;

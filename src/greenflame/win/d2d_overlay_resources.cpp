@@ -458,7 +458,7 @@ bool D2DOverlayResources::Create_shared_resources() {
         props.miterLimit = kStrokeMiterLimit;
         props.dashStyle = D2D1_DASH_STYLE_CUSTOM;
         props.dashOffset = 0.f;
-        float const dashes[] = {4.f, 3.f};
+        float const dashes[] = {kBorderDashOnPx, kBorderDashOffPx};
         hr = factory->CreateStrokeStyle(props, dashes, 2,
                                         dashed_style.ReleaseAndGetAddressOf());
         if (FAILED(hr)) {
@@ -766,6 +766,8 @@ void D2DOverlayResources::Release_device_resources() {
     text_dim.Reset();
     text_center.Reset();
     text_hint.Reset();
+    measured_text = {};
+    measured_text_next = 0;
     text_wheel_hue_brush.Reset();
     checker_brush.Reset();
     for (auto &glyph : toolbar_glyphs) {

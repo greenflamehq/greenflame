@@ -8,6 +8,10 @@
 
 namespace greenflame {
 
+// The selection border dash pattern while dragging, in pixels at stroke width 1.
+inline constexpr float kBorderDashOnPx = 4.f;
+inline constexpr float kBorderDashOffPx = 3.f;
+
 // A lifted window capture as the overlay shows it: `bitmap`'s `source_rect` drawn 1:1
 // at `dest_rect`. All null or empty when no window is lifted.
 struct LiftedWindowView final {
@@ -42,7 +46,8 @@ struct D2DSurfaceTarget final {
 // Layer model:
 //   screenshot    — uploaded once at capture time, never redrawn
 //   annotations   — rebuilt on annotation commit/undo/redo/delete
-//   frozen        — rebuilt when selection or annotations change
+//   frozen        — rebuilt when selection or annotations change; built for no
+//                   selection (all dimmed) during a selection drag, resize or move
 //   draft_stroke  — during a freehand stroke: the stroke body (append only) and
 //                   live_base, the whole frame as of the last body update
 //   live layer    — drawn every frame (selection border, handles, UI)
@@ -140,6 +145,18 @@ struct D2DOverlayResources final {
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_dim;    // 12pt Segoe UI
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_center; // 36pt Segoe UI Black
     Microsoft::WRL::ComPtr<IDWriteTextFormat> text_hint;   // 16pt Segoe UI
+    // The last few texts measured for overlay labels, so a frame drawn into several
+    // per-monitor targets lays each label out once, not once per target. Cleared with
+    // the text formats it is keyed by.
+    struct MeasuredText final {
+        IDWriteTextFormat *format = nullptr;
+        std::wstring text = {};
+        float width = 0.f;
+        float height = 0.f;
+    };
+    static constexpr size_t kMeasuredTextSlots = 4;
+    std::array<MeasuredText, kMeasuredTextSlots> measured_text = {};
+    size_t measured_text_next = 0;
     Microsoft::WRL::ComPtr<ID2D1LinearGradientBrush> text_wheel_hue_brush;
     Microsoft::WRL::ComPtr<ID2D1BitmapBrush> checker_brush;
 
@@ -168,8 +185,13 @@ struct D2DOverlayResources final {
     std::optional<TextCursorPreviewCache> text_cursor_preview_cache;
 
     bool annotations_valid = false;
+    // True when annotations_bitmap was last built from no annotations, so it is all
+    // transparent and blitting it changes nothing.
+    bool annotations_empty = false;
     bool frozen_valid = false;
     core::RectPx frozen_selection = {}; // the selection frozen_bitmap was built with
+    // QPC ticks the last Paint_d2d_frame spent in its frame-latency wait (debug log).
+    int64_t last_frame_wait_qpc = 0;
     // The lifted window the overlay shows. Committed highlighters multiply onto it
     // inside its dest rect; set it with Set_lifted_view.
     LiftedWindowView lifted_view = {};

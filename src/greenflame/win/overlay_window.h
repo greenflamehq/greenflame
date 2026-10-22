@@ -179,6 +179,8 @@ class OverlayWindow final {
     void On_capture_changed(HWND new_owner);
     LRESULT On_mouse_activate(HWND hwnd, WPARAM wparam, LPARAM lparam);
     void Log_gesture_frames();
+    void Start_gesture_frames();
+    void Note_gesture_input();
     LRESULT On_set_cursor(HWND hwnd, WPARAM wparam, LPARAM lparam);
     void Refresh_cursor();
     bool Refresh_hover_handle();
@@ -343,11 +345,17 @@ class OverlayWindow final {
     int debug_force_wait_timeouts_ = 0;
 #endif
 #if defined(GREENFLAME_LOG)
-    // Frame times of the current press-to-release gesture, for the debug log.
+    // Frames of the current press-to-release gesture, for the debug log. QPC ticks.
+    struct GestureFrame final {
+        int64_t end_qpc = 0;         // the frame's paint ended
+        int64_t input_qpc = 0;       // first input since the previous frame
+        int64_t paint_start_qpc = 0; // WM_PAINT began
+        int64_t wait_qpc = 0;        // ticks in the frame-latency wait
+    };
     static constexpr size_t kGestureFrameCapacity = 4096;
-    std::array<int64_t, kGestureFrameCapacity> gesture_frame_qpc_ = {};
-    size_t gesture_frame_count_ = 0;
+    std::vector<GestureFrame> gesture_frames_ = {};
     bool gesture_frames_active_ = false;
+    int64_t gesture_pending_input_qpc_ = 0; // 0: no input since the last frame
 #endif
     HINSTANCE hinstance_ = nullptr;
     core::OverlayController controller_;

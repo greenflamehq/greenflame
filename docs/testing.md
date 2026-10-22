@@ -114,9 +114,19 @@ recovered from the mouse history), `gaps` (history overflowed, movement lost) an
 Each overlay open writes one `overlay` line, `Overlay session: mode=per-monitor|span
 adapter="..." windows=... primary=...`, with the fallback reason when the overlay fell
 back to one window over the desktop. Each press-to-release gesture writes one `frames`
-line: the active tool, the mode, the frame count, frame-interval p50/p95/max in ms and
-the share of frames within 33.3 ms. A close after a failure writes
-`Overlay closed: ...`.
+line: the active tool, the mode, the frame count, frame-interval p50/p95/max in ms,
+the share of frames within 33.3 ms, and why the intervals over 50 ms were long, as
+`kind=count/max` for four kinds:
+
+- `idle`: the frame came within 50 ms of the first input since the frame before it.
+  The interval was a pause of the hand, not a slow frame: a frame is painted only
+  when input asks for one.
+- Otherwise, the largest part of the time from that input to the frame's end:
+  - `wait`: the frame-latency wait (DWM, present, the GPU);
+  - `paint`: drawing the frame, wait excluded;
+  - `late`: from the input until the paint started (the message loop).
+
+A close after a failure writes `Overlay closed: ...`.
 
 ### Overlay debug hooks
 
@@ -247,7 +257,18 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   monitor covers stay black). On `jocelyn-desk` the stitched frames must match the
   one-target frames on every monitor pixel at tolerance 0: `ctest` runs this on WARP
   for hover, select, brush and highlighter in both directions, a straightened
-  highlighter, an arrow, obfuscate, `--annotated --lifted` and steady.
+  highlighter, an arrow, obfuscate, `--annotated --lifted`, steady and
+  `select --annotated --resize`.
+- `--resize` (select): resize a committed selection, inset by an eighth of the
+  desktop on each side, by a handle, instead of dragging a new one.
+- `--select-dynamic` (select): the frozen frame reads stale every frame, so the
+  drag takes the dynamic path instead of the fully dimmed frozen frame outside the
+  selection; the two runs' frames must match at tolerance 0 (`ctest` runs this on
+  WARP on `jocelyn-desk`, one target and one per monitor, for a drag, a drag over
+  annotations and a resize over annotations).
+- `--stale-frozen`: before the run, build the frozen frame for no selection, as a
+  selection drag leaves it. Frames must still match the run without it at tolerance
+  0 (`ctest` runs this on WARP for `steady --annotated`).
 - `--arrow` (line): the line has an arrow head. `--flat` (line): it runs left to
   right along the selection's middle row. `--line-dynamic` (line): the frozen
   frame reads stale every frame, so the draft takes the dynamic path instead of
