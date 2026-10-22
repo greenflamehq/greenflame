@@ -88,3 +88,60 @@ TEST(frame_stats, VerdictLabels) {
     EXPECT_EQ(Frame_rate_verdict_label(FrameRateVerdict::Pass30), "PASS-30");
     EXPECT_EQ(Frame_rate_verdict_label(FrameRateVerdict::Fail), "FAIL");
 }
+
+TEST(frame_stats, Spike_FollowsItsInputPromptly_IsIdle) {
+    FrameIntervalParts const parts{.interval_ms = 120.0,
+                                   .input_to_end_ms = kFrameSpikeMs,
+                                   .wait_ms = 45.0,
+                                   .paint_ms = 45.0};
+    EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Idle);
+}
+
+TEST(frame_stats, Spike_LongWait_IsWait) {
+    FrameIntervalParts const parts{.interval_ms = 120.0,
+                                   .input_to_end_ms = 110.0,
+                                   .wait_ms = kFrameSpikePartMs + 1.0,
+                                   .paint_ms = 45.0};
+    EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Wait);
+}
+
+TEST(frame_stats, Spike_LongPaint_IsPaint) {
+    FrameIntervalParts const parts{.interval_ms = 120.0,
+                                   .input_to_end_ms = 110.0,
+                                   .wait_ms = kFrameSpikePartMs,
+                                   .paint_ms = kFrameSpikePartMs + 1.0};
+    EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Paint);
+}
+
+TEST(frame_stats, Spike_ShortPartsAfterEarlyInput_IsLate) {
+    FrameIntervalParts const parts{.interval_ms = 120.0,
+                                   .input_to_end_ms = kFrameSpikeMs + 1.0,
+                                   .wait_ms = 10.0,
+                                   .paint_ms = 10.0};
+    EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Late);
+}
+
+TEST(frame_stats, SpikeSummary_CountsOnlyLongIntervals) {
+    std::vector<FrameIntervalParts> const frames = {
+        {.interval_ms = kFrameSpikeMs, .input_to_end_ms = 200.0, .wait_ms = 45.0},
+        {.interval_ms = 60.0, .input_to_end_ms = 20.0},
+        {.interval_ms = 150.0, .input_to_end_ms = 30.0},
+        {.interval_ms = 90.0, .input_to_end_ms = 90.0, .wait_ms = 80.0},
+    };
+    auto const counts = Summarize_frame_spikes(frames).by_kind;
+    FrameSpikeCount const idle = counts[static_cast<size_t>(FrameSpikeKind::Idle)];
+    FrameSpikeCount const wait = counts[static_cast<size_t>(FrameSpikeKind::Wait)];
+    EXPECT_EQ(idle.count, 2u);
+    EXPECT_EQ(idle.max_ms, 150.0);
+    EXPECT_EQ(wait.count, 1u);
+    EXPECT_EQ(wait.max_ms, 90.0);
+    EXPECT_EQ(counts[static_cast<size_t>(FrameSpikeKind::Paint)].count, 0u);
+    EXPECT_EQ(counts[static_cast<size_t>(FrameSpikeKind::Late)].count, 0u);
+}
+
+TEST(frame_stats, SpikeKindLabels) {
+    EXPECT_EQ(Frame_spike_kind_label(FrameSpikeKind::Idle), "idle");
+    EXPECT_EQ(Frame_spike_kind_label(FrameSpikeKind::Wait), "wait");
+    EXPECT_EQ(Frame_spike_kind_label(FrameSpikeKind::Paint), "paint");
+    EXPECT_EQ(Frame_spike_kind_label(FrameSpikeKind::Late), "late");
+}

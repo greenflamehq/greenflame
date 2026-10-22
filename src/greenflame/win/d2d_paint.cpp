@@ -42,29 +42,39 @@ constexpr float kSpellSquiggleHalfPeriodPx = 2.0f;
 constexpr float kSpellSquiggleStrokeWidthPx = 1.0f;
 constexpr UINT32 kSpellSquiggleHitTestInitialCapacity = 8u;
 
-void Draw_selection_dim(ID2D1RenderTarget *rt, ID2D1SolidColorBrush *brush,
-                        core::RectPx selection, int vd_width, int vd_height) {
+// The desktop pixels outside selection, as up to four non-overlapping bands (empty
+// bands are empty rects). With no visible selection, the first band is the whole
+// desktop.
+[[nodiscard]] std::array<core::RectPx, 4>
+Dim_bands(core::RectPx selection, int vd_width, int vd_height) noexcept {
     core::RectPx const bounds = core::RectPx::From_ltrb(0, 0, vd_width, vd_height);
     std::optional<core::RectPx> const visible = core::RectPx::Clip(selection, bounds);
-    brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
     if (!visible.has_value()) {
-        rt->FillRectangle(Rect(bounds), brush);
-        return;
+        return {bounds, core::RectPx{}, core::RectPx{}, core::RectPx{}};
     }
+    core::RectPx const &inside = *visible;
+    return {core::RectPx::From_ltrb(0, 0, vd_width, inside.top),
+            core::RectPx::From_ltrb(0, inside.bottom, vd_width, vd_height),
+            core::RectPx::From_ltrb(0, inside.top, inside.left, inside.bottom),
+            core::RectPx::From_ltrb(inside.right, inside.top, vd_width, inside.bottom)};
+}
 
+void Draw_selection_dim(ID2D1RenderTarget *rt, ID2D1SolidColorBrush *brush,
+                        core::RectPx selection, int vd_width, int vd_height) {
+    brush->SetColor(D2D1::ColorF(0.f, 0.f, 0.f, kOverlayDimAlpha));
     // Non-overlapping physical-pixel bands leave the selection untouched. This
     // avoids dimming and then recompositing its annotations.
-    core::RectPx const &inside = *visible;
-    std::array<core::RectPx, 4> const bands = {
-        core::RectPx::From_ltrb(0, 0, vd_width, inside.top),
-        core::RectPx::From_ltrb(0, inside.bottom, vd_width, vd_height),
-        core::RectPx::From_ltrb(0, inside.top, inside.left, inside.bottom),
-        core::RectPx::From_ltrb(inside.right, inside.top, vd_width, inside.bottom)};
-    for (core::RectPx const &band : bands) {
+    for (core::RectPx const &band : Dim_bands(selection, vd_width, vd_height)) {
         if (!band.Is_empty()) {
             rt->FillRectangle(Rect(band), brush);
         }
     }
+}
+
+// The selection the frame keeps undimmed: live_rect while dragging, else
+// final_selection.
+[[nodiscard]] core::RectPx Restore_rect(D2DPaintInput const &input) noexcept {
+    return !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
 }
 
 // Copies the desktop-sized bitmap's pixels inside rect, 1:1 and nearest-neighbor, so
@@ -221,6 +231,84 @@ void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 // Selection border
 // ---------------------------------------------------------------------------
 
+// The world-space rect rt's target shows, or nullopt when the transform is more than
+// a translation (no cheap answer then).
+[[nodiscard]] std::optional<D2D1_RECT_F> Target_view(ID2D1RenderTarget *rt) noexcept {
+    // Exact comparison without == on floats (-Wfloat-equal).
+    auto const is = [](float value, float wanted) noexcept {
+        return !(value < wanted) && !(value > wanted);
+    };
+    D2D1_MATRIX_3X2_F transform{};
+    rt->GetTransform(&transform);
+    if (!is(transform._11, 1.f) || !is(transform._22, 1.f) || !is(transform._12, 0.f) ||
+        !is(transform._21, 0.f)) {
+        return std::nullopt;
+    }
+    D2D1_SIZE_F const size = rt->GetSize();
+    float const view_left = -transform._31;
+    float const view_top = -transform._32;
+    return D2D1::RectF(view_left, view_top, view_left + size.width,
+                       view_top + size.height);
+}
+
+// One dash period of the selection border's dashed style, in pixels at width 1.
+constexpr float kBorderDashPeriodPx = kBorderDashOnPx + kBorderDashOffPx;
+
+// Draws the dashed segment [from, to] of a border line along one axis, cut to the
+// part [view_from, view_to] can show. The cut start moves back to a whole dash
+// period from `from`, so every dash lands on the pixels the uncut line gives it;
+// the cut end lies past the view, where nothing shows. Returns false when no part
+// can show.
+[[nodiscard]] bool Cut_dashed_span(float from, float to, float view_from, float view_to,
+                                   float &cut_from, float &cut_to) noexcept {
+    // One pixel of slack for antialiased dash ends.
+    constexpr float slack = 1.f;
+    float const lo = view_from - slack;
+    float const hi = view_to + slack;
+    if (to < lo || from > hi) {
+        return false;
+    }
+    cut_from = from;
+    if (lo > from) {
+        cut_from =
+            from + std::floor((lo - from) / kBorderDashPeriodPx) * kBorderDashPeriodPx;
+    }
+    cut_to = std::min(to, hi + kBorderDashPeriodPx);
+    return cut_to >= cut_from;
+}
+
+void Draw_dashed_border(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+                        core::RectPx sel) {
+    D2D1_RECT_F const rf = Rect(sel);
+    float const l = rf.left + kHalfPixel;
+    float const r = rf.right - kHalfPixel;
+    float const t = rf.top + kHalfPixel;
+    float const b = rf.bottom - kHalfPixel;
+    // Without a cheap view (not a translation), draw every line whole.
+    D2D1_RECT_F const view =
+        Target_view(rt).value_or(D2D1::RectF(l - 1.f, t - 1.f, r + 1.f, b + 1.f));
+    // Four distinct lines (no marquee): horizontals both left-to-right, verticals
+    // both top-to-bottom. A per-monitor target draws only the dashes it can show:
+    // tessellating thousands of dashes per target per frame is most of a drag's CPU.
+    auto const draw = [&](D2D1_POINT_2F a, D2D1_POINT_2F z) {
+        rt->DrawLine(a, z, res.solid_brush.Get(), 1.f, res.dashed_style.Get());
+    };
+    float from = 0.f;
+    float to = 0.f;
+    for (float const y : {t, b}) {
+        if (y + 1.f > view.top && y - 1.f < view.bottom &&
+            Cut_dashed_span(l, r, view.left, view.right, from, to)) {
+            draw(D2D1::Point2F(from, y), D2D1::Point2F(to, y));
+        }
+    }
+    for (float const x : {l, r}) {
+        if (x + 1.f > view.left && x - 1.f < view.right &&
+            Cut_dashed_span(t, b, view.top, view.bottom, from, to)) {
+            draw(D2D1::Point2F(x, from), D2D1::Point2F(x, to));
+        }
+    }
+}
+
 void Draw_selection_border(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                            core::RectPx sel, bool dashed) {
     if (sel.Is_empty()) {
@@ -228,21 +316,7 @@ void Draw_selection_border(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     }
     res.solid_brush->SetColor(kBorderColor);
     if (dashed) {
-        D2D1_RECT_F const rf = Rect(sel);
-        float const l = rf.left + kHalfPixel;
-        float const r = rf.right - kHalfPixel;
-        float const t = rf.top + kHalfPixel;
-        float const b = rf.bottom - kHalfPixel;
-        // Four distinct lines (no marquee): horizontals both left-to-right,
-        // verticals both top-to-bottom.
-        rt->DrawLine(D2D1::Point2F(l, t), D2D1::Point2F(r, t), res.solid_brush.Get(),
-                     1.f, res.dashed_style.Get());
-        rt->DrawLine(D2D1::Point2F(l, b), D2D1::Point2F(r, b), res.solid_brush.Get(),
-                     1.f, res.dashed_style.Get());
-        rt->DrawLine(D2D1::Point2F(l, t), D2D1::Point2F(l, b), res.solid_brush.Get(),
-                     1.f, res.dashed_style.Get());
-        rt->DrawLine(D2D1::Point2F(r, t), D2D1::Point2F(r, b), res.solid_brush.Get(),
-                     1.f, res.dashed_style.Get());
+        Draw_dashed_border(rt, res, sel);
         return;
     }
 
@@ -281,6 +355,16 @@ struct TextBoxResult {
     if (!res.dwrite_factory || !fmt || text.empty()) {
         return false;
     }
+    // Only the session's own label formats: a caller's temporary format could be
+    // freed and another one made at the same address.
+    bool const memo = fmt == res.text_dim.Get() || fmt == res.text_center.Get();
+    for (D2DOverlayResources::MeasuredText const &known : res.measured_text) {
+        if (memo && known.format == fmt && known.text == text) {
+            out_w = known.width;
+            out_h = known.height;
+            return true;
+        }
+    }
     Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
     HRESULT const hr = res.dwrite_factory->CreateTextLayout(
         text.data(), static_cast<UINT32>(text.size()), fmt, kTextMeasureMaxExtent,
@@ -294,6 +378,12 @@ struct TextBoxResult {
     }
     out_w = metrics.width;
     out_h = metrics.height;
+    if (memo) {
+        res.measured_text[res.measured_text_next] = {
+            .format = fmt, .text = std::wstring(text), .width = out_w, .height = out_h};
+        res.measured_text_next =
+            (res.measured_text_next + 1) % res.measured_text.size();
+    }
     return true;
 }
 
@@ -303,23 +393,14 @@ struct TextBoxResult {
 // translation (no cheap answer then).
 [[nodiscard]] bool Box_reaches_target(ID2D1RenderTarget *rt, float left, float top,
                                       float right, float bottom) noexcept {
-    // Exact comparison without == on floats (-Wfloat-equal).
-    auto const is = [](float value, float wanted) noexcept {
-        return !(value < wanted) && !(value > wanted);
-    };
-    D2D1_MATRIX_3X2_F transform{};
-    rt->GetTransform(&transform);
-    if (!is(transform._11, 1.f) || !is(transform._22, 1.f) || !is(transform._12, 0.f) ||
-        !is(transform._21, 0.f)) {
+    std::optional<D2D1_RECT_F> const view = Target_view(rt);
+    if (!view.has_value()) {
         return true;
     }
     // One pixel of slack for antialiased edges.
     constexpr float slack = 1.f;
-    D2D1_SIZE_F const size = rt->GetSize();
-    float const view_left = -transform._31;
-    float const view_top = -transform._32;
-    return right + slack > view_left && left - slack < view_left + size.width &&
-           bottom + slack > view_top && top - slack < view_top + size.height;
+    return right + slack > view->left && left - slack < view->right &&
+           bottom + slack > view->top && top - slack < view->bottom;
 }
 
 void Draw_text_box(ID2D1RenderTarget *rt, D2DOverlayResources &res,
@@ -2483,15 +2564,14 @@ void Composite_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                             int vd_height, DrawDraft const &draw_draft) {
     GREENFLAME_PROFILE_SCOPE("D2DPaint::Composite_draft_region");
 
-    core::RectPx const restore_rect =
-        !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+    core::RectPx const restore_rect = Restore_rect(input);
 
     rt->PushAxisAlignedClip(Rect(clip), D2D1_ANTIALIAS_MODE_ALIASED);
     rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f));
     if (res.screenshot) {
         Draw_full_bitmap_1to1(rt, res.screenshot.Get());
     }
-    if (res.annotations_bitmap) {
+    if (res.annotations_bitmap && !res.annotations_empty) {
         Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
     }
     draw_draft(rt, false);
@@ -2505,7 +2585,7 @@ void Composite_draft_region(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                     vd_height);
         }
         rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
-        if (res.annotations_bitmap) {
+        if (res.annotations_bitmap && !res.annotations_empty) {
             Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
         }
         draw_draft(rt, true);
@@ -2623,8 +2703,7 @@ void Update_freehand_draft_live_base(D2DOverlayResources &res,
     GREENFLAME_PROFILE_FUNCTION();
 
     D2DOverlayResources::FreehandDraftState &state = res.freehand_draft;
-    core::RectPx const restore_rect =
-        !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+    core::RectPx const restore_rect = Restore_rect(input);
     if (state.live_base_restore_rect != restore_rect ||
         state.live_base_lifted_window != input.lifted_window_bitmap) {
         state.live_base_valid = false;
@@ -2779,8 +2858,7 @@ void Draw_live_annotation_draft(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 [[nodiscard]] core::LineAnnotation const *
 Line_draft_over_frozen(D2DOverlayResources const &res,
                        D2DPaintInput const &input) noexcept {
-    core::RectPx const restore_rect =
-        !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+    core::RectPx const restore_rect = Restore_rect(input);
     if (input.draft_annotation == nullptr || input.draft_text_annotation != nullptr ||
         !res.frozen_valid || !res.frozen_bitmap ||
         restore_rect != res.frozen_selection || input.dragging ||
@@ -3147,6 +3225,7 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
         (void)res.annotations_rt->GetBitmap(
             res.annotations_bitmap.ReleaseAndGetAddressOf());
         res.annotations_valid = true;
+        res.annotations_empty = annotations.empty() && patches.empty();
     }
 }
 
@@ -3163,11 +3242,11 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
 
     res.frozen_rt->BeginDraw();
     Draw_full_bitmap_1to1(res.frozen_rt.Get(), res.screenshot.Get());
-    Draw_bitmap_pixels_1to1(res.frozen_rt.Get(), res.screenshot.Get(), selection,
-                            vd_width, vd_height);
 
     // Composite committed annotations before dimming so the dim sits on top of them.
-    Draw_full_bitmap_1to1(res.frozen_rt.Get(), res.annotations_bitmap.Get());
+    if (!res.annotations_empty) {
+        Draw_full_bitmap_1to1(res.frozen_rt.Get(), res.annotations_bitmap.Get());
+    }
 
     Draw_selection_dim(res.frozen_rt.Get(), res.solid_brush.Get(), selection, vd_width,
                        vd_height);
@@ -3188,8 +3267,22 @@ struct FramePlan final {
     FreehandDraftLiveParts freehand_live = {};
     bool has_live_annotation_draft = false;
     bool is_steady_state = false;
+    // A selection drag, resize or move over the fully dimmed frozen frame.
+    bool selection_gesture = false;
     core::LineAnnotation const *line_draft = nullptr;
 };
+
+// A selection drag, resize or move with nothing else going on: no draft, edit,
+// modifier preview, lifted window or preview patches. Such a frame is the frozen
+// frame built with no selection (everything dimmed) outside the moving selection,
+// and the screenshot and annotations inside it.
+[[nodiscard]] bool Is_selection_gesture(D2DPaintInput const &input,
+                                        bool has_live_annotation_draft) noexcept {
+    return (input.dragging || input.handle_dragging || input.move_dragging) &&
+           !input.annotation_editing && !input.modifier_preview &&
+           !has_live_annotation_draft && input.lifted_window_bitmap == nullptr &&
+           input.annotation_patches.empty();
+}
 
 // True if rect can touch a pixel of target_rect.
 [[nodiscard]] bool Touches(core::RectPx rect, core::RectPx target_rect) noexcept {
@@ -3221,6 +3314,25 @@ struct FramePlan final {
 void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_width,
                    int vd_height, FramePlan &plan) {
     plan.freehand_draft = Is_freehand_draft(input);
+    plan.has_live_annotation_draft = Has_live_annotation_draft(input);
+    bool const selection_gesture =
+        !plan.freehand_draft &&
+        Is_selection_gesture(input, plan.has_live_annotation_draft);
+
+    // frozen_bitmap is built for one selection: none (everything dimmed) during a
+    // selection gesture, else final_selection. A valid frozen frame built for another
+    // selection is rebuilt here, before the freehand draft reads it (a rebuild
+    // invalidates live_base). An invalid one is the caller's to rebuild; until then
+    // the frame takes the dynamic path.
+    core::RectPx const frozen_wanted =
+        selection_gesture ? core::RectPx{} : input.final_selection;
+    if (res.frozen_valid && res.frozen_selection != frozen_wanted) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Rebuild_frozen");
+        Rebuild_frozen_bitmap(res, frozen_wanted, vd_width, vd_height);
+    }
+    bool const frozen_ready =
+        res.frozen_valid && res.frozen_bitmap && res.frozen_selection == frozen_wanted;
+
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Update_draft_stroke");
         if (plan.freehand_draft) {
@@ -3245,11 +3357,11 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
     // outside the selection: it never takes the steady path. Freehand drafts and line
     // drafts over a valid frozen frame recomposite around themselves; any other draft
     // takes the dynamic path.
-    plan.has_live_annotation_draft = Has_live_annotation_draft(input);
-    plan.is_steady_state =
-        res.frozen_valid && !input.dragging && !input.handle_dragging &&
-        !input.move_dragging && !input.annotation_editing && !input.modifier_preview &&
-        !plan.has_live_annotation_draft && input.lifted_window_bitmap == nullptr;
+    plan.selection_gesture = selection_gesture && frozen_ready;
+    plan.is_steady_state = frozen_ready && !input.dragging && !input.handle_dragging &&
+                           !input.move_dragging && !input.annotation_editing &&
+                           !input.modifier_preview && !plan.has_live_annotation_draft &&
+                           input.lifted_window_bitmap == nullptr;
     plan.line_draft =
         plan.freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
 }
@@ -3298,6 +3410,25 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                                        *input.draft_annotation);
                                    });
         }
+    } else if (plan.selection_gesture) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Selection_gesture");
+        // Outside the selection: the frozen frame, all dimmed. Inside: screenshot and
+        // annotations. Every pixel is drawn once, plus the annotations inside.
+        core::RectPx const selection = Restore_rect(input);
+        for (core::RectPx const &band : Dim_bands(selection, vd_width, vd_height)) {
+            if (!band.Is_empty() && Touches(band, target_rect)) {
+                Draw_bitmap_pixels_1to1(rt, res.frozen_bitmap.Get(), band, vd_width,
+                                        vd_height);
+            }
+        }
+        if (Touches(selection.Normalized(), target_rect)) {
+            Draw_bitmap_pixels_1to1(rt, res.screenshot.Get(), selection, vd_width,
+                                    vd_height);
+            if (!res.annotations_empty) {
+                Draw_bitmap_pixels_1to1(rt, res.annotations_bitmap.Get(), selection,
+                                        vd_width, vd_height);
+            }
+        }
     } else if (plan.is_steady_state) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Steady_state");
         // Fastest path: one GPU blit of the frozen composite, nearest-neighbor 1:1:
@@ -3311,22 +3442,16 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Dynamic_frame");
         // Dynamic path: composite content once, then dim outside the selection.
         // Use live_rect while dragging; annotation gestures use final_selection.
-        core::RectPx const restore_rect =
-            !input.live_rect.Is_empty() ? input.live_rect : input.final_selection;
+        core::RectPx const restore_rect = Restore_rect(input);
         bool const needs_selection_restore =
             input.lifted_window_bitmap != nullptr || plan.has_live_annotation_draft;
         if (res.screenshot) {
             Draw_full_bitmap_1to1(rt, res.screenshot.Get());
-            if (!needs_selection_restore) {
-                // Retain the selection's pixel-exact sampling. The full-surface
-                // linear blit can round differently on very wide desktops.
-                Draw_bitmap_pixels_1to1(rt, res.screenshot.Get(), restore_rect,
-                                        vd_width, vd_height);
-            }
         }
 
         // Composite annotations before dimming so the dim sits on top of them.
-        if (res.annotations_bitmap) {
+        bool const has_annotations = res.annotations_bitmap && !res.annotations_empty;
+        if (has_annotations) {
             Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
         }
 
@@ -3354,7 +3479,7 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         }
         if (needs_selection_restore && !restore_rect.Is_empty()) {
             rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
-            if (res.annotations_bitmap) {
+            if (has_annotations) {
                 Draw_full_bitmap_1to1(rt, res.annotations_bitmap.Get());
             }
             if (plan.has_live_annotation_draft && draft_here) {
@@ -3403,11 +3528,17 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
             waitables.push_back(target.frame_latency_waitable);
         }
     }
+    res.last_frame_wait_qpc = 0;
     if (!waitables.empty()) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Wait_frame_latency");
+        LARGE_INTEGER wait_start{};
+        (void)QueryPerformanceCounter(&wait_start);
         DWORD const wait =
             WaitForMultipleObjectsEx(static_cast<DWORD>(waitables.size()),
                                      waitables.data(), TRUE, wait_timeout_ms, FALSE);
+        LARGE_INTEGER wait_end{};
+        (void)QueryPerformanceCounter(&wait_end);
+        res.last_frame_wait_qpc = wait_end.QuadPart - wait_start.QuadPart;
         if (wait == WAIT_TIMEOUT) {
             return D2DFrameStatus::WaitTimedOut;
         }
