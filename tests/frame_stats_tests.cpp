@@ -121,7 +121,8 @@ TEST(frame_stats, Spike_LoopDelayLargestPart_IsLate) {
     EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Late);
 }
 
-// Two parts under 40 ms each still explain a spike: the larger one wins, not "late".
+// Wait and paint split the spike evenly with no loop delay: the tie goes to wait,
+// not "late".
 TEST(frame_stats, Spike_EvenWaitAndPaint_IsWaitNotLate) {
     FrameIntervalParts const parts{.interval_ms = 70.0,
                                    .input_to_end_ms = 70.0,
@@ -130,7 +131,7 @@ TEST(frame_stats, Spike_EvenWaitAndPaint_IsWaitNotLate) {
     EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Wait);
 }
 
-// A wait over 40 ms does not explain a spike that is mostly loop delay.
+// The loop delay is the largest part, so a long wait does not explain the spike.
 TEST(frame_stats, Spike_LongLoopDelayWithLongWait_IsLate) {
     FrameIntervalParts const parts{.interval_ms = 200.0,
                                    .input_to_end_ms = 200.0,
