@@ -879,7 +879,9 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
                                                   std::max(y, kSelectStartPx + 1));
         input.cursor_client_px = {x, y};
         if (args.resize) {
+            // As On_paint during a handle drag: the dragged handle's edges highlight.
             input.handle_dragging = true;
+            input.highlight_handle = core::SelectionHandle::BottomRight;
         } else {
             input.dragging = true;
             input.selection_drag_corner_guide_px =

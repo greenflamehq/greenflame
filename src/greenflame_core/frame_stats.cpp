@@ -62,10 +62,11 @@ FrameSpikeKind Classify_frame_spike(FrameIntervalParts const &parts) noexcept {
     if (parts.input_to_end_ms <= kFrameSpikeMs) {
         return FrameSpikeKind::Idle;
     }
-    if (parts.wait_ms > kFrameSpikePartMs) {
+    double const late_ms = parts.input_to_end_ms - parts.wait_ms - parts.paint_ms;
+    if (parts.wait_ms >= parts.paint_ms && parts.wait_ms >= late_ms) {
         return FrameSpikeKind::Wait;
     }
-    if (parts.paint_ms > kFrameSpikePartMs) {
+    if (parts.paint_ms >= late_ms) {
         return FrameSpikeKind::Paint;
     }
     return FrameSpikeKind::Late;

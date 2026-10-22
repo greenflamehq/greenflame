@@ -3240,6 +3240,9 @@ void Rebuild_frozen_bitmap(D2DOverlayResources &res, core::RectPx selection,
         return;
     }
 
+    // Invalid until drawn: a failed EndDraw must not leave a half-drawn frame marked
+    // valid for the old selection.
+    res.frozen_valid = false;
     res.frozen_rt->BeginDraw();
     Draw_full_bitmap_1to1(res.frozen_rt.Get(), res.screenshot.Get());
 

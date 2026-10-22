@@ -38,8 +38,6 @@ Frame_rate_verdict_label(FrameRateVerdict verdict) noexcept;
 
 // A frame interval longer than this is a spike worth explaining.
 inline constexpr double kFrameSpikeMs = 50.0;
-// A part of a spike (frame-latency wait, paint) longer than this explains it.
-inline constexpr double kFrameSpikePartMs = 40.0;
 
 // One painted frame of a gesture, measured from the frame before it.
 struct FrameIntervalParts final {
@@ -52,12 +50,15 @@ struct FrameIntervalParts final {
 // Why a long interval was long.
 enum class FrameSpikeKind : uint8_t {
     Idle,  // no input for most of it: the frame followed its input promptly
-    Wait,  // the frame-latency wait (DWM, present, the GPU) took most of it
-    Paint, // drawing the frame took most of it
-    Late,  // input arrived, but the paint started late (message loop)
+    Wait,  // the frame-latency wait (DWM, present, the GPU) was the largest part
+    Paint, // drawing the frame was the largest part
+    Late,  // the time from input to paint start (message loop) was the largest part
 };
 inline constexpr size_t kFrameSpikeKindCount = 4;
 
+// Idle when the frame ended within kFrameSpikeMs of its input. Otherwise the largest
+// of the input-to-end time's three parts: wait, paint, and late (the rest: input to
+// paint start). Ties go to wait, then paint.
 [[nodiscard]] FrameSpikeKind
 Classify_frame_spike(FrameIntervalParts const &parts) noexcept;
 

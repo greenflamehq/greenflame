@@ -121,9 +121,10 @@ the share of frames within 33.3 ms, and why the intervals over 50 ms were long, 
 - `idle`: the frame came within 50 ms of the first input since the frame before it.
   The interval was a pause of the hand, not a slow frame: a frame is painted only
   when input asks for one.
-- `wait`: the frame-latency wait took over 40 ms (DWM, present, the GPU).
-- `paint`: drawing the frame took over 40 ms, wait excluded.
-- `late`: input came early, but the paint started late (the message loop).
+- Otherwise, the largest part of the time from that input to the frame's end:
+  - `wait`: the frame-latency wait (DWM, present, the GPU);
+  - `paint`: drawing the frame, wait excluded;
+  - `late`: from the input until the paint started (the message loop).
 
 A close after a failure writes `Overlay closed: ...`.
 

@@ -97,27 +97,45 @@ TEST(frame_stats, Spike_FollowsItsInputPromptly_IsIdle) {
     EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Idle);
 }
 
-TEST(frame_stats, Spike_LongWait_IsWait) {
+TEST(frame_stats, Spike_WaitLargestPart_IsWait) {
     FrameIntervalParts const parts{.interval_ms = 120.0,
                                    .input_to_end_ms = 110.0,
-                                   .wait_ms = kFrameSpikePartMs + 1.0,
+                                   .wait_ms = 60.0,
                                    .paint_ms = 45.0};
     EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Wait);
 }
 
-TEST(frame_stats, Spike_LongPaint_IsPaint) {
+TEST(frame_stats, Spike_PaintLargestPart_IsPaint) {
     FrameIntervalParts const parts{.interval_ms = 120.0,
                                    .input_to_end_ms = 110.0,
-                                   .wait_ms = kFrameSpikePartMs,
-                                   .paint_ms = kFrameSpikePartMs + 1.0};
+                                   .wait_ms = 41.0,
+                                   .paint_ms = 45.0};
     EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Paint);
 }
 
-TEST(frame_stats, Spike_ShortPartsAfterEarlyInput_IsLate) {
+TEST(frame_stats, Spike_LoopDelayLargestPart_IsLate) {
     FrameIntervalParts const parts{.interval_ms = 120.0,
                                    .input_to_end_ms = kFrameSpikeMs + 1.0,
                                    .wait_ms = 10.0,
                                    .paint_ms = 10.0};
+    EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Late);
+}
+
+// Two parts under 40 ms each still explain a spike: the larger one wins, not "late".
+TEST(frame_stats, Spike_EvenWaitAndPaint_IsWaitNotLate) {
+    FrameIntervalParts const parts{.interval_ms = 70.0,
+                                   .input_to_end_ms = 70.0,
+                                   .wait_ms = 35.0,
+                                   .paint_ms = 35.0};
+    EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Wait);
+}
+
+// A wait over 40 ms does not explain a spike that is mostly loop delay.
+TEST(frame_stats, Spike_LongLoopDelayWithLongWait_IsLate) {
+    FrameIntervalParts const parts{.interval_ms = 200.0,
+                                   .input_to_end_ms = 200.0,
+                                   .wait_ms = 41.0,
+                                   .paint_ms = 5.0};
     EXPECT_EQ(Classify_frame_spike(parts), FrameSpikeKind::Late);
 }
 
