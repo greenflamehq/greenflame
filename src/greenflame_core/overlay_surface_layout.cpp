@@ -92,6 +92,7 @@ bool Layout_still_matches(OverlayLayout const &layout,
         return true;
     }
     std::vector<RectPx> planned;
+    planned.reserve(layout.surfaces.size());
     for (OverlaySurfacePlan const &surface : layout.surfaces) {
         planned.push_back(surface.rect_screen);
     }

@@ -312,9 +312,10 @@ class OverlayWindow final {
         size_t gaps = 0;           // history overflowed: movement was lost
         size_t fallbacks = 0;      // history unavailable: message point only
     };
-    // Members are ordered to keep padding small (clang-analyzer-optin.performance.
-    // Padding in the nightly): pointers, then owners, then larger structs, then
-    // ints and bools. Owners keep their relative order, so they destroy as before.
+    // Member order keeps clang-analyzer-optin.performance.Padding quiet: 8-byte
+    // members first, then 4-byte, then 1-byte. The unique_ptr owners keep their
+    // relative order (it is their destruction order). The GREENFLAME_LOG block stays
+    // last.
     IOverlayEvents *events_ = nullptr;
     core::AppConfig *config_ = nullptr;
     IWindowQuery *window_query_ = nullptr;

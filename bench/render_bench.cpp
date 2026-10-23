@@ -1091,13 +1091,16 @@ struct RunContext final {
 core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
                                   D2DPaintInput const &input, Args const &args,
                                   bool straightened, uint64_t id) {
+    if (!input.draft_freehand_style.has_value()) {
+        return core::Annotation{.id = id, .data = core::FreehandStrokeAnnotation{}};
+    }
+    auto const &style = *input.draft_freehand_style;
     core::FreehandStrokeAnnotation stroke{
-        .points =
-            args.smooth && !straightened
-                ? core::Smooth_freehand_points(raw, core::FreehandSmoothingMode::Smooth,
-                                               input.draft_freehand_style->width_px)
-                : std::vector<core::PointPx>(raw.begin(), raw.end()),
-        .style = *input.draft_freehand_style,
+        .points = args.smooth && !straightened
+                      ? core::Smooth_freehand_points(
+                            raw, core::FreehandSmoothingMode::Smooth, style.width_px)
+                      : std::vector<core::PointPx>(raw.begin(), raw.end()),
+        .style = style,
         .freehand_tip_shape = input.draft_freehand_tip_shape,
     };
     return core::Annotation{.id = id, .data = stroke};
@@ -1338,6 +1341,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         static_cast<double>(ctx.width) * static_cast<double>(ctx.height) / kMegapixel;
     double const shaded = Median(mpx);
     std::vector<double> mcycles;
+    mcycles.reserve(samples.size());
     for (FrameSample const &s : samples) {
         mcycles.push_back(s.cpu_mcycles);
     }
