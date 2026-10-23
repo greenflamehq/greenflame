@@ -312,38 +312,60 @@ class OverlayWindow final {
         size_t gaps = 0;           // history overflowed: movement was lost
         size_t fallbacks = 0;      // history unavailable: message point only
     };
-    StrokeInput stroke_input_ = {};
-
-    bool highlighter_straighten_pending_ = false;
-    core::PointPx highlighter_straighten_ref_pos_ = {};
-
+    // Members are ordered to keep padding small (clang-analyzer-optin.performance.
+    // Padding in the nightly): pointers, then owners, then larger structs, then
+    // ints and bools. Owners keep their relative order, so they destroy as before.
     IOverlayEvents *events_ = nullptr;
     core::AppConfig *config_ = nullptr;
     IWindowQuery *window_query_ = nullptr;
     // The window on the cursor's monitor when the overlay opened: it has keyboard
     // focus, owns the other windows, the timers, the clipboard and the dialogs.
     HWND primary_hwnd_ = nullptr;
+    HPOWERNOTIFY display_state_notify_ = nullptr;
+    HINSTANCE hinstance_ = nullptr;
+    std::unique_ptr<OverlayResources> resources_;
+    std::unique_ptr<ObfuscateSourceProvider> obfuscate_source_provider_;
+    std::unique_ptr<D2DOverlayResources> d2d_resources_;
+    std::unique_ptr<D2DTextLayoutEngine> text_layout_engine_;
+    std::unique_ptr<Win32SpellCheckService> spell_check_service_;
     std::vector<OverlaySurface> surfaces_ = {};
+    std::vector<ToolbarButtonEntry> toolbar_buttons_;
+    StrokeInput stroke_input_ = {};
+    std::wstring fail_close_reason_ = {};
+    std::wstring transient_center_label_text_ = {};
     core::OverlayLayout layout_ = {};
+    SelectionWheelState selection_wheel_ = {};
+    OverlayHelpOverlay hotkey_help_overlay_ = {};
+    OverlayWarningDialog obfuscate_warning_dialog_ = {};
+    core::OverlayController controller_;
+    int modal_depth_ = 0; // a Save As dialog or message box is up
+    int wait_timeout_streak_ = 0;
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+    // Debug hooks (Ctrl+Shift+Alt+F11 / F12): the next paints report a lost device or
+    // frame-wait timeouts, to exercise the close paths.
+    int debug_force_wait_timeouts_ = 0;
+#endif
+    int mouse_wheel_delta_remainder_ = 0;
+    int32_t selected_annotation_marquee_phase_px_ = 0;
+    core::PointPx highlighter_straighten_ref_pos_ = {};
+    bool highlighter_straighten_pending_ = false;
     bool creating_ = false;     // Create_surfaces is running
     bool closing_ = false;      // Destroy is running
     bool capture_held_ = false; // SetCapture since the last press
     bool releasing_capture_ = false;
-    int modal_depth_ = 0; // a Save As dialog or message box is up
     bool fail_close_posted_ = false;
     bool fail_close_pending_ = false; // waits for the modal dialog to end
-    std::wstring fail_close_reason_ = {};
-    int wait_timeout_streak_ = 0;
-    bool close_after_modal_ = false; // Destroy asked for during a modal dialog
+    bool close_after_modal_ = false;  // Destroy asked for during a modal dialog
     bool session_locked_ = false;
     bool display_off_ = false;
-    HPOWERNOTIFY display_state_notify_ = nullptr;
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
-    // Debug hooks (Ctrl+Shift+Alt+F11 / F12): the next paints report a lost device or
-    // frame-wait timeouts, to exercise the close paths.
     bool debug_force_device_lost_ = false;
-    int debug_force_wait_timeouts_ = 0;
 #endif
+    bool testing_toolbar_ = false;
+    bool caret_blink_visible_ = true;
+    bool selected_annotation_marquee_timer_running_ = false;
+    bool suppress_next_lbutton_up_ = false;
+    std::optional<core::SelectionHandle> last_hover_handle_;
 #if defined(GREENFLAME_LOG)
     // Frames of the current press-to-release gesture, for the debug log. QPC ticks.
     struct GestureFrame final {
@@ -357,25 +379,6 @@ class OverlayWindow final {
     bool gesture_frames_active_ = false;
     int64_t gesture_pending_input_qpc_ = 0; // 0: no input since the last frame
 #endif
-    HINSTANCE hinstance_ = nullptr;
-    core::OverlayController controller_;
-    std::unique_ptr<OverlayResources> resources_;
-    std::unique_ptr<ObfuscateSourceProvider> obfuscate_source_provider_;
-    std::unique_ptr<D2DOverlayResources> d2d_resources_;
-    std::unique_ptr<D2DTextLayoutEngine> text_layout_engine_;
-    std::unique_ptr<Win32SpellCheckService> spell_check_service_;
-    std::optional<core::SelectionHandle> last_hover_handle_;
-    OverlayHelpOverlay hotkey_help_overlay_ = {};
-    OverlayWarningDialog obfuscate_warning_dialog_ = {};
-    bool testing_toolbar_ = false;
-    int mouse_wheel_delta_remainder_ = 0;
-    std::wstring transient_center_label_text_ = {};
-    bool caret_blink_visible_ = true;
-    int32_t selected_annotation_marquee_phase_px_ = 0;
-    bool selected_annotation_marquee_timer_running_ = false;
-    bool suppress_next_lbutton_up_ = false;
-    std::vector<ToolbarButtonEntry> toolbar_buttons_;
-    SelectionWheelState selection_wheel_ = {};
 };
 
 } // namespace greenflame
