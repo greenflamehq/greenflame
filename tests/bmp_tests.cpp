@@ -141,7 +141,8 @@ TEST(bmp, Diff_bmp_bytes_SizeMismatchOrGarbage_IsNullopt) {
 
 // Pixel (x, y) in top-down coordinates of a kDiffWidth x kDiffHeight BMP buffer.
 static size_t Pixel_offset(int x, int y) {
-    return static_cast<size_t>((kDiffHeight - 1 - y) * kDiffRowBytes + x * 4);
+    return static_cast<size_t>(kDiffHeight - 1 - y) * kDiffRowBytes +
+           static_cast<size_t>(x) * 4;
 }
 
 TEST(bmp, Diff_bmp_bytes_MaskSkipsPixelsOutsideIt) {

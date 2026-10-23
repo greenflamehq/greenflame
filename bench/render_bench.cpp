@@ -998,6 +998,17 @@ std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
     return annotations;
 }
 
+// The draft stroke style the tool uses for a freehand scenario. The app sets the style
+// opacity (and, for the highlighter, the blit opacity) from the tool opacity.
+core::StrokeStyle Freehand_style(std::string_view scenario, Args const &args) {
+    bool const highlighter = scenario == "highlighter";
+    core::StrokeStyle style{};
+    style.width_px = highlighter ? kHighlighterWidthPx : kBrushWidthPx;
+    style.color = highlighter ? kHighlighterColor : kBrushColor;
+    style.opacity_percent = Stroke_opacity_percent(scenario, args);
+    return style;
+}
+
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
     if (scenario == "steady" || scenario == "line" || scenario == "obfuscate" ||
@@ -1009,14 +1020,10 @@ void Set_scenario_base(std::string_view scenario, int width, int height,
     }
     if (Is_freehand(scenario)) {
         bool const highlighter = scenario == "highlighter";
-        core::StrokeStyle style{};
-        style.width_px = highlighter ? kHighlighterWidthPx : kBrushWidthPx;
-        style.color = highlighter ? kHighlighterColor : kBrushColor;
-        // The app sets both the style opacity and the blit opacity (k1 for the
-        // highlighter multiply) from the tool opacity.
+        // The blit opacity (k1 for the highlighter multiply) also comes from the tool
+        // opacity.
         int const opacity_percent = Stroke_opacity_percent(scenario, args);
-        style.opacity_percent = opacity_percent;
-        input.draft_freehand_style = style;
+        input.draft_freehand_style = Freehand_style(scenario, args);
         input.draft_freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
                                                      : core::FreehandTipShape::Round;
         input.draft_freehand_smoothing_mode = args.smooth
@@ -1089,15 +1096,15 @@ struct RunContext final {
 // The annotation the tool commits for these draft points: smoothed when smoothing is
 // on, raw when off or straightened.
 core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
+                                  core::StrokeStyle const &style,
                                   D2DPaintInput const &input, Args const &args,
                                   bool straightened, uint64_t id) {
     core::FreehandStrokeAnnotation stroke{
-        .points =
-            args.smooth && !straightened
-                ? core::Smooth_freehand_points(raw, core::FreehandSmoothingMode::Smooth,
-                                               input.draft_freehand_style->width_px)
-                : std::vector<core::PointPx>(raw.begin(), raw.end()),
-        .style = *input.draft_freehand_style,
+        .points = args.smooth && !straightened
+                      ? core::Smooth_freehand_points(
+                            raw, core::FreehandSmoothingMode::Smooth, style.width_px)
+                      : std::vector<core::PointPx>(raw.begin(), raw.end()),
+        .style = style,
         .freehand_tip_shape = input.draft_freehand_tip_shape,
     };
     return core::Annotation{.id = id, .data = stroke};
@@ -1137,9 +1144,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             ok = Paint_d2d_frame(*ctx.res, dab_input, ctx.width, ctx.height, nullptr,
                                  kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
         }
-        annotations.push_back(
-            Committed_stroke(dab_state.points, input, args, /*straightened=*/false,
-                             static_cast<uint64_t>(annotations.size() + 1)));
+        annotations.push_back(Committed_stroke(
+            dab_state.points, Freehand_style(scenario, args), input, args,
+            /*straightened=*/false, static_cast<uint64_t>(annotations.size() + 1)));
         input.annotations = annotations;
         Rebuild_annotations_bitmap(*ctx.res, annotations);
         Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
@@ -1245,9 +1252,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         std::span<const core::PointPx> const raw = input.draft_freehand_points;
         bool const straightened = raw.size() == 2 && args.straighten_at >= 0;
         std::vector<core::Annotation> committed = annotations;
-        committed.push_back(
-            Committed_stroke(raw, input, args, straightened,
-                             static_cast<uint64_t>(annotations.size() + 1)));
+        committed.push_back(Committed_stroke(
+            raw, Freehand_style(scenario, args), input, args, straightened,
+            static_cast<uint64_t>(annotations.size() + 1)));
         commit_points = std::get<core::FreehandStrokeAnnotation>(committed.back().data)
                             .points.size();
         input.annotations = committed;
@@ -1338,6 +1345,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         static_cast<double>(ctx.width) * static_cast<double>(ctx.height) / kMegapixel;
     double const shaded = Median(mpx);
     std::vector<double> mcycles;
+    mcycles.reserve(samples.size());
     for (FrameSample const &s : samples) {
         mcycles.push_back(s.cpu_mcycles);
     }
