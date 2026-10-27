@@ -433,6 +433,16 @@ add_library(greenflame_render STATIC
     src/greenflame/win/d2d_draw_helpers.h
     src/greenflame/win/d2d_paint.h
     src/greenflame/win/d2d_paint.cpp
+    src/greenflame/win/debug_log.cpp
+    src/greenflame/win/debug_log.h
+    src/greenflame/win/display_queries.cpp
+    src/greenflame/win/display_queries.h
+    src/greenflame/win/gdi_capture.cpp
+    src/greenflame/win/gdi_capture.h
+    src/greenflame/win/annotation_capture_renderer.h
+    src/greenflame/win/annotation_capture_renderer.cpp
+    src/greenflame/win/obfuscate_preview.h
+    src/greenflame/win/obfuscate_preview.cpp
 )
 
 target_include_directories(greenflame_render PUBLIC
@@ -440,6 +450,11 @@ target_include_directories(greenflame_render PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src/greenflame
 )
 
+# The debug log lives in this library; every target that links it must agree on
+# GREENFLAME_LOG, so it is public.
+if(GREENFLAME_ENABLE_DEBUG_LOG)
+    target_compile_definitions(greenflame_render PUBLIC GREENFLAME_LOG)
+endif()
 target_compile_definitions(greenflame_render PRIVATE
     NOMINMAX
     WIN32_LEAN_AND_MEAN
@@ -463,6 +478,13 @@ target_link_libraries(greenflame_render PUBLIC
     dxgi
     dxguid  # CLSID_D2D1ArithmeticComposite and other D2D effect GUIDs
     windowsapp
+    # GDI capture and the software annotation renderer (Save, Copy, obfuscate
+    # sources)
+    user32
+    gdi32
+    shcore
+    Windowscodecs
+    ole32
 )
 
 # -----------------------------
@@ -476,17 +498,9 @@ add_executable(greenflame WIN32
     src/greenflame/greenflame_app.h
     src/greenflame/app_config_store.cpp
     src/greenflame/app_config_store.h
-    src/greenflame/win/display_queries.cpp
-    src/greenflame/win/display_queries.h
-    src/greenflame/win/debug_log.cpp
-    src/greenflame/win/debug_log.h
-    src/greenflame/win/gdi_capture.cpp
-    src/greenflame/win/gdi_capture.h
     src/greenflame/win/save_image.cpp
     src/greenflame/win/wgc_window_capture.cpp
     src/greenflame/win/wgc_window_capture.h
-    src/greenflame/win/annotation_capture_renderer.h
-    src/greenflame/win/annotation_capture_renderer.cpp
     src/greenflame/win/overlay_help_overlay.cpp
     src/greenflame/win/overlay_help_overlay.h
     src/greenflame/win/overlay_panel_chrome.cpp

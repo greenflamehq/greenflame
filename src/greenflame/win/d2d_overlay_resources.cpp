@@ -1,6 +1,7 @@
 #include "greenflame/win/d2d_overlay_resources.h"
 
 #include "greenflame/win/d2d_draw_helpers.h"
+#include "greenflame_core/overlay_controller.h"
 
 namespace greenflame {
 
@@ -738,6 +739,12 @@ void D2DOverlayResources::Invalidate_annotations() noexcept {
 }
 
 void D2DOverlayResources::Invalidate_frozen() noexcept { frozen_valid = false; }
+
+void D2DOverlayResources::Apply_overlay_action(core::OverlayAction action) noexcept {
+    if (action == core::OverlayAction::InvalidateFrozenCache) {
+        Invalidate_annotations();
+    }
+}
 
 void D2DOverlayResources::Release_device_resources() {
     screenshot.Reset();

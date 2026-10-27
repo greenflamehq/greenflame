@@ -6,6 +6,10 @@
 #include "greenflame_core/freehand_smoothing.h"
 #include "greenflame_core/text_annotation_types.h"
 
+namespace greenflame::core {
+enum class OverlayAction : uint8_t;
+} // namespace greenflame::core
+
 namespace greenflame {
 
 // The selection border dash pattern while dragging, in pixels at stroke width 1.
@@ -251,6 +255,10 @@ struct D2DOverlayResources final {
 
     // Mark only the frozen cache dirty (annotations are still valid).
     void Invalidate_frozen() noexcept;
+
+    // Marks the caches an overlay controller action makes stale. The window and the
+    // render bench both apply actions through this.
+    void Apply_overlay_action(core::OverlayAction action) noexcept;
 
     // Release all device-dependent resources except factory and dwrite_factory.
     void Release_device_resources();
