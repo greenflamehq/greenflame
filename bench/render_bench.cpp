@@ -233,6 +233,8 @@ struct Args final {
     bool edit_dynamic = false;      // --edit-dynamic
     bool verify_edit = false;       // --verify-edit
     bool click_first = false;       // --click-first
+    bool click_moved = false;       // --click-moved
+    bool raster_load = false;       // --raster-load
     bool reverse = false;           // --reverse: freehand runs right to left
     bool split_monitors = false;    // --split-monitors: one target per monitor
     bool mask_monitors = false;     // --mask-monitors: diff only monitor pixels
@@ -283,6 +285,12 @@ void Print_usage() {
         "  --click-first                move: first a click on the annotation that "
         "does not move it, an idle frame, and a selection drag and commit, before "
         "the drag\n"
+        "  --raster-load                move: 3 obfuscates of 1600x400 and 3 texts of "
+        "1600x200 below the moved annotation, off its path (large rasters)\n"
+        "  --click-moved                with --click-first: the click's painted frame "
+        "has the annotation moved (it is back at the release, which does nothing); "
+        "fail unless the steady frame after the selection commit matches a fresh "
+        "rebuild\n"
         "  --resize                     move: drag the right edge instead of the body; "
         "select: resize a committed selection, inset "
         "by an eighth of the desktop, by a handle\n"
@@ -487,6 +495,10 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.verify_edit = true;
         } else if (key == "--click-first") {
             args.click_first = true;
+        } else if (key == "--click-moved") {
+            args.click_moved = true;
+        } else if (key == "--raster-load") {
+            args.raster_load = true;
         } else if (key == "--multi") {
             args.multi = true;
         } else if (key == "--obfuscate-below") {
@@ -1117,6 +1129,12 @@ constexpr int32_t kEditRasterCellPx = 8;
 constexpr uint64_t kEditFirstId = 1000;
 // commit: odd frames commit the --annotated inset shrunk by this much on each side.
 constexpr int32_t kCommitShrinkPx = 32;
+// --raster-load: large rasters below the moved annotation, off its path.
+constexpr int32_t kLoadWidthPx = 1600;
+constexpr int32_t kLoadObfuscateHeightPx = 400;
+constexpr int32_t kLoadTextHeightPx = 200;
+constexpr int32_t kLoadGapPx = 16;
+constexpr int kLoadCount = 3;
 
 // What OverlayWindow's obfuscate source provider sees: the screenshot, or with --lifted
 // the window capture, as a GDI bitmap.
@@ -1353,6 +1371,24 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
             scene.doc.push_back(std::move(annotation));
         }
     };
+    if (args.raster_load) {
+        std::vector<core::Annotation> load;
+        for (int k = 0; k < kLoadCount; ++k) {
+            int32_t const left = sel.left + k * (kLoadWidthPx + kLoadGapPx);
+            load.push_back(*Make_edit_annotation(
+                "obfuscate",
+                core::RectPx::From_ltrb(left, sel.top + kLoadGapPx, left + kLoadWidthPx,
+                                        sel.top + kLoadGapPx + kLoadObfuscateHeightPx),
+                next_id++));
+            load.push_back(*Make_edit_annotation(
+                "text",
+                core::RectPx::From_ltrb(left,
+                                        sel.bottom - kLoadGapPx - kLoadTextHeightPx,
+                                        left + kLoadWidthPx, sel.bottom - kLoadGapPx),
+                next_id++));
+        }
+        append(load, false);
+    }
     if (args.obfuscate_below) {
         append(obfuscates, false);
         append(moved, true);
@@ -1593,6 +1629,54 @@ std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
     return differing;
 }
 
+// Reads every target into packed (a desktop-sized bottom-up BGRA buffer).
+bool Read_targets(D2DOverlayResources &res, int width, int height,
+                  std::vector<uint8_t> &packed) {
+    packed.assign(
+        static_cast<size_t>(width) * kBytesPerPixel * static_cast<size_t>(height), 0);
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, packed)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// --click-moved: paints a steady frame from the caches as they are, then again with
+// the annotations and the frozen frame rebuilt from input's annotations, and returns
+// how many pixels differ (nullopt if a step failed).
+std::optional<size_t> Steady_differs_from_rebuild(D2DOverlayResources &res,
+                                                  D2DPaintInput const &input, int width,
+                                                  int height) {
+    std::vector<uint8_t> cached;
+    std::vector<uint8_t> fresh;
+    if (Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs) !=
+            D2DFrameStatus::Ok ||
+        !Read_targets(res, width, height, cached)) {
+        return std::nullopt;
+    }
+    Rebuild_annotations_bitmap(res, input.annotations);
+    Rebuild_frozen_bitmap(res, input.final_selection, width, height);
+    if (Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs) !=
+            D2DFrameStatus::Ok ||
+        !Read_targets(res, width, height, fresh)) {
+        return std::nullopt;
+    }
+    if (std::ranges::equal(cached, fresh)) {
+        return 0;
+    }
+    size_t differing = 0;
+    for (size_t at = 0; at < cached.size(); at += kBytesPerPixel) {
+        if (!std::equal(cached.begin() + static_cast<std::ptrdiff_t>(at),
+                        cached.begin() +
+                            static_cast<std::ptrdiff_t>(at + kBytesPerPixel),
+                        fresh.begin() + static_cast<std::ptrdiff_t>(at))) {
+            ++differing;
+        }
+    }
+    return differing;
+}
+
 // Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
 std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                                    Args const &args, int run, bool dump_here) {
@@ -1677,9 +1761,16 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         // release returns no action, so nothing rebuilds. Then a selection drag (the
         // frozen frame built for no selection) and its commit (built for the selection
         // again). The drag that follows must still take the edit fast paths.
+        // --click-moved: the painted edit frame shows the annotation moved, and the
+        // release (back at the start) returns no action.
         D2DPaintInput click = input;
-        Fill_move_frame(*edit, 0, args.frames, args, click);
+        Fill_move_frame(*edit, args.click_moved ? args.frames / 2 : 0, args.frames,
+                        args, click);
+        for (size_t m = 0; m < edit->moved.size(); ++m) {
+            edit->doc[edit->moved[m]] = edit->start[m];
+        }
         D2DPaintInput idle = input;
+        idle.annotations = edit->doc;
         bool const ok = Paint_d2d_frame(*ctx.res, click, ctx.width, ctx.height, nullptr,
                                         kFrameWaitTimeoutMs) == D2DFrameStatus::Ok &&
                         Paint_d2d_frame(*ctx.res, idle, ctx.width, ctx.height, nullptr,
@@ -1690,6 +1781,20 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         }
         Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
         Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        if (args.click_moved) {
+            std::optional<size_t> const differing =
+                Steady_differs_from_rebuild(*ctx.res, idle, ctx.width, ctx.height);
+            if (!differing.has_value()) {
+                Print("click-moved: readback failed\n");
+                return std::nullopt;
+            }
+            Print("click-moved: the steady frame differs from a fresh rebuild in {} "
+                  "pixels\n",
+                  *differing);
+            if (*differing > 0) {
+                return std::nullopt;
+            }
+        }
     }
     ctx.res->edit_stats = {};
     size_t verify_differing_frames = 0;

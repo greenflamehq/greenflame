@@ -256,15 +256,21 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     `--stale-frozen`) and, with `--annotated`, the below-edit cache.
     `ctest` runs it on WARP, in one target on `single-1080`, for a rectangle,
     obfuscates below, a multi-selection, a resize, a moved obfuscate, a
-    highlighter, `--lifted`, `--stale-frozen` and `--click-first`; and one per
+    highlighter, `--lifted`, `--stale-frozen`, `--click-first` and `--click-moved`
+    (a rectangle and an obfuscate); and one per
     monitor on `jocelyn-desk` for the rectangle, the moved obfuscate and
-    `--click-first`. Each uses 2 frames and at most one obfuscation, to keep `ctest`
-    fast. Run the heavier variants by hand when edit drawing changes: every
+    `--click-first`. Each uses 3 frames (the middle one under the obfuscate) and at
+    most one obfuscation, to keep `ctest` fast. Run the heavier variants by hand when edit drawing changes: every
     `--edit-kind`, both layouts, `--obfuscations 3`, `--stroke-points 10000`, and
     more `--frames`.
   - `--click-first`: before the drag, a click on the annotation that moves
     nothing (the edit ends with no rebuild), an idle frame, then a selection drag
     and commit. The drag must still take the changed-area path.
+  - `--click-moved` (with `--click-first`): the click's painted frame shows the
+    annotation moved, and the release (back at the start) does nothing. The steady
+    frame after the selection commit must match one with every cache rebuilt.
+  - `--raster-load`: 3 obfuscates of 1600x400 and 3 texts of 1600x200 below the
+    moved annotation, off its path, to measure large rasters.
   - `--dump-frame` equal to `--frames` writes the frame after the release.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows

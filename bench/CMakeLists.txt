@@ -388,9 +388,10 @@ if(BUILD_TESTING)
     # all with --lifted or --stale-frozen). --click-first replays a click that moves
     # nothing, then a selection drag and commit, before the drag.
     # Span runs use single-1080, split runs jocelyn-desk (they need several
-    # monitors). Two measured frames each keep ctest fast.
+    # monitors). Three measured frames each keep ctest fast and put the middle frame's
+    # moved annotation under the obfuscate.
     set(greenflame_edit_common
-        --adapter warp --scenario move --annotated --frames 2 --verify-edit)
+        --adapter warp --scenario move --annotated --frames 3 --verify-edit)
     set(greenflame_edit_layout_span --layout single-1080)
     set(greenflame_edit_layout_split --layout jocelyn-desk --split-monitors)
     set(greenflame_edit_args_rect --obfuscations 1)
@@ -402,12 +403,17 @@ if(BUILD_TESTING)
     set(greenflame_edit_args_lifted --obfuscations 1 --lifted)
     set(greenflame_edit_args_stale --stale-frozen)
     set(greenflame_edit_args_click --obfuscations 1 --click-first)
+    # A click whose painted frame was moved and whose release does nothing: the
+    # steady frame after a selection commit must match a fresh rebuild.
+    set(greenflame_edit_args_click_moved --obfuscations 1 --click-first --click-moved)
+    set(greenflame_edit_args_click_moved_obfuscate
+        --obfuscations 1 --click-first --click-moved --edit-kind obfuscate)
     # Every case runs in one target. The per-target paths (the clip cull, the frozen
     # blit per monitor) also run split for a moved rectangle, a moved obfuscate and
     # the click replay; the other cases do not depend on the targets.
     set(greenflame_edit_split_cases rect obfuscate click)
     foreach(greenflame_edit_case rect below multi resize obfuscate highlighter lifted
-            stale click)
+            stale click click_moved click_moved_obfuscate)
         set(greenflame_edit_targets_list span)
         if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)
             list(APPEND greenflame_edit_targets_list split)

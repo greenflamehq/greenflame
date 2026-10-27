@@ -3227,6 +3227,7 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
             res.annotations_bitmap.ReleaseAndGetAddressOf());
         res.annotations_valid = true;
         res.annotations_empty = annotations.empty() && patches.empty();
+        res.annotations_from_edit = false;
         res.annotations_source =
             patches.empty() && !skip_id.has_value()
                 ? std::make_shared<const std::vector<core::Annotation>>(
@@ -3357,9 +3358,8 @@ void Draw_annotations_for_edit(D2DOverlayResources &res, D2DPaintInput const &in
     res.freehand_draft.live_base_valid = false;
     res.freehand_draft.active = false;
     res.annotations_valid = false;
-    std::span<const core::Annotation> const below = annotations.first(below_count);
     bool const cached = res.edit_cache.valid && res.annotations_bitmap &&
-                        std::ranges::equal(res.edit_cache.below, below);
+                        res.edit_cache.below_count == below_count;
     if (cached) {
         if (FAILED(res.annotations_bitmap->CopyFromBitmap(
                 nullptr, res.edit_below_bitmap.Get(), nullptr))) {
@@ -3382,7 +3382,7 @@ void Draw_annotations_for_edit(D2DOverlayResources &res, D2DPaintInput const &in
             Rebuild_annotations_bitmap(res, annotations, patches);
             return;
         }
-        res.edit_cache.below.assign(below.begin(), below.end());
+        res.edit_cache.below_count = below_count;
         res.edit_cache.valid = true;
     }
 
@@ -3397,33 +3397,60 @@ void Draw_annotations_for_edit(D2DOverlayResources &res, D2DPaintInput const &in
     }
 }
 
-// The annotations an edit frame's bitmap shows: the document with the frame's preview
-// patches applied.
-[[nodiscard]] std::shared_ptr<const std::vector<core::Annotation>>
-Shown_annotations(std::span<const core::Annotation> annotations,
-                  std::span<const AnnotationPreviewPatch> patches) {
-    auto shown = std::make_shared<std::vector<core::Annotation>>(annotations.begin(),
-                                                                 annotations.end());
-    for (AnnotationPreviewPatch const &patch : patches) {
-        if (patch.index < shown->size()) {
-            (*shown)[patch.index] = patch.annotation;
+// Whether an edit frame shows the edit's start: every edited annotation is back where
+// it began, and every preview patch equals the document's annotation.
+[[nodiscard]] bool Edit_frame_shows_start(D2DPaintInput const &input) noexcept {
+    for (core::AnnotationEditPreview const &preview : input.annotation_edit_previews) {
+        if (preview.index >= input.annotations.size() ||
+            input.annotations[preview.index] != preview.annotation_before) {
+            return false;
         }
     }
-    return shown;
+    for (AnnotationPreviewPatch const &patch : input.annotation_patches) {
+        if (patch.index >= input.annotations.size() ||
+            input.annotations[patch.index] != patch.annotation) {
+            return false;
+        }
+    }
+    return true;
 }
 
-// Draws an edit frame's annotations_bitmap and records what it shows. An edit can end
-// with no rebuild (a click on an annotation that does not move it), and a frozen
-// rebuild after that copies this record: without it the next edit could not tell
-// that the frozen frame shows its start, and would take the dynamic path.
+// Draws an edit frame's annotations_bitmap and records what it shows, without copying
+// the document: the frozen frame's record when the frame shows the edit's start (a
+// click that moves nothing), else unknown.
 void Rebuild_annotations_for_edit(D2DOverlayResources &res,
                                   D2DPaintInput const &input) {
     GREENFLAME_PROFILE_SCOPE("D2DPaint::Rebuild_annotations_for_edit");
     Draw_annotations_for_edit(res, input);
+    res.edit_cache.active = true;
+    res.annotations_from_edit = true;
     res.annotations_source =
-        res.annotations_valid
-            ? Shown_annotations(input.annotations, input.annotation_patches)
+        res.annotations_valid && res.edit_cache.frozen_is_edit_start.value_or(false) &&
+                Edit_frame_shows_start(input)
+            ? res.frozen_source
             : nullptr;
+}
+
+// The first frame after an edit. The edit may have ended with no action (a drag back
+// to the start, a jittery click), so nothing rebuilt annotations_bitmap, which can
+// still show the last moved frame. Rebuild it, and the frozen frame, when they do not
+// show the document. A frozen frame built from a stale bitmap would keep a ghost, or
+// show clear pixels where an obfuscate is, until the next annotation commit.
+void End_edit(D2DOverlayResources &res, D2DPaintInput const &input, int vd_width,
+              int vd_height) {
+    GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::End_edit");
+    res.edit_cache = {};
+    auto const shows_document =
+        [&](std::shared_ptr<const std::vector<core::Annotation>> const &source) {
+            return source != nullptr && std::ranges::equal(*source, input.annotations);
+        };
+    if (res.annotations_valid && res.annotations_from_edit &&
+        !shows_document(res.annotations_source)) {
+        Rebuild_annotations_bitmap(res, input.annotations, input.annotation_patches);
+    }
+    if (res.frozen_valid && !shows_document(res.frozen_source)) {
+        Rebuild_frozen_bitmap(res, res.frozen_selection, vd_width, vd_height);
+    }
 }
 
 // Whether frozen_bitmap shows the annotations as they were when the edit started: the
@@ -3503,6 +3530,9 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
                    int vd_height, FramePlan &plan) {
     plan.freehand_draft = Is_freehand_draft(input);
     plan.has_live_annotation_draft = Has_live_annotation_draft(input);
+    if (!input.annotation_editing && res.edit_cache.active) {
+        End_edit(res, input, vd_width, vd_height);
+    }
     bool const selection_gesture =
         !plan.freehand_draft &&
         Is_selection_gesture(input, plan.has_live_annotation_draft);
@@ -3542,10 +3572,6 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
             res.edit_cache.frozen_is_edit_start = Frozen_shows_edit_start(res, input);
         }
         Rebuild_annotations_for_edit(res, input);
-    } else if (res.edit_cache.valid ||
-               res.edit_cache.frozen_is_edit_start.has_value()) {
-        // The edit ended: what it cached is stale.
-        res.edit_cache = {};
     }
 
     // Any live annotation draft must be drawn before the dim so the dim sits on top

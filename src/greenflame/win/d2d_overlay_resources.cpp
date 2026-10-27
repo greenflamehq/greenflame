@@ -752,6 +752,7 @@ D2DOverlayResources::Toolbar_glyph_bitmap(OverlayToolbarGlyphId glyph) const noe
 }
 
 void D2DOverlayResources::Invalidate_annotations() noexcept {
+    edit_cache = {};
     obfuscate_bitmaps.clear();
     text_bitmaps.clear();
     bubble_bitmaps.clear();

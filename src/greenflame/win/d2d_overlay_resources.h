@@ -192,17 +192,25 @@ struct D2DOverlayResources final {
     std::optional<TextCursorPreviewCache> text_cursor_preview_cache;
 
     bool annotations_valid = false;
-    // The annotations annotations_bitmap was last fully built from (no preview patches,
-    // no skipped annotation), and the ones frozen_bitmap shows. Null when not known,
-    // as after an edit frame's rebuild.
+    // The annotations annotations_bitmap shows, and the ones frozen_bitmap shows. Null
+    // when not known: preview patches, a skipped annotation, or an edit frame that
+    // shows something other than the edit's start.
     std::shared_ptr<const std::vector<core::Annotation>> annotations_source = nullptr;
     std::shared_ptr<const std::vector<core::Annotation>> frozen_source = nullptr;
+    // True when an edit frame drew annotations_bitmap last. The first frame after the
+    // edit rebuilds it if it does not show the document: an edit can end with no
+    // action, so nothing else would.
+    bool annotations_from_edit = false;
     // Annotation edits (move, resize). Every edit frame rebuilds annotations_bitmap.
     // The annotations below the lowest one the edit changes stay the same, so they are
     // drawn once into edit_below_bitmap and each frame draws only the rest.
     struct EditCache final {
+        bool active = false; // an edit frame was drawn since the last non-edit frame
+        // edit_below_bitmap holds the first below_count annotations. Within one edit
+        // they cannot change (the document is locked mid-manipulation; lifted window
+        // and screenshot changes drop this cache).
         bool valid = false;
-        std::vector<core::Annotation> below = {}; // what edit_below_bitmap holds
+        size_t below_count = 0;
         // Whether frozen_bitmap shows the annotations the edit started from, so a frame
         // can recomposite only what the edit changed. Decided at the edit's first
         // frame; cleared when frozen_bitmap is rebuilt and when the edit ends.
