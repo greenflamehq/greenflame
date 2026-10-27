@@ -257,7 +257,7 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     `ctest` runs it on WARP, in one target on `single-1080`, for a rectangle,
     obfuscates below, a multi-selection, a resize, a moved obfuscate, a
     highlighter, `--lifted`, `--stale-frozen`, `--click-first` and `--click-moved`
-    (a rectangle and an obfuscate); and one per
+    (a rectangle with and without an obfuscation, and a moved obfuscate); and one per
     monitor on `jocelyn-desk` for the rectangle, the moved obfuscate and
     `--click-first`. Each uses 3 frames (the middle one under the obfuscate) and at
     most one obfuscation, to keep `ctest` fast. Run the heavier variants by hand when edit drawing changes: every

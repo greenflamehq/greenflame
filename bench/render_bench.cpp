@@ -1763,18 +1763,20 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         // again). The drag that follows must still take the edit fast paths.
         // --click-moved: the painted edit frame shows the annotation moved, and the
         // release (back at the start) returns no action.
+        // click.annotations spans edit->doc, so the click frame is painted before the
+        // document goes back to the start.
         D2DPaintInput click = input;
         Fill_move_frame(*edit, args.click_moved ? args.frames / 2 : 0, args.frames,
                         args, click);
+        bool ok = Paint_d2d_frame(*ctx.res, click, ctx.width, ctx.height, nullptr,
+                                  kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
         for (size_t m = 0; m < edit->moved.size(); ++m) {
             edit->doc[edit->moved[m]] = edit->start[m];
         }
         D2DPaintInput idle = input;
         idle.annotations = edit->doc;
-        bool const ok = Paint_d2d_frame(*ctx.res, click, ctx.width, ctx.height, nullptr,
-                                        kFrameWaitTimeoutMs) == D2DFrameStatus::Ok &&
-                        Paint_d2d_frame(*ctx.res, idle, ctx.width, ctx.height, nullptr,
-                                        kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+        ok = ok && Paint_d2d_frame(*ctx.res, idle, ctx.width, ctx.height, nullptr,
+                                   kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
         if (!ok) {
             Print("paint failed (device lost?)\n");
             return std::nullopt;

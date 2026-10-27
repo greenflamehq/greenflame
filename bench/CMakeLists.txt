@@ -406,6 +406,8 @@ if(BUILD_TESTING)
     # A click whose painted frame was moved and whose release does nothing: the
     # steady frame after a selection commit must match a fresh rebuild.
     set(greenflame_edit_args_click_moved --obfuscations 1 --click-first --click-moved)
+    # No obfuscation: only the moved annotation can leave a stale frame.
+    set(greenflame_edit_args_click_moved_plain --click-first --click-moved)
     set(greenflame_edit_args_click_moved_obfuscate
         --obfuscations 1 --click-first --click-moved --edit-kind obfuscate)
     # Every case runs in one target. The per-target paths (the clip cull, the frozen
@@ -413,7 +415,7 @@ if(BUILD_TESTING)
     # the click replay; the other cases do not depend on the targets.
     set(greenflame_edit_split_cases rect obfuscate click)
     foreach(greenflame_edit_case rect below multi resize obfuscate highlighter lifted
-            stale click click_moved click_moved_obfuscate)
+            stale click click_moved click_moved_plain click_moved_obfuscate)
         set(greenflame_edit_targets_list span)
         if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)
             list(APPEND greenflame_edit_targets_list split)
