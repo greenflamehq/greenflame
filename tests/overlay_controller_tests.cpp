@@ -278,7 +278,7 @@ TEST(overlay_controller, B_Release_CommitsFinalSelection) {
     Press(c, {100, 200});
     Move(c, {300, 400});
     OverlayAction action = Release(c, {300, 400});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_FALSE(c.State().dragging);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(100, 200, 300, 400)));
     EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
@@ -292,7 +292,7 @@ TEST(overlay_controller, B_DragPastDesktop_ClipsSelectionToDesktopBounds) {
     EXPECT_EQ(c.State().live_rect, (RectPx::From_ltrb(100, 200, 1920, 1080)));
 
     OverlayAction action = Release(c, {2500, 1400});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(100, 200, 1920, 1080)));
 }
 
@@ -306,7 +306,7 @@ TEST(overlay_controller, B_NegativeOriginDrag_StillReachesRightmostMonitor) {
     EXPECT_EQ(c.State().live_rect, (RectPx::From_ltrb(4000, 100, 5000, 300)));
 
     action = Release(c, {5000, 300});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(4000, 100, 5000, 300)));
 }
 
@@ -687,7 +687,7 @@ TEST(overlay_controller, E_HandleRelease_CommitsFinalSelection) {
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
     Move(c, {50, 50});
     OverlayAction action = Release(c, {50, 50});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_FALSE(c.State().handle_dragging);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
 }
@@ -711,8 +711,7 @@ TEST(overlay_controller, E_ResizeRelease_ConvertsWindowBackedSelectionToRegion) 
     ASSERT_EQ(c.On_pointer_move(No_mods(), {20, 70}, {20, 70}, std::nullopt, {},
                                 std::nullopt, 0, 0),
               OverlayAction::Repaint);
-    ASSERT_EQ(c.On_primary_release(No_mods(), {20, 70}),
-              OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {20, 70}), OverlayAction::Repaint);
 
     EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
     EXPECT_FALSE(c.State().selection_window.has_value());
@@ -762,7 +761,7 @@ TEST(overlay_controller, E_HandleDragPastDesktop_ClipsSelectionToDesktopBounds) 
     EXPECT_EQ(c.State().live_rect, (RectPx::From_ltrb(0, 0, 300, 300)));
 
     OverlayAction action = Release(c, {-50, -50});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(0, 0, 300, 300)));
 }
 
@@ -826,7 +825,7 @@ TEST(overlay_controller, F_MoveRelease_CommitsFinalSelection) {
                            std::nullopt, std::nullopt, {}, Make_snap_edges(c), 0, 0);
     Move(c, {250, 250});
     OverlayAction action = Release(c, {250, 250});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_FALSE(c.State().move_dragging);
     EXPECT_FALSE(c.State().final_selection.Is_empty());
 }
@@ -850,8 +849,7 @@ TEST(overlay_controller, F_MoveRelease_ConvertsWindowBackedSelectionToRegion) {
     ASSERT_EQ(c.On_pointer_move(No_mods(), {140, 180}, {140, 180}, std::nullopt, {},
                                 std::nullopt, 0, 0),
               OverlayAction::Repaint);
-    ASSERT_EQ(c.On_primary_release(No_mods(), {140, 180}),
-              OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_primary_release(No_mods(), {140, 180}), OverlayAction::Repaint);
 
     EXPECT_EQ(c.State().selection_source, SaveSelectionSource::Region);
     EXPECT_FALSE(c.State().selection_window.has_value());
@@ -900,7 +898,7 @@ TEST(overlay_controller, F_MoveDragPastDesktop_ClampsInsideDesktopBounds) {
     EXPECT_EQ(c.State().live_rect, (RectPx::From_ltrb(0, 0, 200, 200)));
 
     OverlayAction action = Release(c, {0, 0});
-    EXPECT_EQ(action, OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(action, OverlayAction::Repaint);
     EXPECT_EQ(c.State().final_selection, (RectPx::From_ltrb(0, 0, 200, 200)));
 }
 
@@ -1056,7 +1054,7 @@ TEST(overlay_controller, G_Cancel_ActiveTool_DeselectsBeforeClearingSelection) {
     EXPECT_TRUE(c.State().final_selection.Is_empty());
 
     EXPECT_EQ(Press(c, {400, 400}), OverlayAction::Repaint);
-    EXPECT_EQ(Release(c, {600, 600}), OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(Release(c, {600, 600}), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_annotation_tool(), std::nullopt);
 }
 
@@ -2195,8 +2193,7 @@ TEST(overlay_controller, AnnotationToolbar_MoveAndResizeHideToolbar) {
               OverlayAction::Repaint);
     EXPECT_FALSE(c.Should_show_annotation_toolbar());
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
-    EXPECT_EQ(c.On_primary_release(No_mods(), {220, 220}),
-              OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(c.On_primary_release(No_mods(), {220, 220}), OverlayAction::Repaint);
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
 
     ASSERT_EQ(c.On_primary_press(No_mods(), {100, 100}, {100, 100}, std::nullopt,
@@ -2205,8 +2202,7 @@ TEST(overlay_controller, AnnotationToolbar_MoveAndResizeHideToolbar) {
               OverlayAction::Repaint);
     EXPECT_FALSE(c.Should_show_annotation_toolbar());
     EXPECT_FALSE(c.Can_interact_with_annotation_toolbar());
-    EXPECT_EQ(c.On_primary_release(No_mods(), {90, 90}),
-              OverlayAction::InvalidateFrozenCache);
+    EXPECT_EQ(c.On_primary_release(No_mods(), {90, 90}), OverlayAction::Repaint);
     EXPECT_TRUE(c.Should_show_annotation_toolbar());
     EXPECT_TRUE(c.Can_interact_with_annotation_toolbar());
 }

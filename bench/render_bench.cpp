@@ -230,6 +230,8 @@ struct Args final {
     bool obfuscate_below = false;   // --obfuscate-below
     bool multi = false;             // --multi
     std::string edit_kind = "rect"; // --edit-kind
+    bool edit_dynamic = false;      // --edit-dynamic
+    bool verify_edit = false;       // --verify-edit
     bool reverse = false;           // --reverse: freehand runs right to left
     bool split_monitors = false;    // --split-monitors: one target per monitor
     bool mask_monitors = false;     // --mask-monitors: diff only monitor pixels
@@ -271,6 +273,10 @@ void Print_usage() {
         "  --obfuscate-below            move: the obfuscates sit below the moved "
         "annotation\n"
         "  --stroke-points N            points per --annotated stroke (default 64)\n"
+        "  --edit-dynamic               move: edit frames take the full annotation "
+        "rebuild and the dynamic path\n"
+        "  --verify-edit                move: draw every frame again with "
+        "--edit-dynamic and fail unless the two match at tolerance 0\n"
         "  --resize                     move: drag the right edge instead of the body; "
         "select: resize a committed selection, inset "
         "by an eighth of the desktop, by a handle\n"
@@ -282,7 +288,8 @@ void Print_usage() {
         "  --select-dynamic             select: skip the selection-gesture path (the "
         "frozen frame reads stale every frame); frames must match without it\n"
         "  --stale-frozen               build the frozen frame for no selection before "
-        "the run, as a drag leaves it; frames must match without it\n"
+        "the run, as a drag leaves it (move: from the annotations moved halfway, as "
+        "mid-edit); frames must match without it\n"
         "  --lifted                     with --annotated: a lifted window capture with "
         "its own pixels over the selection\n"
         "  --lifted-as-screenshot       with --annotated: those pixels in the "
@@ -468,6 +475,10 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.stale_frozen = true;
         } else if (key == "--resize") {
             args.resize = true;
+        } else if (key == "--edit-dynamic") {
+            args.edit_dynamic = true;
+        } else if (key == "--verify-edit") {
+            args.verify_edit = true;
         } else if (key == "--multi") {
             args.multi = true;
         } else if (key == "--obfuscate-below") {
@@ -1531,6 +1542,44 @@ core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
     return core::Annotation{.id = id, .data = stroke};
 }
 
+// --verify-edit: reads the frame just drawn, draws it again with the edit fast paths
+// off, and returns the number of pixels that differ (nullopt if a step failed). The
+// edit caches stay as they were for the next frame.
+std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
+                                        D2DPaintInput const &input, int width,
+                                        int height) {
+    size_t const row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+    std::vector<uint8_t> fast(row_bytes * static_cast<size_t>(height));
+    std::vector<uint8_t> full(fast.size());
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, fast)) {
+            return std::nullopt;
+        }
+    }
+    bool const was_fast = res.edit_fast_paths;
+    res.edit_fast_paths = false;
+    bool const ok = Paint_d2d_frame(res, input, width, height, nullptr,
+                                    kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+    res.edit_fast_paths = was_fast;
+    if (!ok) {
+        return std::nullopt;
+    }
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, full)) {
+            return std::nullopt;
+        }
+    }
+    size_t differing = 0;
+    for (size_t at = 0; at < fast.size(); at += kBytesPerPixel) {
+        if (!std::equal(fast.begin() + static_cast<std::ptrdiff_t>(at),
+                        fast.begin() + static_cast<std::ptrdiff_t>(at + kBytesPerPixel),
+                        full.begin() + static_cast<std::ptrdiff_t>(at))) {
+            ++differing;
+        }
+    }
+    return differing;
+}
+
 // Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
 std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                                    Args const &args, int run, bool dump_here) {
@@ -1592,11 +1641,25 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         input.annotations = edit->doc;
         Rebuild_annotations_bitmap(*ctx.res, edit->doc);
     }
-    if (args.stale_frozen) {
+    ctx.res->edit_fast_paths = !args.edit_dynamic;
+    if (args.stale_frozen && edit.has_value() && scenario == "move") {
+        // Valid and built for the selection, but from the annotations moved halfway,
+        // as a frozen rebuild in the middle of an edit leaves it. Edit frames must not
+        // take it for the edit's start.
+        D2DPaintInput mid = input;
+        Fill_move_frame(*edit, args.frames / 2, args.frames, args, mid);
+        Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        for (size_t m = 0; m < edit->moved.size(); ++m) {
+            edit->doc[edit->moved[m]] = edit->start[m];
+        }
+        Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+    } else if (args.stale_frozen) {
         // As a selection drag leaves it: valid, but built for no selection. The paint
         // must rebuild it for the frame's selection.
         Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
     }
+    size_t verify_differing_frames = 0;
     ScenarioState state;
     std::vector<FrameSample> samples;
     samples.reserve(static_cast<size_t>(args.frames));
@@ -1671,6 +1734,20 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         sample.mpx = static_cast<double>(ps.PSInvocations) / kMegapixel;
         sample.points = state.points.size();
         samples.push_back(sample);
+        // --verify-edit: the same frame again through the full rebuild and the dynamic
+        // path, compared pixel for pixel, outside timing.
+        if (args.verify_edit && edit.has_value()) {
+            std::optional<size_t> const differing =
+                Verify_edit_frame(*ctx.res, input, ctx.width, ctx.height);
+            if (!differing.has_value()) {
+                Print("verify-edit: readback failed\n");
+                return std::nullopt;
+            }
+            if (*differing > 0) {
+                ++verify_differing_frames;
+                Print("verify-edit: frame {} differs in {} pixels\n", f, *differing);
+            }
+        }
         // Readback happens after the frame's numbers are taken, outside timing.
         if (dump_here && f == args.dump_frame) {
             if (!Dump_target(*ctx.res, ctx.width, ctx.height, args.dump_path)) {
@@ -1678,6 +1755,14 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                 return std::nullopt;
             }
             Print("dump: frame {} of {} written to {}\n", f, scenario, args.dump_path);
+        }
+    }
+
+    if (args.verify_edit && edit.has_value()) {
+        Print("verify-edit: {} of {} frames differ\n", verify_differing_frames,
+              args.frames);
+        if (verify_differing_frames > 0) {
+            return std::nullopt;
         }
     }
 

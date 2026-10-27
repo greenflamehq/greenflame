@@ -108,6 +108,9 @@ struct D2DOverlayResources final {
     // draws. Used as input 1 of base_composite_effect so the multiply sees the prior
     // annotations underneath.
     Microsoft::WRL::ComPtr<ID2D1Bitmap> base_composite_bitmap;
+    // Annotation edits: annotations_bitmap as of the annotations below the edit (see
+    // edit_cache), copied back at the start of each edit frame's rebuild.
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> edit_below_bitmap;
 
     // Live freehand stroke (brush and highlighter). The smoother turns the stroke's
     // stable body into final points, drawn once each into draft_stroke_body_rt (append
@@ -189,6 +192,26 @@ struct D2DOverlayResources final {
     std::optional<TextCursorPreviewCache> text_cursor_preview_cache;
 
     bool annotations_valid = false;
+    // The annotations annotations_bitmap was last fully built from (no preview patches,
+    // no skipped annotation), and the ones frozen_bitmap shows. Null when not known,
+    // as after an edit frame's rebuild.
+    std::shared_ptr<const std::vector<core::Annotation>> annotations_source = nullptr;
+    std::shared_ptr<const std::vector<core::Annotation>> frozen_source = nullptr;
+    // Annotation edits (move, resize). Every edit frame rebuilds annotations_bitmap.
+    // The annotations below the lowest one the edit changes stay the same, so they are
+    // drawn once into edit_below_bitmap and each frame draws only the rest.
+    struct EditCache final {
+        bool valid = false;
+        std::vector<core::Annotation> below = {}; // what edit_below_bitmap holds
+        // Whether frozen_bitmap shows the annotations the edit started from, so a frame
+        // can recomposite only what the edit changed. Decided at the edit's first
+        // frame; cleared when frozen_bitmap is rebuilt and when the edit ends.
+        std::optional<bool> frozen_is_edit_start = std::nullopt;
+    };
+    EditCache edit_cache = {};
+    // False: edit frames take the full rebuild and the dynamic path (render bench
+    // checks against it).
+    bool edit_fast_paths = true;
     // True when annotations_bitmap was last built from no annotations, so it is all
     // transparent and blitting it changes nothing.
     bool annotations_empty = false;

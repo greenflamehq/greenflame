@@ -236,6 +236,26 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   `--points-per-frame`), a line tool drag from the selection's top-left to its
   bottom-right, an obfuscate draft sliding across the desktop's middle row, idle
   selection, or all of them.
+- `--scenario move|commit` (not in `all`): `move` drags one committed annotation
+  across the selection's middle row, as an annotation edit does: each frame fills the
+  edit previews and builds the obfuscate preview patches through the same code as the
+  overlay (timed with the frame), and the release commits the edit and rebuilds every
+  obfuscate. `commit` commits a new selection every frame through a real overlay
+  controller and applies the action it returns to the caches. Options:
+  - `--edit-kind rect|filled-rect|ellipse|filled-ellipse|line|arrow|brush|highlighter|obfuscate|text|bubble`
+    (default `rect`): the moved annotation. Text and bubble carry stand-in rasters.
+  - `--multi`: also move an ellipse below it, as a multi-selection body move.
+  - `--resize`: drag the right edge of a box annotation instead of the body.
+  - `--obfuscations K`: K committed obfuscates across the middle row, above the moved
+    annotation (`--obfuscate-below`: below it).
+  - `--stroke-points N` (default 64): points per `--annotated` stroke.
+  - `--edit-dynamic`: edit frames take the full annotation rebuild and the dynamic
+    path. `--verify-edit`: every frame is drawn again that way and the run fails
+    unless the two match at tolerance 0 (`ctest` runs this on WARP on
+    `jocelyn-desk`, one target and one per monitor, for a rectangle, obfuscates below,
+    a multi-selection, a resize, a moved obfuscate, a highlighter, `--lifted` and
+    `--stale-frozen`).
+  - `--dump-frame` equal to `--frames` writes the frame after the release.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.
@@ -268,7 +288,9 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   annotations and a resize over annotations).
 - `--stale-frozen`: before the run, build the frozen frame for no selection, as a
   selection drag leaves it. Frames must still match the run without it at tolerance
-  0 (`ctest` runs this on WARP for `steady --annotated`).
+  0 (`ctest` runs this on WARP for `steady --annotated`). With `move`, the frozen
+  frame is built from the annotations moved halfway instead, as a frozen rebuild in
+  the middle of an edit leaves it; edit frames must not take it for the edit's start.
 - `--arrow` (line): the line has an arrow head. `--flat` (line): it runs left to
   right along the selection's middle row. `--line-dynamic` (line): the frozen
   frame reads stale every frame, so the draft takes the dynamic path instead of

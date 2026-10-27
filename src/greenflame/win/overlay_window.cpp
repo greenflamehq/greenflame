@@ -1133,10 +1133,12 @@ void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client)
         Request_repaint();
     }
 
-    if (Should_force_obfuscate_repaint() ||
-        (!controller_.Has_active_annotation_gesture() &&
-         (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
-          controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
+    // Obfuscate drafts and edit previews need no forced paint here: the controller
+    // already asked for one, and a forced paint per mouse move makes frames come at
+    // input rate, unthrottled.
+    if (!controller_.Has_active_annotation_gesture() &&
+        (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
+         controller_.Active_annotation_tool() == core::AnnotationToolId::Text)) {
         GREENFLAME_PROFILE_SCOPE(
             "OverlayWindow::Refresh_pointer_visual_overlays::Forced_redraw");
         Repaint_now();
@@ -1151,7 +1153,12 @@ void OverlayWindow::Restore_selection_state(core::OverlaySelectionState const &s
             (void)d2d_resources_->Upload_lifted_window_capture(
                 resources_->window_capture.display_capture);
         }
-        d2d_resources_->Invalidate_annotations();
+        // Annotations do not depend on the selection: the frozen frame is keyed by it,
+        // and a changed lifted window invalidates through Set_lifted_view. Restoring
+        // no selection resets the annotations, though.
+        if (state.final_selection.Is_empty()) {
+            d2d_resources_->Invalidate_annotations();
+        }
     }
     Request_repaint();
 }
@@ -3359,11 +3366,16 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     if (eff_ctrl && wparam == L'Z') {
+        // A selection undo leaves the annotations alone: rebuild them only when the
+        // undone or redone command changed them.
+        std::vector<core::Annotation> const annotations_before(
+            controller_.Annotations().begin(), controller_.Annotations().end());
         bool const applied = eff_shift ? controller_.Redo() : controller_.Undo();
         if (!applied) {
             return 0;
         }
-        if (d2d_resources_) {
+        if (d2d_resources_ &&
+            !std::ranges::equal(annotations_before, controller_.Annotations())) {
             d2d_resources_->Invalidate_annotations();
         }
         Rebuild_toolbar_buttons();
@@ -4610,6 +4622,8 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         std::optional<core::TextDraftView> draft_text_view = std::nullopt;
         std::optional<core::Annotation> draft_obfuscate_preview = std::nullopt;
         std::vector<AnnotationPreviewPatch> patches;
+        std::vector<core::AnnotationEditPreview> const edit_previews =
+            controller_.Active_annotation_edit_previews();
         input.draft_freehand_points = controller_.Draft_freehand_points();
         input.draft_freehand_style = controller_.Draft_freehand_style();
         // Multi-point freehand drafts render from the split-tail preview below.
@@ -4661,6 +4675,7 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         input.handle_dragging = s.handle_dragging;
         input.move_dragging = s.move_dragging;
         input.annotation_editing = controller_.Has_active_annotation_edit();
+        input.annotation_edit_previews = edit_previews;
         input.modifier_preview = s.modifier_preview;
         if (config_ != nullptr) {
             input.show_selection_size_side_labels =
