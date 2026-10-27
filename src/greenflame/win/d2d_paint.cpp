@@ -3505,7 +3505,12 @@ Edit_changed_rects(D2DPaintInput const &input, int vd_width, int vd_height) {
         // has moved, give the same rect twice: recomposite it once.
         if (std::optional<core::RectPx> const clipped =
                 core::RectPx::Clip(grown, desktop);
-            clipped.has_value() && std::ranges::find(rects, *clipped) == rects.end()) {
+            clipped.has_value() &&
+            std::ranges::none_of(rects, [&](core::RectPx const &rect) {
+                // A predicate, not find: MSVC's vectorized find rejects this element
+                // size under clang-cl.
+                return rect == *clipped;
+            })) {
             rects.push_back(*clipped);
         }
     };
