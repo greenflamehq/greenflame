@@ -251,13 +251,20 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   - `--stroke-points N` (default 64): points per `--annotated` stroke.
   - `--edit-dynamic`: edit frames take the full annotation rebuild and the dynamic
     path. `--verify-edit`: every frame is drawn again that way and the run fails
-    unless the two match at tolerance 0 (`ctest` runs this on WARP on
-    `jocelyn-desk`, one target and one per monitor, for a rectangle, obfuscates below,
-    a multi-selection, a resize, a moved obfuscate, a highlighter, `--lifted` and
-    `--stale-frozen`).
-    Each uses 4 frames and one obfuscation, to keep `ctest` fast. Run the heavier
-    variants by hand when edit drawing changes: every `--edit-kind`,
-    `--obfuscations 3`, `--stroke-points 10000`, and more `--frames`.
+    unless the two match at tolerance 0. It also fails unless the edit fast paths
+    ran: the changed-area path on some frame (on none with `--lifted` or
+    `--stale-frozen`) and, with `--annotated`, the below-edit cache.
+    `ctest` runs it on WARP, in one target on `single-1080`, for a rectangle,
+    obfuscates below, a multi-selection, a resize, a moved obfuscate, a
+    highlighter, `--lifted`, `--stale-frozen` and `--click-first`; and one per
+    monitor on `jocelyn-desk` for the rectangle, the moved obfuscate and
+    `--click-first`. Each uses 2 frames and at most one obfuscation, to keep `ctest`
+    fast. Run the heavier variants by hand when edit drawing changes: every
+    `--edit-kind`, both layouts, `--obfuscations 3`, `--stroke-points 10000`, and
+    more `--frames`.
+  - `--click-first`: before the drag, a click on the annotation that moves
+    nothing (the edit ends with no rebuild), an idle frame, then a selection drag
+    and commit. The drag must still take the changed-area path.
   - `--dump-frame` equal to `--frames` writes the frame after the release.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows

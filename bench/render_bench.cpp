@@ -232,6 +232,7 @@ struct Args final {
     std::string edit_kind = "rect"; // --edit-kind
     bool edit_dynamic = false;      // --edit-dynamic
     bool verify_edit = false;       // --verify-edit
+    bool click_first = false;       // --click-first
     bool reverse = false;           // --reverse: freehand runs right to left
     bool split_monitors = false;    // --split-monitors: one target per monitor
     bool mask_monitors = false;     // --mask-monitors: diff only monitor pixels
@@ -276,7 +277,12 @@ void Print_usage() {
         "  --edit-dynamic               move: edit frames take the full annotation "
         "rebuild and the dynamic path\n"
         "  --verify-edit                move: draw every frame again with "
-        "--edit-dynamic and fail unless the two match at tolerance 0\n"
+        "--edit-dynamic and fail unless the two match at tolerance 0, or unless the "
+        "edit fast paths ran (none of the changed-area path with --lifted or "
+        "--stale-frozen)\n"
+        "  --click-first                move: first a click on the annotation that "
+        "does not move it, an idle frame, and a selection drag and commit, before "
+        "the drag\n"
         "  --resize                     move: drag the right edge instead of the body; "
         "select: resize a committed selection, inset "
         "by an eighth of the desktop, by a handle\n"
@@ -479,6 +485,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.edit_dynamic = true;
         } else if (key == "--verify-edit") {
             args.verify_edit = true;
+        } else if (key == "--click-first") {
+            args.click_first = true;
         } else if (key == "--multi") {
             args.multi = true;
         } else if (key == "--obfuscate-below") {
@@ -1664,6 +1672,26 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         // must rebuild it for the frame's selection.
         Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
     }
+    if (args.click_first && edit.has_value() && scenario == "move") {
+        // A click on the annotation that does not move it: one edit frame, then the
+        // release returns no action, so nothing rebuilds. Then a selection drag (the
+        // frozen frame built for no selection) and its commit (built for the selection
+        // again). The drag that follows must still take the edit fast paths.
+        D2DPaintInput click = input;
+        Fill_move_frame(*edit, 0, args.frames, args, click);
+        D2DPaintInput idle = input;
+        bool const ok = Paint_d2d_frame(*ctx.res, click, ctx.width, ctx.height, nullptr,
+                                        kFrameWaitTimeoutMs) == D2DFrameStatus::Ok &&
+                        Paint_d2d_frame(*ctx.res, idle, ctx.width, ctx.height, nullptr,
+                                        kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+        if (!ok) {
+            Print("paint failed (device lost?)\n");
+            return std::nullopt;
+        }
+        Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+    }
+    ctx.res->edit_stats = {};
     size_t verify_differing_frames = 0;
     ScenarioState state;
     std::vector<FrameSample> samples;
@@ -1767,6 +1795,18 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         Print("verify-edit: {} of {} frames differ\n", verify_differing_frames,
               args.frames);
         if (verify_differing_frames > 0) {
+            return std::nullopt;
+        }
+        // The fast paths must have run, or the check above proves nothing. A lifted
+        // window and a frozen frame built mid-edit must keep the changed-area path off.
+        D2DOverlayResources::EditStats const stats = ctx.res->edit_stats;
+        bool const region_expected = !args.lifted && !args.stale_frozen;
+        Print("verify-edit: {} changed-area frames, {} below-cache hits\n",
+              stats.region_frames, stats.below_cache_hits);
+        if (scenario == "move" && ((region_expected && stats.region_frames == 0) ||
+                                   (!region_expected && stats.region_frames > 0) ||
+                                   (args.annotated && stats.below_cache_hits == 0))) {
+            Print("verify-edit: the edit fast paths did not run as expected\n");
             return std::nullopt;
         }
     }

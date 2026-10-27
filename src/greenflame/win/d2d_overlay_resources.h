@@ -212,6 +212,13 @@ struct D2DOverlayResources final {
     // False: edit frames take the full rebuild and the dynamic path (render bench
     // checks against it).
     bool edit_fast_paths = true;
+    // How often the edit fast paths ran: frames drawn as a changed-area recomposite,
+    // and frames whose rebuild reused edit_below_bitmap. The render bench checks them.
+    struct EditStats final {
+        size_t region_frames = 0;
+        size_t below_cache_hits = 0;
+    };
+    EditStats edit_stats = {};
     // True when annotations_bitmap was last built from no annotations, so it is all
     // transparent and blitting it changes nothing.
     bool annotations_empty = false;

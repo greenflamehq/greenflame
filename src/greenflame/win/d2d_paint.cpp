@@ -3340,9 +3340,7 @@ struct FramePlan final {
 // An edit frame's annotations_bitmap. With the edit's lower annotations unchanged since
 // the last frame, edit_below_bitmap holds them: copy it back and draw only the rest.
 // Otherwise draw them, keep a copy, then draw the rest. Without the cache, one pass.
-void Rebuild_annotations_for_edit(D2DOverlayResources &res,
-                                  D2DPaintInput const &input) {
-    GREENFLAME_PROFILE_SCOPE("D2DPaint::Rebuild_annotations_for_edit");
+void Draw_annotations_for_edit(D2DOverlayResources &res, D2DPaintInput const &input) {
     if (!res.annotations_rt) {
         return;
     }
@@ -3353,13 +3351,11 @@ void Rebuild_annotations_for_edit(D2DOverlayResources &res,
                        !input.annotation_edit_previews.empty() && below_count > 0;
     if (!split) {
         Rebuild_annotations_bitmap(res, annotations, patches);
-        res.annotations_source = nullptr;
         return;
     }
 
     res.freehand_draft.live_base_valid = false;
     res.freehand_draft.active = false;
-    res.annotations_source = nullptr;
     res.annotations_valid = false;
     std::span<const core::Annotation> const below = annotations.first(below_count);
     bool const cached = res.edit_cache.valid && res.annotations_bitmap &&
@@ -3369,9 +3365,9 @@ void Rebuild_annotations_for_edit(D2DOverlayResources &res,
                 nullptr, res.edit_below_bitmap.Get(), nullptr))) {
             res.edit_cache = {};
             Rebuild_annotations_bitmap(res, annotations, patches);
-            res.annotations_source = nullptr;
             return;
         }
+        ++res.edit_stats.below_cache_hits;
     } else {
         res.edit_cache.valid = false;
         res.annotations_rt->BeginDraw();
@@ -3384,7 +3380,6 @@ void Rebuild_annotations_for_edit(D2DOverlayResources &res,
             FAILED(res.edit_below_bitmap->CopyFromBitmap(
                 nullptr, res.annotations_bitmap.Get(), nullptr))) {
             Rebuild_annotations_bitmap(res, annotations, patches);
-            res.annotations_source = nullptr;
             return;
         }
         res.edit_cache.below.assign(below.begin(), below.end());
@@ -3400,6 +3395,35 @@ void Rebuild_annotations_for_edit(D2DOverlayResources &res,
         res.annotations_valid = true;
         res.annotations_empty = annotations.empty() && patches.empty();
     }
+}
+
+// The annotations an edit frame's bitmap shows: the document with the frame's preview
+// patches applied.
+[[nodiscard]] std::shared_ptr<const std::vector<core::Annotation>>
+Shown_annotations(std::span<const core::Annotation> annotations,
+                  std::span<const AnnotationPreviewPatch> patches) {
+    auto shown = std::make_shared<std::vector<core::Annotation>>(annotations.begin(),
+                                                                 annotations.end());
+    for (AnnotationPreviewPatch const &patch : patches) {
+        if (patch.index < shown->size()) {
+            (*shown)[patch.index] = patch.annotation;
+        }
+    }
+    return shown;
+}
+
+// Draws an edit frame's annotations_bitmap and records what it shows. An edit can end
+// with no rebuild (a click on an annotation that does not move it), and a frozen
+// rebuild after that copies this record: without it the next edit could not tell
+// that the frozen frame shows its start, and would take the dynamic path.
+void Rebuild_annotations_for_edit(D2DOverlayResources &res,
+                                  D2DPaintInput const &input) {
+    GREENFLAME_PROFILE_SCOPE("D2DPaint::Rebuild_annotations_for_edit");
+    Draw_annotations_for_edit(res, input);
+    res.annotations_source =
+        res.annotations_valid
+            ? Shown_annotations(input.annotations, input.annotation_patches)
+            : nullptr;
 }
 
 // Whether frozen_bitmap shows the annotations as they were when the edit started: the
@@ -3450,9 +3474,11 @@ Edit_changed_rects(D2DPaintInput const &input, int vd_width, int vd_height) {
                                     bounds.top - kFreehandDraftAntialiasMarginPx,
                                     bounds.right + kFreehandDraftAntialiasMarginPx,
                                     bounds.bottom + kFreehandDraftAntialiasMarginPx);
+        // A preview obfuscate that does not move, and an edited annotation before it
+        // has moved, give the same rect twice: recomposite it once.
         if (std::optional<core::RectPx> const clipped =
                 core::RectPx::Clip(grown, desktop);
-            clipped.has_value()) {
+            clipped.has_value() && std::ranges::find(rects, *clipped) == rects.end()) {
             rects.push_back(*clipped);
         }
     };
@@ -3538,6 +3564,9 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
         res.edit_cache.frozen_is_edit_start.value_or(false)) {
         plan.edit_clips = Edit_changed_rects(input, vd_width, vd_height);
         plan.edit_region = plan.edit_clips.size() <= kMaxEditClips;
+        if (plan.edit_region) {
+            ++res.edit_stats.region_frames;
+        }
     }
     plan.is_steady_state = frozen_ready && !input.dragging && !input.handle_dragging &&
                            !input.move_dragging && !input.annotation_editing &&

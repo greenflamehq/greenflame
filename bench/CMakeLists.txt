@@ -384,9 +384,15 @@ if(BUILD_TESTING)
     # rebuild and the dynamic path, and fails unless the two match at tolerance 0, in
     # one target and in one per monitor. --lifted takes the dynamic path; --stale-frozen
     # gives a frozen frame built mid-edit, which must not be taken for the start.
+    # --verify-edit also fails unless the fast paths ran (the changed-area path not at
+    # all with --lifted or --stale-frozen). --click-first replays a click that moves
+    # nothing, then a selection drag and commit, before the drag.
+    # Span runs use single-1080, split runs jocelyn-desk (they need several
+    # monitors). Two measured frames each keep ctest fast.
     set(greenflame_edit_common
-        --adapter warp --layout jocelyn-desk --scenario move --annotated --frames 4
-        --verify-edit)
+        --adapter warp --scenario move --annotated --frames 2 --verify-edit)
+    set(greenflame_edit_layout_span --layout single-1080)
+    set(greenflame_edit_layout_split --layout jocelyn-desk --split-monitors)
     set(greenflame_edit_args_rect --obfuscations 1)
     set(greenflame_edit_args_below --obfuscations 1 --obfuscate-below)
     set(greenflame_edit_args_multi --obfuscations 1 --multi)
@@ -395,14 +401,21 @@ if(BUILD_TESTING)
     set(greenflame_edit_args_highlighter --obfuscations 1 --edit-kind highlighter)
     set(greenflame_edit_args_lifted --obfuscations 1 --lifted)
     set(greenflame_edit_args_stale --stale-frozen)
+    set(greenflame_edit_args_click --obfuscations 1 --click-first)
+    # Every case runs in one target. The per-target paths (the clip cull, the frozen
+    # blit per monitor) also run split for a moved rectangle, a moved obfuscate and
+    # the click replay; the other cases do not depend on the targets.
+    set(greenflame_edit_split_cases rect obfuscate click)
     foreach(greenflame_edit_case rect below multi resize obfuscate highlighter lifted
-            stale)
-        foreach(greenflame_edit_targets span split)
+            stale click)
+        set(greenflame_edit_targets_list span)
+        if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)
+            list(APPEND greenflame_edit_targets_list split)
+        endif()
+        foreach(greenflame_edit_targets ${greenflame_edit_targets_list})
             set(greenflame_edit_args ${greenflame_edit_common}
+                ${greenflame_edit_layout_${greenflame_edit_targets}}
                 ${greenflame_edit_args_${greenflame_edit_case}})
-            if(greenflame_edit_targets STREQUAL "split")
-                list(APPEND greenflame_edit_args --split-monitors)
-            endif()
             add_test(
                 NAME greenflame_render_bench_edit_${greenflame_edit_case}_${greenflame_edit_targets}
                 COMMAND greenflame_render_bench ${greenflame_edit_args}
