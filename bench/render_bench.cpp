@@ -1569,6 +1569,11 @@ std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
             return std::nullopt;
         }
     }
+    // Whole-buffer compare first: a per-pixel loop over a desktop-sized buffer takes
+    // seconds per frame in debug builds.
+    if (std::ranges::equal(fast, full)) {
+        return 0;
+    }
     size_t differing = 0;
     for (size_t at = 0; at < fast.size(); at += kBytesPerPixel) {
         if (!std::equal(fast.begin() + static_cast<std::ptrdiff_t>(at),

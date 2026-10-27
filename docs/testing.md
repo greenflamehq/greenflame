@@ -255,6 +255,9 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     `jocelyn-desk`, one target and one per monitor, for a rectangle, obfuscates below,
     a multi-selection, a resize, a moved obfuscate, a highlighter, `--lifted` and
     `--stale-frozen`).
+    Each uses 4 frames and one obfuscation, to keep `ctest` fast. Run the heavier
+    variants by hand when edit drawing changes: every `--edit-kind`,
+    `--obfuscations 3`, `--stroke-points 10000`, and more `--frames`.
   - `--dump-frame` equal to `--frames` writes the frame after the release.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
