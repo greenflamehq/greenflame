@@ -409,6 +409,14 @@ endif()
 # easyjson (header-only JSON)
 # -----------------------------
 include(FetchContent)
+# easyjson's CPM asks for cmake-scripts tag 24.04, which upstream deleted
+# (only 24.04.1 exists). FetchContent keeps the first declaration of a name,
+# so declare it here, pinned to the 24.04.1 commit, before easyjson does.
+FetchContent_Declare(
+    cmake-scripts
+    GIT_REPOSITORY https://github.com/StableCoder/cmake-scripts.git
+    GIT_TAG        45f72fdc2d715030c6cb61e3d5977811ea45abda # 24.04.1
+)
 FetchContent_Declare(
     easyjson
     GIT_REPOSITORY https://github.com/jahan-addison/easyjson.git
