@@ -15,13 +15,17 @@
 //   than in the app;
 // - no Alt-free snapping of the crosshair cursor (CPU only, not paint);
 // - no selection wheel or text drafts; committed annotations only with --annotated,
-//   and obfuscate only as the obfuscate scenario's draft.
+//   and obfuscate only as the obfuscate scenario's draft and in move and commit;
+// - move fills no selected-annotation marquee or handles, and its text and bubble
+//   annotations carry stand-in rasters (no text layout engine here).
 
 #include "greenflame/win/d2d_overlay_resources.h"
 #include "greenflame/win/d2d_paint.h"
+#include "greenflame/win/obfuscate_preview.h"
 #include "greenflame/win/overlay_top_layer.h"
 #include "greenflame_core/bmp.h"
 #include "greenflame_core/frame_stats.h"
+#include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/selection_wheel.h"
 
 namespace greenflame::bench {
@@ -221,9 +225,19 @@ struct Args final {
     bool select_dynamic = false;       // --select-dynamic
     bool stale_frozen = false;         // --stale-frozen
     bool resize = false;               // --resize
-    bool reverse = false;              // --reverse: freehand runs right to left
-    bool split_monitors = false;       // --split-monitors: one target per monitor
-    bool mask_monitors = false;        // --mask-monitors: diff only monitor pixels
+    int stroke_points = 64;         // --stroke-points N: points per --annotated stroke
+    int obfuscations = 0;           // --obfuscations K
+    bool obfuscate_below = false;   // --obfuscate-below
+    bool multi = false;             // --multi
+    std::string edit_kind = "rect"; // --edit-kind
+    bool edit_dynamic = false;      // --edit-dynamic
+    bool verify_edit = false;       // --verify-edit
+    bool click_first = false;       // --click-first
+    bool click_moved = false;       // --click-moved
+    bool raster_load = false;       // --raster-load
+    bool reverse = false;           // --reverse: freehand runs right to left
+    bool split_monitors = false;    // --split-monitors: one target per monitor
+    bool mask_monitors = false;     // --mask-monitors: diff only monitor pixels
 };
 
 void Print_usage() {
@@ -233,7 +247,7 @@ void Print_usage() {
         "  --adapter default|N|warp     D3D adapter (default: what the app uses)\n"
         "  --list-adapters              print DXGI adapters and exit\n"
         "  --scenario hover|select|brush|highlighter|line|obfuscate|steady|all   "
-        "(default all)\n"
+        "(default all), or move|commit (not in all)\n"
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
@@ -251,7 +265,34 @@ void Print_usage() {
         "commit it without drawing)\n"
         "  --annotated                  inset selection plus committed brush and "
         "highlighter strokes\n"
-        "  --resize                     select: resize a committed selection, inset "
+        "  --edit-kind K                move: the moved annotation, rect (default), "
+        "filled-rect, ellipse, filled-ellipse, line, arrow, brush, highlighter, "
+        "obfuscate, text or bubble\n"
+        "  --multi                      move: also move an ellipse below it (a "
+        "multi-selection body move)\n"
+        "  --obfuscations K             move, commit: K obfuscates across the "
+        "selection's "
+        "middle row, above the moved annotation\n"
+        "  --obfuscate-below            move: the obfuscates sit below the moved "
+        "annotation\n"
+        "  --stroke-points N            points per --annotated stroke (default 64)\n"
+        "  --edit-dynamic               move: edit frames take the full annotation "
+        "rebuild and the dynamic path\n"
+        "  --verify-edit                move: draw every frame again with "
+        "--edit-dynamic and fail unless the two match at tolerance 0, or unless the "
+        "edit fast paths ran (none of the changed-area path with --lifted or "
+        "--stale-frozen)\n"
+        "  --click-first                move: first a click on the annotation that "
+        "does not move it, an idle frame, and a selection drag and commit, before "
+        "the drag\n"
+        "  --raster-load                move: 3 obfuscates of 1600x400 and 3 texts of "
+        "1600x200 below the moved annotation, off its path (large rasters)\n"
+        "  --click-moved                with --click-first: the click's painted frame "
+        "has the annotation moved (it is back at the release, which does nothing); "
+        "fail unless the steady frame after the selection commit matches a fresh "
+        "rebuild\n"
+        "  --resize                     move: drag the right edge instead of the body; "
+        "select: resize a committed selection, inset "
         "by an eighth of the desktop, by a handle\n"
         "  --arrow                      line: draw an arrow head\n"
         "  --flat                       line: run left to right along the selection's "
@@ -261,7 +302,8 @@ void Print_usage() {
         "  --select-dynamic             select: skip the selection-gesture path (the "
         "frozen frame reads stale every frame); frames must match without it\n"
         "  --stale-frozen               build the frozen frame for no selection before "
-        "the run, as a drag leaves it; frames must match without it\n"
+        "the run, as a drag leaves it (move: from the annotations moved halfway, as "
+        "mid-edit); frames must match without it\n"
         "  --lifted                     with --annotated: a lifted window capture with "
         "its own pixels over the selection\n"
         "  --lifted-as-screenshot       with --annotated: those pixels in the "
@@ -447,6 +489,32 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.stale_frozen = true;
         } else if (key == "--resize") {
             args.resize = true;
+        } else if (key == "--edit-dynamic") {
+            args.edit_dynamic = true;
+        } else if (key == "--verify-edit") {
+            args.verify_edit = true;
+        } else if (key == "--click-first") {
+            args.click_first = true;
+        } else if (key == "--click-moved") {
+            args.click_moved = true;
+        } else if (key == "--raster-load") {
+            args.raster_load = true;
+        } else if (key == "--multi") {
+            args.multi = true;
+        } else if (key == "--obfuscate-below") {
+            args.obfuscate_below = true;
+        } else if (key == "--obfuscations") {
+            std::optional<int> const v = next_int(0);
+            if (!v) return std::nullopt;
+            args.obfuscations = *v;
+        } else if (key == "--stroke-points") {
+            std::optional<int> const v = next_int(2);
+            if (!v) return std::nullopt;
+            args.stroke_points = *v;
+        } else if (key == "--edit-kind") {
+            std::optional<std::string_view> const v = next();
+            if (!v) return std::nullopt;
+            args.edit_kind = std::string(*v);
         } else if (key == "--lifted") {
             args.lifted = true;
         } else if (key == "--lifted-as-screenshot") {
@@ -969,9 +1037,9 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
 
 // --annotated: committed strokes crossing the selection edge on every monitor, so
 // frames carry annotations both inside the selection and under the dim.
-std::vector<core::Annotation> Make_bench_annotations(int width, int height) {
+std::vector<core::Annotation> Make_bench_annotations(int width, int height,
+                                                     int points_per_stroke) {
     constexpr int stroke_count = 4;
-    constexpr int points_per_stroke = 64;
     constexpr double waves_per_stroke = 6.0;
     constexpr int32_t brush_width_px = 7;
     std::vector<core::Annotation> annotations;
@@ -1032,6 +1100,414 @@ void Set_scenario_base(std::string_view scenario, int width, int height,
         input.draft_freehand_blit_opacity_percent =
             highlighter ? opacity_percent : core::StrokeStyle::kMaxOpacityPercent;
     }
+}
+
+// ---------------------------------------------------------------------------
+// move / commit: annotation edits and selection commits
+// ---------------------------------------------------------------------------
+
+// move: the moved annotation's box, left of the selection's middle row at the start.
+constexpr int32_t kEditBoxWidthPx = 320;
+constexpr int32_t kEditBoxHeightPx = 160;
+constexpr int32_t kEditMarginPx = 32;
+// --multi: the second moved annotation sits this far below the first.
+constexpr int32_t kEditMultiGapPx = 24;
+// --obfuscations K: each obfuscate's size and block size, on the move's path.
+constexpr int32_t kEditObfuscateWidthPx = 384;
+constexpr int32_t kEditObfuscateHeightPx = 224;
+constexpr int32_t kEditObfuscateBlockPx = 12;
+constexpr int32_t kEditStrokeWidthPx = 6;
+constexpr int32_t kEditZigzagPoints = 64;
+constexpr uint8_t kEditRed = 0;
+constexpr uint8_t kEditGreen = 160;
+constexpr uint8_t kEditBlue = 64;
+constexpr COLORREF kEditColor = RGB(kEditRed, kEditGreen, kEditBlue);
+// Text and bubble stand-ins: a raster of this colour and alpha, in kEditRasterCellPx
+// cells, since the bench has no text layout engine.
+constexpr uint8_t kEditRasterAlpha = 192;
+constexpr int32_t kEditRasterCellPx = 8;
+constexpr uint64_t kEditFirstId = 1000;
+// commit: odd frames commit the --annotated inset shrunk by this much on each side.
+constexpr int32_t kCommitShrinkPx = 32;
+// --raster-load: large rasters below the moved annotation, off its path.
+constexpr int32_t kLoadWidthPx = 1600;
+constexpr int32_t kLoadObfuscateHeightPx = 400;
+constexpr int32_t kLoadTextHeightPx = 200;
+constexpr int32_t kLoadGapPx = 16;
+constexpr int kLoadCount = 3;
+
+// What OverlayWindow's obfuscate source provider sees: the screenshot, or with --lifted
+// the window capture, as a GDI bitmap.
+class BenchObfuscateSource final : public core::IObfuscateSourceProvider {
+  public:
+    BenchObfuscateSource(GdiCaptureResult capture, core::RectPx capture_bounds) noexcept
+        : capture_(capture), capture_bounds_(capture_bounds) {}
+    BenchObfuscateSource(BenchObfuscateSource const &) = delete;
+    BenchObfuscateSource &operator=(BenchObfuscateSource const &) = delete;
+    BenchObfuscateSource(BenchObfuscateSource &&) = delete;
+    BenchObfuscateSource &operator=(BenchObfuscateSource &&) = delete;
+    ~BenchObfuscateSource() override { capture_.Free(); }
+
+    [[nodiscard]] std::optional<core::BgraBitmap>
+    Build_composited_source(core::RectPx bounds,
+                            std::span<const core::Annotation> lower) override {
+        return Build_obfuscate_source(capture_, capture_bounds_, bounds, lower);
+    }
+
+  private:
+    GdiCaptureResult capture_ = {};
+    core::RectPx capture_bounds_ = {};
+};
+
+// The same pixels Prepare_resources and Prepare_lifted upload, as the source capture.
+std::unique_ptr<BenchObfuscateSource> Make_bench_obfuscate_source(int width, int height,
+                                                                  Args const &args) {
+    core::RectPx const sel = Inset_selection(width, height);
+    GdiCaptureResult capture{};
+    core::RectPx capture_bounds = {};
+    if (args.lifted) {
+        core::RectPx const source =
+            core::RectPx::From_ltrb(kLiftedCaptureMarginPx, kLiftedCaptureMarginPx,
+                                    kLiftedCaptureMarginPx + sel.Width(),
+                                    kLiftedCaptureMarginPx + sel.Height());
+        capture.width = sel.Width() + 2 * kLiftedCaptureMarginPx;
+        capture.height = sel.Height() + 2 * kLiftedCaptureMarginPx;
+        capture.bitmap = Make_noise_bitmap(capture.width, capture.height, ~kNoiseSeed,
+                                           source, kLiftedNoiseSeed);
+        capture_bounds = core::RectPx::From_ltrb(
+            sel.left - kLiftedCaptureMarginPx, sel.top - kLiftedCaptureMarginPx,
+            sel.right + kLiftedCaptureMarginPx, sel.bottom + kLiftedCaptureMarginPx);
+    } else {
+        capture.width = width;
+        capture.height = height;
+        capture.bitmap =
+            args.lifted_as_screenshot
+                ? Make_noise_bitmap(width, height, kNoiseSeed, sel, kLiftedNoiseSeed)
+                : Make_noise_bitmap(width, height, kNoiseSeed);
+    }
+    if (capture.bitmap == nullptr) {
+        return nullptr;
+    }
+    return std::make_unique<BenchObfuscateSource>(capture, capture_bounds);
+}
+
+// A raster stand-in for text and bubble annotations: kEditColor cells over transparent.
+void Fill_stand_in_raster(int32_t width, int32_t height, int32_t &out_width,
+                          int32_t &out_height, int32_t &out_row_bytes,
+                          std::vector<uint8_t> &out_pixels) {
+    out_width = width;
+    out_height = height;
+    out_row_bytes = width * kBytesPerPixel;
+    out_pixels.assign(static_cast<size_t>(out_row_bytes) * static_cast<size_t>(height),
+                      0);
+    for (int32_t y = 0; y < height; ++y) {
+        for (int32_t x = 0; x < width; ++x) {
+            if (((x / kEditRasterCellPx) + (y / kEditRasterCellPx)) % 2 != 0) {
+                continue;
+            }
+            float const a = static_cast<float>(kEditRasterAlpha) / 255.f;
+            size_t const at =
+                static_cast<size_t>(y) * static_cast<size_t>(out_row_bytes) +
+                static_cast<size_t>(x) * kBytesPerPixel;
+            out_pixels[at] = static_cast<uint8_t>(kEditBlue * a);
+            out_pixels[at + 1] = static_cast<uint8_t>(kEditGreen * a);
+            out_pixels[at + 2] = static_cast<uint8_t>(kEditRed * a);
+            out_pixels[at + 3] = kEditRasterAlpha;
+        }
+    }
+}
+
+// The annotation --edit-kind moves, filling box. Obfuscates get their raster later.
+std::optional<core::Annotation> Make_edit_annotation(std::string_view kind,
+                                                     core::RectPx box, uint64_t id) {
+    core::StrokeStyle const style{.width_px = kEditStrokeWidthPx, .color = kEditColor};
+    core::Annotation annotation{.id = id};
+    if (kind == "rect" || kind == "filled-rect") {
+        annotation.data = core::RectangleAnnotation{
+            .outer_bounds = box, .style = style, .filled = kind == "filled-rect"};
+    } else if (kind == "ellipse" || kind == "filled-ellipse") {
+        annotation.data = core::EllipseAnnotation{
+            .outer_bounds = box, .style = style, .filled = kind == "filled-ellipse"};
+    } else if (kind == "line" || kind == "arrow") {
+        annotation.data = core::LineAnnotation{.start = {box.left, box.top},
+                                               .end = {box.right, box.bottom},
+                                               .style = style,
+                                               .arrow_head = kind == "arrow"};
+    } else if (kind == "brush" || kind == "highlighter") {
+        bool const highlighter = kind == "highlighter";
+        core::FreehandStrokeAnnotation stroke{};
+        stroke.style =
+            highlighter ? core::StrokeStyle{.width_px = kHighlighterWidthPx,
+                                            .color = kHighlighterColor,
+                                            .opacity_percent =
+                                                core::kDefaultHighlighterOpacityPercent}
+                        : style;
+        stroke.freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
+                                                : core::FreehandTipShape::Round;
+        for (int32_t i = 0; i < kEditZigzagPoints; ++i) {
+            int32_t const x =
+                box.left + static_cast<int32_t>(static_cast<int64_t>(box.Width()) * i /
+                                                (kEditZigzagPoints - 1));
+            stroke.points.push_back({x, i % 2 == 0 ? box.top : box.bottom});
+        }
+        annotation.data = stroke;
+    } else if (kind == "obfuscate") {
+        annotation.data = core::ObfuscateAnnotation{
+            .bounds = box, .block_size = kEditObfuscateBlockPx};
+    } else if (kind == "text") {
+        core::TextAnnotation text{};
+        text.origin = {box.left, box.top};
+        text.visual_bounds = box;
+        Fill_stand_in_raster(box.Width(), box.Height(), text.bitmap_width_px,
+                             text.bitmap_height_px, text.bitmap_row_bytes,
+                             text.premultiplied_bgra);
+        annotation.data = text;
+    } else if (kind == "bubble") {
+        core::BubbleAnnotation bubble{};
+        bubble.diameter_px = box.Height();
+        bubble.center = {box.left + box.Height() / 2, box.top + box.Height() / 2};
+        bubble.color = kEditColor;
+        Fill_stand_in_raster(bubble.diameter_px, bubble.diameter_px,
+                             bubble.bitmap_width_px, bubble.bitmap_height_px,
+                             bubble.bitmap_row_bytes, bubble.premultiplied_bgra);
+        annotation.data = bubble;
+    } else {
+        return std::nullopt;
+    }
+    return annotation;
+}
+
+// The obfuscate at index rebuilt over the annotations below it, as a commit does.
+bool Commit_obfuscate(std::vector<core::Annotation> &doc, size_t index,
+                      core::IObfuscateSourceProvider &source) {
+    if (!std::holds_alternative<core::ObfuscateAnnotation>(doc[index].data)) {
+        return true;
+    }
+    std::optional<core::Annotation> rebuilt = Build_preview_obfuscate_annotation(
+        doc[index], std::span<const core::Annotation>(doc).first(index), source);
+    if (!rebuilt.has_value()) {
+        return false;
+    }
+    doc[index] = std::move(*rebuilt);
+    return true;
+}
+
+// move and commit: the document, what moves, and the obfuscate source.
+struct EditScene final {
+    EditScene() = default;
+    EditScene(EditScene const &) = delete;
+    EditScene &operator=(EditScene const &) = delete;
+    EditScene(EditScene &&) = default;
+    EditScene &operator=(EditScene &&) = default;
+    ~EditScene() = default;
+
+    std::vector<core::Annotation> doc = {};
+    std::vector<size_t> moved = {};           // indices of the moved annotations
+    std::vector<core::Annotation> start = {}; // the moved annotations at the start
+    std::vector<core::AnnotationEditPreview> previews = {};
+    std::vector<AnnotationPreviewPatch> patches = {};
+    std::unique_ptr<BenchObfuscateSource> source = nullptr;
+    int32_t travel_px = 0;
+    std::vector<core::MonitorWithBounds> monitors = {}; // commit: the layout's monitors
+    core::PointPx origin = {};                          // commit: desktop origin
+};
+
+// Builds the scene: --annotated strokes (--stroke-points each), --obfuscations K on
+// the move's path (above the moved annotation, or below it with --obfuscate-below),
+// and the moved annotation (two with --multi). Every obfuscate is committed.
+std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
+                                         int height, Layout const &layout,
+                                         Args const &args) {
+    EditScene scene{};
+    scene.source = Make_bench_obfuscate_source(width, height, args);
+    if (scene.source == nullptr) {
+        return std::nullopt;
+    }
+    if (args.annotated) {
+        scene.doc = Make_bench_annotations(width, height, args.stroke_points);
+    }
+    core::RectPx const sel = Inset_selection(width, height);
+    int32_t const mid_y = (sel.top + sel.bottom) / 2;
+    uint64_t next_id = kEditFirstId;
+
+    std::vector<core::Annotation> obfuscates;
+    for (int k = 0; k < args.obfuscations; ++k) {
+        int32_t const center_x =
+            sel.left + static_cast<int32_t>(static_cast<int64_t>(sel.Width()) *
+                                            (k + 1) / (args.obfuscations + 1));
+        core::RectPx const box = core::RectPx::From_ltrb(
+            center_x - kEditObfuscateWidthPx / 2, mid_y - kEditObfuscateHeightPx / 2,
+            center_x + kEditObfuscateWidthPx / 2, mid_y + kEditObfuscateHeightPx / 2);
+        obfuscates.push_back(*Make_edit_annotation("obfuscate", box, next_id++));
+    }
+
+    std::vector<core::Annotation> moved;
+    if (scenario == "move") {
+        core::RectPx const box = core::RectPx::From_ltrb(
+            sel.left + kEditMarginPx, mid_y - kEditBoxHeightPx / 2,
+            sel.left + kEditMarginPx + kEditBoxWidthPx, mid_y + kEditBoxHeightPx / 2);
+        std::optional<core::Annotation> first =
+            Make_edit_annotation(args.edit_kind, box, next_id++);
+        if (!first.has_value()) {
+            Print("unknown --edit-kind {}\n", args.edit_kind);
+            return std::nullopt;
+        }
+        moved.push_back(std::move(*first));
+        if (args.multi) {
+            core::RectPx const below = core::RectPx::From_ltrb(
+                box.left, box.bottom + kEditMultiGapPx, box.right,
+                box.bottom + kEditMultiGapPx + kEditBoxHeightPx);
+            moved.push_back(*Make_edit_annotation("ellipse", below, next_id++));
+        }
+        scene.travel_px = sel.Width() - 2 * kEditMarginPx - kEditBoxWidthPx;
+    }
+
+    auto const append = [&](std::vector<core::Annotation> &from, bool is_moved) {
+        for (core::Annotation &annotation : from) {
+            if (is_moved) {
+                scene.moved.push_back(scene.doc.size());
+                scene.start.push_back(annotation);
+            }
+            scene.doc.push_back(std::move(annotation));
+        }
+    };
+    if (args.raster_load) {
+        std::vector<core::Annotation> load;
+        for (int k = 0; k < kLoadCount; ++k) {
+            int32_t const left = sel.left + k * (kLoadWidthPx + kLoadGapPx);
+            load.push_back(*Make_edit_annotation(
+                "obfuscate",
+                core::RectPx::From_ltrb(left, sel.top + kLoadGapPx, left + kLoadWidthPx,
+                                        sel.top + kLoadGapPx + kLoadObfuscateHeightPx),
+                next_id++));
+            load.push_back(*Make_edit_annotation(
+                "text",
+                core::RectPx::From_ltrb(left,
+                                        sel.bottom - kLoadGapPx - kLoadTextHeightPx,
+                                        left + kLoadWidthPx, sel.bottom - kLoadGapPx),
+                next_id++));
+        }
+        append(load, false);
+    }
+    if (args.obfuscate_below) {
+        append(obfuscates, false);
+        append(moved, true);
+    } else {
+        append(moved, true);
+        append(obfuscates, false);
+    }
+    for (size_t i = 0; i < scene.doc.size(); ++i) {
+        if (!Commit_obfuscate(scene.doc, i, *scene.source)) {
+            Print("move: could not build an obfuscate source\n");
+            return std::nullopt;
+        }
+    }
+    for (size_t i = 0; i < scene.moved.size(); ++i) {
+        scene.start[i] = scene.doc[scene.moved[i]];
+    }
+
+    for (core::RectPx const &m : layout.monitors_screen) {
+        core::MonitorWithBounds monitor{};
+        monitor.bounds = m;
+        monitor.info.dpi_scale.percent = 100;
+        scene.monitors.push_back(monitor);
+    }
+    core::RectPx const vd = Union_of(layout.monitors_screen);
+    scene.origin = {vd.left, vd.top};
+    return scene;
+}
+
+// --resize: the moved annotation's right edge follows the drag instead of the whole
+// annotation. Kinds without a box move instead.
+core::Annotation Edited_annotation(core::Annotation const &start, int32_t dx,
+                                   bool resize) {
+    if (!resize) {
+        return core::Translate_annotation(start, {dx, 0});
+    }
+    core::Annotation edited = start;
+    std::visit(core::Overloaded{
+                   [&](core::RectangleAnnotation &a) { a.outer_bounds.right += dx; },
+                   [&](core::EllipseAnnotation &a) { a.outer_bounds.right += dx; },
+                   [&](core::ObfuscateAnnotation &a) { a.bounds.right += dx; },
+                   [&](auto &) { edited = core::Translate_annotation(start, {dx, 0}); },
+               },
+               edited.data);
+    return edited;
+}
+
+// move: frame i of the drag, as OverlayWindow::On_paint fills an edit frame: the
+// document with the moved annotations at their new place, the edit previews, and the
+// obfuscate patches built through the shared preview builder.
+void Fill_move_frame(EditScene &scene, int frame, int frames, Args const &args,
+                     D2DPaintInput &input) {
+    int const i = std::max(frame, 0);
+    int const last = std::max(1, frames - 1);
+    int32_t const dx =
+        static_cast<int32_t>(static_cast<int64_t>(scene.travel_px) * i / last);
+    scene.previews.clear();
+    for (size_t m = 0; m < scene.moved.size(); ++m) {
+        core::Annotation const edited =
+            Edited_annotation(scene.start[m], dx, args.resize);
+        scene.previews.push_back(
+            core::AnnotationEditPreview{.index = scene.moved[m],
+                                        .annotation_before = scene.start[m],
+                                        .annotation_after = edited});
+        scene.doc[scene.moved[m]] = edited;
+    }
+    std::vector<size_t> const preview_indices =
+        core::Obfuscate_preview_indices(scene.doc, scene.previews);
+    scene.patches =
+        Build_obfuscate_preview_patches(scene.doc, preview_indices, *scene.source);
+    input.annotation_editing = true;
+    input.annotations = scene.doc;
+    input.annotation_patches = scene.patches;
+    input.annotation_edit_previews = scene.previews;
+}
+
+// move: the release, as the controller commits it: every obfuscate rebuilt over its
+// final lower annotations, no previews, the caches invalidated.
+bool Commit_move(EditScene &scene, D2DOverlayResources &res, D2DPaintInput &input) {
+    for (size_t i = 0; i < scene.doc.size(); ++i) {
+        if (!Commit_obfuscate(scene.doc, i, *scene.source)) {
+            return false;
+        }
+    }
+    scene.previews.clear();
+    scene.patches.clear();
+    input.annotation_editing = false;
+    input.annotations = scene.doc;
+    input.annotation_patches = {};
+    input.annotation_edit_previews = {};
+    res.Apply_overlay_action(core::OverlayAction::InvalidateFrozenCache);
+    return true;
+}
+
+// commit: frame i drags a new selection on a fresh overlay controller (the --annotated
+// inset, shrunk on odd frames) and applies the action its release returns.
+void Fill_commit_frame(EditScene &scene, int frame, int width, int height,
+                       D2DOverlayResources &res, D2DPaintInput &input) {
+    core::RectPx sel = Inset_selection(width, height);
+    if (frame % 2 != 0) {
+        sel = core::RectPx::From_ltrb(
+            sel.left + kCommitShrinkPx, sel.top + kCommitShrinkPx,
+            sel.right - kCommitShrinkPx, sel.bottom - kCommitShrinkPx);
+    }
+    core::OverlayController controller;
+    controller.Reset_for_session(scene.monitors);
+    core::PointPx const from = {sel.left, sel.top};
+    core::PointPx const to = {sel.right, sel.bottom};
+    core::PointPx const from_screen = {from.x + scene.origin.x,
+                                       from.y + scene.origin.y};
+    core::PointPx const to_screen = {to.x + scene.origin.x, to.y + scene.origin.y};
+    (void)controller.On_primary_press({}, from, from_screen, std::nullopt, std::nullopt,
+                                      std::nullopt, {}, core::SnapEdges{},
+                                      scene.origin.x, scene.origin.y);
+    (void)controller.On_pointer_move({}, to, to_screen, std::nullopt, {}, std::nullopt,
+                                     scene.origin.x, scene.origin.y);
+    core::OverlayAction const action = controller.On_primary_release({}, to);
+    res.Apply_overlay_action(action);
+    input.final_selection = controller.State().final_selection;
+    input.annotations = scene.doc;
 }
 
 struct FrameSample final {
@@ -1110,6 +1586,97 @@ core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
     return core::Annotation{.id = id, .data = stroke};
 }
 
+// --verify-edit: reads the frame just drawn, draws it again with the edit fast paths
+// off, and returns the number of pixels that differ (nullopt if a step failed). The
+// edit caches stay as they were for the next frame.
+std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
+                                        D2DPaintInput const &input, int width,
+                                        int height) {
+    size_t const row_bytes = static_cast<size_t>(width) * kBytesPerPixel;
+    std::vector<uint8_t> fast(row_bytes * static_cast<size_t>(height));
+    std::vector<uint8_t> full(fast.size());
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, fast)) {
+            return std::nullopt;
+        }
+    }
+    bool const was_fast = res.edit_fast_paths;
+    res.edit_fast_paths = false;
+    bool const ok = Paint_d2d_frame(res, input, width, height, nullptr,
+                                    kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+    res.edit_fast_paths = was_fast;
+    if (!ok) {
+        return std::nullopt;
+    }
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, full)) {
+            return std::nullopt;
+        }
+    }
+    // Whole-buffer compare first: a per-pixel loop over a desktop-sized buffer takes
+    // seconds per frame in debug builds.
+    if (std::ranges::equal(fast, full)) {
+        return 0;
+    }
+    size_t differing = 0;
+    for (size_t at = 0; at < fast.size(); at += kBytesPerPixel) {
+        if (!std::equal(fast.begin() + static_cast<std::ptrdiff_t>(at),
+                        fast.begin() + static_cast<std::ptrdiff_t>(at + kBytesPerPixel),
+                        full.begin() + static_cast<std::ptrdiff_t>(at))) {
+            ++differing;
+        }
+    }
+    return differing;
+}
+
+// Reads every target into packed (a desktop-sized bottom-up BGRA buffer).
+bool Read_targets(D2DOverlayResources &res, int width, int height,
+                  std::vector<uint8_t> &packed) {
+    packed.assign(
+        static_cast<size_t>(width) * kBytesPerPixel * static_cast<size_t>(height), 0);
+    for (D2DSurfaceTarget const &target : res.targets) {
+        if (!Read_target_into(res, target, width, height, packed)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// --click-moved: paints a steady frame from the caches as they are, then again with
+// the annotations and the frozen frame rebuilt from input's annotations, and returns
+// how many pixels differ (nullopt if a step failed).
+std::optional<size_t> Steady_differs_from_rebuild(D2DOverlayResources &res,
+                                                  D2DPaintInput const &input, int width,
+                                                  int height) {
+    std::vector<uint8_t> cached;
+    std::vector<uint8_t> fresh;
+    if (Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs) !=
+            D2DFrameStatus::Ok ||
+        !Read_targets(res, width, height, cached)) {
+        return std::nullopt;
+    }
+    Rebuild_annotations_bitmap(res, input.annotations);
+    Rebuild_frozen_bitmap(res, input.final_selection, width, height);
+    if (Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs) !=
+            D2DFrameStatus::Ok ||
+        !Read_targets(res, width, height, fresh)) {
+        return std::nullopt;
+    }
+    if (std::ranges::equal(cached, fresh)) {
+        return 0;
+    }
+    size_t differing = 0;
+    for (size_t at = 0; at < cached.size(); at += kBytesPerPixel) {
+        if (!std::equal(cached.begin() + static_cast<std::ptrdiff_t>(at),
+                        cached.begin() +
+                            static_cast<std::ptrdiff_t>(at + kBytesPerPixel),
+                        fresh.begin() + static_cast<std::ptrdiff_t>(at))) {
+            ++differing;
+        }
+    }
+    return differing;
+}
+
 // Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
 std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                                    Args const &args, int run, bool dump_here) {
@@ -1120,8 +1687,9 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     input.lifted_window_dest_rect = ctx.res->lifted_view.dest_rect;
     input.lifted_window_source_rect = ctx.res->lifted_view.source_rect;
     std::vector<core::Annotation> annotations =
-        args.annotated ? Make_bench_annotations(ctx.width, ctx.height)
-                       : std::vector<core::Annotation>{};
+        args.annotated
+            ? Make_bench_annotations(ctx.width, ctx.height, args.stroke_points)
+            : std::vector<core::Annotation>{};
     input.annotations = annotations;
     Rebuild_annotations_bitmap(*ctx.res, annotations);
     ctx.res->frozen_valid = false;
@@ -1159,11 +1727,79 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             return std::nullopt;
         }
     }
-    if (args.stale_frozen) {
+    // move and commit: the scene, its committed annotations and caches.
+    std::optional<EditScene> edit = std::nullopt;
+    if (scenario == "move" || scenario == "commit") {
+        edit = Make_edit_scene(scenario, ctx.width, ctx.height, *ctx.layout, args);
+        if (!edit.has_value()) {
+            return std::nullopt;
+        }
+        input.final_selection = Inset_selection(ctx.width, ctx.height);
+        input.annotations = edit->doc;
+        Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+    }
+    ctx.res->edit_fast_paths = !args.edit_dynamic;
+    if (args.stale_frozen && edit.has_value() && scenario == "move") {
+        // Valid and built for the selection, but from the annotations moved halfway,
+        // as a frozen rebuild in the middle of an edit leaves it. Edit frames must not
+        // take it for the edit's start.
+        D2DPaintInput mid = input;
+        Fill_move_frame(*edit, args.frames / 2, args.frames, args, mid);
+        Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        for (size_t m = 0; m < edit->moved.size(); ++m) {
+            edit->doc[edit->moved[m]] = edit->start[m];
+        }
+        Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+    } else if (args.stale_frozen) {
         // As a selection drag leaves it: valid, but built for no selection. The paint
         // must rebuild it for the frame's selection.
         Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
     }
+    if (args.click_first && edit.has_value() && scenario == "move") {
+        // A click on the annotation that does not move it: one edit frame, then the
+        // release returns no action, so nothing rebuilds. Then a selection drag (the
+        // frozen frame built for no selection) and its commit (built for the selection
+        // again). The drag that follows must still take the edit fast paths.
+        // --click-moved: the painted edit frame shows the annotation moved, and the
+        // release (back at the start) returns no action.
+        // click.annotations spans edit->doc, so the click frame is painted before the
+        // document goes back to the start.
+        D2DPaintInput click = input;
+        Fill_move_frame(*edit, args.click_moved ? args.frames / 2 : 0, args.frames,
+                        args, click);
+        bool ok = Paint_d2d_frame(*ctx.res, click, ctx.width, ctx.height, nullptr,
+                                  kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+        for (size_t m = 0; m < edit->moved.size(); ++m) {
+            edit->doc[edit->moved[m]] = edit->start[m];
+        }
+        D2DPaintInput idle = input;
+        idle.annotations = edit->doc;
+        ok = ok && Paint_d2d_frame(*ctx.res, idle, ctx.width, ctx.height, nullptr,
+                                   kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+        if (!ok) {
+            Print("paint failed (device lost?)\n");
+            return std::nullopt;
+        }
+        Rebuild_frozen_bitmap(*ctx.res, core::RectPx{}, ctx.width, ctx.height);
+        Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width, ctx.height);
+        if (args.click_moved) {
+            std::optional<size_t> const differing =
+                Steady_differs_from_rebuild(*ctx.res, idle, ctx.width, ctx.height);
+            if (!differing.has_value()) {
+                Print("click-moved: readback failed\n");
+                return std::nullopt;
+            }
+            Print("click-moved: the steady frame differs from a fresh rebuild in {} "
+                  "pixels\n",
+                  *differing);
+            if (*differing > 0) {
+                return std::nullopt;
+            }
+        }
+    }
+    ctx.res->edit_stats = {};
+    size_t verify_differing_frames = 0;
     ScenarioState state;
     std::vector<FrameSample> samples;
     samples.reserve(static_cast<size_t>(args.frames));
@@ -1178,9 +1814,19 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         ULONG64 cycles0 = 0;
         (void)QueryThreadCycleTime(GetCurrentThread(), &cycles0);
         LARGE_INTEGER const t0 = Now();
+        // move and commit: OverlayWindow's input and action work for the frame (the
+        // obfuscate patches, a selection commit), timed as part of the frame.
+        if (edit.has_value() && scenario == "move") {
+            Fill_move_frame(*edit, f, args.frames, args, input);
+        } else if (edit.has_value()) {
+            Fill_commit_frame(*edit, f, ctx.width, ctx.height, *ctx.res, input);
+        }
         // Mirror OverlayWindow::On_paint: rebuild invalid caches before the frame.
         if (!ctx.res->annotations_valid) {
-            Rebuild_annotations_bitmap(*ctx.res, annotations);
+            Rebuild_annotations_bitmap(
+                *ctx.res, edit.has_value()
+                              ? std::span<const core::Annotation>(edit->doc)
+                              : std::span<const core::Annotation>(annotations));
         }
         if (!ctx.res->frozen_valid) {
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
@@ -1228,6 +1874,20 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         sample.mpx = static_cast<double>(ps.PSInvocations) / kMegapixel;
         sample.points = state.points.size();
         samples.push_back(sample);
+        // --verify-edit: the same frame again through the full rebuild and the dynamic
+        // path, compared pixel for pixel, outside timing.
+        if (args.verify_edit && edit.has_value()) {
+            std::optional<size_t> const differing =
+                Verify_edit_frame(*ctx.res, input, ctx.width, ctx.height);
+            if (!differing.has_value()) {
+                Print("verify-edit: readback failed\n");
+                return std::nullopt;
+            }
+            if (*differing > 0) {
+                ++verify_differing_frames;
+                Print("verify-edit: frame {} differs in {} pixels\n", f, *differing);
+            }
+        }
         // Readback happens after the frame's numbers are taken, outside timing.
         if (dump_here && f == args.dump_frame) {
             if (!Dump_target(*ctx.res, ctx.width, ctx.height, args.dump_path)) {
@@ -1235,6 +1895,68 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                 return std::nullopt;
             }
             Print("dump: frame {} of {} written to {}\n", f, scenario, args.dump_path);
+        }
+    }
+
+    if (args.verify_edit && edit.has_value()) {
+        Print("verify-edit: {} of {} frames differ\n", verify_differing_frames,
+              args.frames);
+        if (verify_differing_frames > 0) {
+            return std::nullopt;
+        }
+        // The fast paths must have run, or the check above proves nothing. A lifted
+        // window and a frozen frame built mid-edit must keep the changed-area path off.
+        D2DOverlayResources::EditStats const stats = ctx.res->edit_stats;
+        bool const region_expected = !args.lifted && !args.stale_frozen;
+        Print("verify-edit: {} changed-area frames, {} below-cache hits\n",
+              stats.region_frames, stats.below_cache_hits);
+        if (scenario == "move" && ((region_expected && stats.region_frames == 0) ||
+                                   (!region_expected && stats.region_frames > 0) ||
+                                   (args.annotated && stats.below_cache_hits == 0))) {
+            Print("verify-edit: the edit fast paths did not run as expected\n");
+            return std::nullopt;
+        }
+    }
+
+    // move: the release frame. The controller commits the edit (every obfuscate
+    // rebuilt), the caches are invalidated and rebuilt, and the frame has no previews.
+    std::optional<std::pair<double, double>> move_release_ms = std::nullopt;
+    ULONG64 move_release_cycles = 0;
+    if (edit.has_value() && scenario == "move") {
+        ID3D11DeviceContext *const context = ctx.queries->context.Get();
+        ULONG64 cycles0 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &cycles0);
+        LARGE_INTEGER const t0 = Now();
+        bool ok = Commit_move(*edit, *ctx.res, input);
+        if (ok && !ctx.res->annotations_valid) {
+            Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+        }
+        if (ok && !ctx.res->frozen_valid) {
+            Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
+                                  ctx.height);
+        }
+        ok = ok && Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr,
+                                   kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+        LARGE_INTEGER const t1 = Now();
+        ULONG64 cycles1 = 0;
+        (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
+        move_release_cycles = cycles1 - cycles0;
+        context->End(ctx.queries->done.Get());
+        context->Flush();
+        (void)Wait_query<BOOL>(context, ctx.queries->done.Get());
+        LARGE_INTEGER const t2 = Now();
+        if (!ok) {
+            Print("move: release failed\n");
+            return std::nullopt;
+        }
+        move_release_ms = std::pair{Qpc_ms(t0, t1), Qpc_ms(t0, t2)};
+        if (dump_here && args.dump_frame == args.frames) {
+            if (!Dump_target(*ctx.res, ctx.width, ctx.height, args.dump_path)) {
+                Print("dump: failed to write {}\n", args.dump_path);
+                return std::nullopt;
+            }
+            Print("dump: release frame of {} written to {}\n", scenario,
+                  args.dump_path);
         }
     }
 
@@ -1383,6 +2105,12 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
                 Median(bm));
         }
     }
+    if (move_release_ms.has_value()) {
+        Print("release: cpu {:.2f} ms ({:.1f} Mcycles), frame {:.2f} ms\n",
+              move_release_ms->first,
+              static_cast<double>(move_release_cycles) / kCyclesPerMegacycle,
+              move_release_ms->second);
+    }
     if (commit_ms.has_value()) {
         Print("release: {} committed points, cpu {:.2f} ms ({:.1f} Mcycles), frame "
               "{:.2f} ms\n",
@@ -1410,7 +2138,8 @@ int Run_render_bench(Args const &args) {
     if (args.scenario == "all") {
         scenarios.assign(kAllScenarios.begin(), kAllScenarios.end());
     } else if (std::find(kAllScenarios.begin(), kAllScenarios.end(), args.scenario) !=
-               kAllScenarios.end()) {
+                   kAllScenarios.end() ||
+               args.scenario == "move" || args.scenario == "commit") {
         scenarios.push_back(args.scenario);
     } else {
         Print("unknown scenario: {}\n", args.scenario);
@@ -1420,9 +2149,10 @@ int Run_render_bench(Args const &args) {
     std::string_view const dump_scenario =
         args.scenario == "all" ? std::string_view("select") : scenarios.front();
     if (args.dump_frame > args.frames ||
-        (args.dump_frame == args.frames && !Is_freehand(dump_scenario))) {
-        Print("--dump-frame {} is past --frames {} (equal is the release frame, brush "
-              "or highlighter only)\n",
+        (args.dump_frame == args.frames && !Is_freehand(dump_scenario) &&
+         dump_scenario != "move")) {
+        Print("--dump-frame {} is past --frames {} (equal is the release frame, brush, "
+              "highlighter or move only)\n",
               args.dump_frame, args.frames);
         return static_cast<int>(BenchExit::BadArgs);
     }

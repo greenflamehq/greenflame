@@ -2,6 +2,7 @@
 
 // Direct2D overlay paint pipeline.
 
+#include "greenflame_core/annotation_edit_interaction.h"
 #include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/freehand_smoothing.h"
 #include "greenflame_core/rect_px.h"
@@ -37,6 +38,9 @@ struct D2DPaintInput {
     std::span<const core::RectPx> monitor_rects_client = {};
     std::span<const core::Annotation> annotations = {};
     std::span<const AnnotationPreviewPatch> annotation_patches = {};
+    // The annotations an edit (move, resize) is changing, with their state at the
+    // edit's start. Empty when no edit is active.
+    std::span<const core::AnnotationEditPreview> annotation_edit_previews = {};
     std::span<const core::PointPx> draft_freehand_points = {};
     std::wstring_view transient_center_label_text = {};
     std::span<IOverlayButton *const> toolbar_buttons = {};

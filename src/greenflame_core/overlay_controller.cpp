@@ -411,6 +411,11 @@ void OverlayController::Cancel_text_draft() {
     annotation_controller_.Cancel_text_draft();
 }
 
+std::vector<AnnotationEditPreview>
+OverlayController::Active_annotation_edit_previews() const {
+    return annotation_controller_.Active_annotation_edit_previews();
+}
+
 bool OverlayController::Has_active_annotation_edit() const noexcept {
     return annotation_controller_.Has_active_edit_interaction();
 }
@@ -1036,7 +1041,8 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
         }
         state_.move_dragging = false;
         state_.live_rect = {};
-        return OverlayAction::InvalidateFrozenCache;
+        // Only the selection changed: the frozen frame is keyed by it and rebuilds.
+        return OverlayAction::Repaint;
     }
 
     if (state_.handle_dragging && state_.resize_handle.has_value()) {
@@ -1060,7 +1066,8 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
         state_.handle_dragging = false;
         state_.resize_handle = std::nullopt;
         state_.live_rect = {};
-        return OverlayAction::InvalidateFrozenCache;
+        // Only the selection changed: the frozen frame is keyed by it and rebuilds.
+        return OverlayAction::Repaint;
     }
 
     if (state_.dragging) {
@@ -1074,7 +1081,8 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
             Allowed_selection_rect(raw, state_.start_px, state_.cached_monitors);
         Reset_window_selection_metadata(true);
         state_.dragging = false;
-        return OverlayAction::InvalidateFrozenCache;
+        // Only the selection changed: the frozen frame is keyed by it and rebuilds.
+        return OverlayAction::Repaint;
     }
 
     if (annotation_controller_.Has_active_text_edit()) {

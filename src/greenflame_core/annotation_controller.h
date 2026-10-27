@@ -25,6 +25,12 @@ class IObfuscateSourceProvider {
                             std::span<const Annotation> lower_annotations) = 0;
 };
 
+// Indices of the obfuscates an edit preview changes: the edited obfuscates, and every
+// obfuscate whose bounds touch an edited annotation's old or new bounds. Ascending.
+[[nodiscard]] std::vector<size_t>
+Obfuscate_preview_indices(std::span<const Annotation> annotations,
+                          std::span<const AnnotationEditPreview> previews);
+
 class AnnotationController final : public IAnnotationToolHost,
                                    public IAnnotationEditInteractionHost {
   public:

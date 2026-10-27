@@ -2316,6 +2316,29 @@ gesture to `%TEMP%\greenflame-debug.log`.
   - The interactive drag and strokes look no worse than on the base build. Until
     in-app frame timing exists, this step is judged by eye.
 
+### GF-MAN-PERF-002 - Moving Annotations Over Obfuscations
+
+- Priority: `P2`
+- Run on: `ENV-B`, in a debug-log build (`GREENFLAME_ENABLE_DEBUG_LOG`), on the
+  slowest multi-monitor desk available. Run it when a change touches annotation edits,
+  obfuscation or the overlay's caches.
+- Steps:
+  1. Select a region across two monitors. Draw a long Highlighter stroke, three
+     obfuscations side by side and a rectangle.
+  2. Drag the rectangle under and through the three obfuscations, slowly, then fast.
+     Release, then Ctrl+Z and Ctrl+Shift+Z.
+  3. Drag one obfuscation over the highlighter and release.
+  4. Move and resize the selection itself, then Ctrl+Z.
+- Expected:
+  - During every drag, each obfuscation only ever shows pixelated content: never the
+    clear pixels under it, never a gap. The pixelation follows what moves under it.
+  - No trail or ghost of the dragged annotation stays behind; after release the
+    frame matches what Save shows.
+  - The `frames` lines for the plain rectangle drag show lower intervals than on the
+    base build; the drags over obfuscations are no worse.
+  - Selection moves, resizes and their undo keep every annotation and obfuscation as
+    it was.
+
 ## CLI End-To-End
 
 ### GF-MAN-CLI-001 - Help And Version

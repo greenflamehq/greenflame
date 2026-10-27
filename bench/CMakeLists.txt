@@ -264,8 +264,10 @@ if(BUILD_TESTING)
         --scenario highlighter --annotated --lifted ${greenflame_split_freehand})
     set(greenflame_split_args_steady --scenario steady --annotated)
     set(greenflame_split_args_resize --scenario select --annotated --resize)
+    set(greenflame_split_args_move
+        --scenario move --annotated --obfuscations 1 --edit-kind highlighter)
     foreach(greenflame_split_case hover select brush brush_reverse highlighter
-            highlighter_reverse straight line obfuscate lifted steady resize)
+            highlighter_reverse straight line obfuscate lifted steady resize move)
         set(greenflame_split_name greenflame_render_bench_split_${greenflame_split_case})
         set(greenflame_split_span_bmp
             "${CMAKE_CURRENT_BINARY_DIR}/split_${greenflame_split_case}_span.bmp")
@@ -374,5 +376,65 @@ if(BUILD_TESTING)
     )
     set_tests_properties(greenflame_render_bench_stale_frozen_diff
         PROPERTIES FIXTURES_REQUIRED greenflame_bench_stale_frozen
+    )
+
+    # An annotation edit (move, resize) redraws only the annotations above the lowest
+    # one it changes, and recomposites only where it changed things over the frozen
+    # frame of its start. --verify-edit draws every frame again through the full
+    # rebuild and the dynamic path, and fails unless the two match at tolerance 0, in
+    # one target and in one per monitor. --lifted takes the dynamic path; --stale-frozen
+    # gives a frozen frame built mid-edit, which must not be taken for the start.
+    # --verify-edit also fails unless the fast paths ran (the changed-area path not at
+    # all with --lifted or --stale-frozen). --click-first replays a click that moves
+    # nothing, then a selection drag and commit, before the drag.
+    # Span runs use single-1080, split runs jocelyn-desk (they need several
+    # monitors). Three measured frames each keep ctest fast and put the middle frame's
+    # moved annotation under the obfuscate.
+    set(greenflame_edit_common
+        --adapter warp --scenario move --annotated --frames 3 --verify-edit)
+    set(greenflame_edit_layout_span --layout single-1080)
+    set(greenflame_edit_layout_split --layout jocelyn-desk --split-monitors)
+    set(greenflame_edit_args_rect --obfuscations 1)
+    set(greenflame_edit_args_below --obfuscations 1 --obfuscate-below)
+    set(greenflame_edit_args_multi --obfuscations 1 --multi)
+    set(greenflame_edit_args_resize --obfuscations 1 --resize)
+    set(greenflame_edit_args_obfuscate --obfuscations 1 --edit-kind obfuscate)
+    set(greenflame_edit_args_highlighter --obfuscations 1 --edit-kind highlighter)
+    set(greenflame_edit_args_lifted --obfuscations 1 --lifted)
+    set(greenflame_edit_args_stale --stale-frozen)
+    set(greenflame_edit_args_click --obfuscations 1 --click-first)
+    # A click whose painted frame was moved and whose release does nothing: the
+    # steady frame after a selection commit must match a fresh rebuild.
+    set(greenflame_edit_args_click_moved --obfuscations 1 --click-first --click-moved)
+    # No obfuscation: only the moved annotation can leave a stale frame.
+    set(greenflame_edit_args_click_moved_plain --click-first --click-moved)
+    set(greenflame_edit_args_click_moved_obfuscate
+        --obfuscations 1 --click-first --click-moved --edit-kind obfuscate)
+    # Every case runs in one target. The per-target paths (the clip cull, the frozen
+    # blit per monitor) also run split for a moved rectangle, a moved obfuscate and
+    # the click replay; the other cases do not depend on the targets.
+    set(greenflame_edit_split_cases rect obfuscate click)
+    foreach(greenflame_edit_case rect below multi resize obfuscate highlighter lifted
+            stale click click_moved click_moved_plain click_moved_obfuscate)
+        set(greenflame_edit_targets_list span)
+        if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)
+            list(APPEND greenflame_edit_targets_list split)
+        endif()
+        foreach(greenflame_edit_targets ${greenflame_edit_targets_list})
+            set(greenflame_edit_args ${greenflame_edit_common}
+                ${greenflame_edit_layout_${greenflame_edit_targets}}
+                ${greenflame_edit_args_${greenflame_edit_case}})
+            add_test(
+                NAME greenflame_render_bench_edit_${greenflame_edit_case}_${greenflame_edit_targets}
+                COMMAND greenflame_render_bench ${greenflame_edit_args}
+            )
+        endforeach()
+    endforeach()
+
+    # A selection commit through the real overlay controller, with annotations.
+    add_test(
+        NAME greenflame_render_bench_commit_smoke
+        COMMAND greenflame_render_bench --adapter warp --layout single-1080
+            --scenario commit --annotated --obfuscations 1 --frames 4
     )
 endif()

@@ -6,6 +6,10 @@
 #include "greenflame_core/freehand_smoothing.h"
 #include "greenflame_core/text_annotation_types.h"
 
+namespace greenflame::core {
+enum class OverlayAction : uint8_t;
+} // namespace greenflame::core
+
 namespace greenflame {
 
 // The selection border dash pattern while dragging, in pixels at stroke width 1.
@@ -104,6 +108,9 @@ struct D2DOverlayResources final {
     // draws. Used as input 1 of base_composite_effect so the multiply sees the prior
     // annotations underneath.
     Microsoft::WRL::ComPtr<ID2D1Bitmap> base_composite_bitmap;
+    // Annotation edits: annotations_bitmap as of the annotations below the edit (see
+    // edit_cache), copied back at the start of each edit frame's rebuild.
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> edit_below_bitmap;
 
     // Live freehand stroke (brush and highlighter). The smoother turns the stroke's
     // stable body into final points, drawn once each into draft_stroke_body_rt (append
@@ -185,6 +192,41 @@ struct D2DOverlayResources final {
     std::optional<TextCursorPreviewCache> text_cursor_preview_cache;
 
     bool annotations_valid = false;
+    // The annotations annotations_bitmap shows, and the ones frozen_bitmap shows. Null
+    // when not known: preview patches, a skipped annotation, or an edit frame that
+    // shows something other than the edit's start.
+    std::shared_ptr<const std::vector<core::Annotation>> annotations_source = nullptr;
+    std::shared_ptr<const std::vector<core::Annotation>> frozen_source = nullptr;
+    // True when an edit frame drew annotations_bitmap last. The first frame after the
+    // edit rebuilds it if it does not show the document: an edit can end with no
+    // action, so nothing else would.
+    bool annotations_from_edit = false;
+    // Annotation edits (move, resize). Every edit frame rebuilds annotations_bitmap.
+    // The annotations below the lowest one the edit changes stay the same, so they are
+    // drawn once into edit_below_bitmap and each frame draws only the rest.
+    struct EditCache final {
+        bool active = false; // an edit frame was drawn since the last non-edit frame
+        // edit_below_bitmap holds the first below_count annotations. Within one edit
+        // they cannot change (the document is locked mid-manipulation; lifted window
+        // and screenshot changes drop this cache).
+        bool valid = false;
+        size_t below_count = 0;
+        // Whether frozen_bitmap shows the annotations the edit started from, so a frame
+        // can recomposite only what the edit changed. Decided at the edit's first
+        // frame; cleared when frozen_bitmap is rebuilt and when the edit ends.
+        std::optional<bool> frozen_is_edit_start = std::nullopt;
+    };
+    EditCache edit_cache = {};
+    // False: edit frames take the full rebuild and the dynamic path (render bench
+    // checks against it).
+    bool edit_fast_paths = true;
+    // How often the edit fast paths ran: frames drawn as a changed-area recomposite,
+    // and frames whose rebuild reused edit_below_bitmap. The render bench checks them.
+    struct EditStats final {
+        size_t region_frames = 0;
+        size_t below_cache_hits = 0;
+    };
+    EditStats edit_stats = {};
     // True when annotations_bitmap was last built from no annotations, so it is all
     // transparent and blitting it changes nothing.
     bool annotations_empty = false;
@@ -251,6 +293,10 @@ struct D2DOverlayResources final {
 
     // Mark only the frozen cache dirty (annotations are still valid).
     void Invalidate_frozen() noexcept;
+
+    // Marks the caches an overlay controller action makes stale. The window and the
+    // render bench both apply actions through this.
+    void Apply_overlay_action(core::OverlayAction action) noexcept;
 
     // Release all device-dependent resources except factory and dwrite_factory.
     void Release_device_resources();

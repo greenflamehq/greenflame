@@ -381,22 +381,27 @@ AnnotationController::Active_annotation_edit_previews() const {
 }
 
 std::vector<size_t> AnnotationController::Active_obfuscate_preview_indices() const {
+    return Obfuscate_preview_indices(document_.annotations,
+                                     Active_annotation_edit_previews());
+}
+
+std::vector<size_t>
+Obfuscate_preview_indices(std::span<const Annotation> annotations,
+                          std::span<const AnnotationEditPreview> previews) {
     std::vector<size_t> indices = {};
-    std::vector<AnnotationEditPreview> const previews =
-        Active_annotation_edit_previews();
     if (previews.empty()) {
         return indices;
     }
 
-    for (size_t index = 0; index < document_.annotations.size(); ++index) {
-        Annotation const &annotation = document_.annotations[index];
+    for (size_t index = 0; index < annotations.size(); ++index) {
+        Annotation const &annotation = annotations[index];
         if (!Is_obfuscate_annotation(annotation)) {
             continue;
         }
 
         bool include_index = false;
         for (AnnotationEditPreview const &preview : previews) {
-            if (preview.index >= document_.annotations.size()) {
+            if (preview.index >= annotations.size()) {
                 continue;
             }
             std::optional<RectPx> const old_bounds =

@@ -4,6 +4,7 @@
 
 #include "app_config_store.h"
 #include "greenflame/win/annotation_capture_renderer.h"
+#include "greenflame/win/obfuscate_preview.h"
 #include "greenflame_core/app_config.h"
 #include "greenflame_core/frame_stats.h"
 #include "greenflame_core/modification_command.h"
@@ -675,64 +676,6 @@ Load_png_resource_alpha_mask(HINSTANCE hinstance, int resource_id) {
     return glyph;
 }
 
-[[nodiscard]] bool Read_capture_pixels(greenflame::GdiCaptureResult const &capture,
-                                       std::span<uint8_t> pixels) {
-    if (!capture.Is_valid()) {
-        return false;
-    }
-
-    HDC const dc = GetDC(nullptr);
-    if (dc == nullptr) {
-        return false;
-    }
-
-    BITMAPINFOHEADER bmi{};
-    greenflame::Fill_bmi32_top_down(bmi, capture.width, capture.height);
-    int const result =
-        GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
-    ReleaseDC(nullptr, dc);
-    return result != 0;
-}
-
-[[nodiscard]] std::optional<greenflame::core::Annotation>
-Build_preview_obfuscate_annotation(
-    greenflame::core::Annotation annotation,
-    std::span<const greenflame::core::Annotation> lower_annotations,
-    greenflame::core::IObfuscateSourceProvider &source_provider) {
-    greenflame::core::ObfuscateAnnotation *const obfuscate =
-        std::get_if<greenflame::core::ObfuscateAnnotation>(&annotation.data);
-    if (obfuscate == nullptr) {
-        return std::nullopt;
-    }
-
-    greenflame::core::RectPx const normalized_bounds = obfuscate->bounds.Normalized();
-    if (normalized_bounds.Is_empty()) {
-        return std::nullopt;
-    }
-
-    std::optional<greenflame::core::BgraBitmap> const source =
-        source_provider.Build_composited_source(normalized_bounds, lower_annotations);
-    if (!source.has_value() || !source->Is_valid()) {
-        return std::nullopt;
-    }
-
-    greenflame::core::BgraBitmap const raster =
-        greenflame::core::Rasterize_obfuscate(*source, obfuscate->block_size);
-    if (!raster.Is_valid()) {
-        return std::nullopt;
-    }
-
-    obfuscate->bounds = normalized_bounds;
-    obfuscate->block_size =
-        greenflame::core::Clamp_obfuscate_block_size(obfuscate->block_size);
-    obfuscate->bitmap_width_px = raster.width_px;
-    obfuscate->bitmap_height_px = raster.height_px;
-    obfuscate->bitmap_row_bytes = raster.row_bytes;
-    obfuscate->premultiplied_bgra = raster.premultiplied_bgra;
-    return annotation;
-}
-
 } // namespace
 
 namespace greenflame {
@@ -841,39 +784,8 @@ struct OverlayWindow::ObfuscateSourceProvider final
             return std::nullopt;
         }
 
-        GdiCaptureResult cropped{};
-        int32_t const crop_left = normalized_bounds.left - source_bounds.left;
-        int32_t const crop_top = normalized_bounds.top - source_bounds.top;
-        if (!Crop_capture(*source_capture, crop_left, crop_top,
-                          normalized_bounds.Width(), normalized_bounds.Height(),
-                          cropped)) {
-            return std::nullopt;
-        }
-
-        if (!lower_annotations.empty() &&
-            !Render_annotations_into_capture(cropped, lower_annotations,
-                                             normalized_bounds)) {
-            cropped.Free();
-            return std::nullopt;
-        }
-
-        int const row_bytes = Row_bytes32(cropped.width);
-        size_t const buffer_size =
-            static_cast<size_t>(row_bytes) * static_cast<size_t>(cropped.height);
-        core::BgraBitmap bitmap{
-            .width_px = cropped.width,
-            .height_px = cropped.height,
-            .row_bytes = row_bytes,
-            .premultiplied_bgra = std::vector<uint8_t>(buffer_size),
-        };
-        bool const read_ok = Read_capture_pixels(cropped, bitmap.premultiplied_bgra);
-        cropped.Free();
-        if (!read_ok) {
-            return std::nullopt;
-        }
-
-        core::Force_alpha_opaque(bitmap.premultiplied_bgra);
-        return bitmap;
+        return Build_obfuscate_source(*source_capture, source_bounds, normalized_bounds,
+                                      lower_annotations);
     }
 
   private:
@@ -1221,10 +1133,12 @@ void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client)
         Request_repaint();
     }
 
-    if (Should_force_obfuscate_repaint() ||
-        (!controller_.Has_active_annotation_gesture() &&
-         (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
-          controller_.Active_annotation_tool() == core::AnnotationToolId::Text))) {
+    // Obfuscate drafts and edit previews need no forced paint here: the controller
+    // already asked for one, and a forced paint per mouse move makes frames come at
+    // input rate, unthrottled.
+    if (!controller_.Has_active_annotation_gesture() &&
+        (Should_show_brush_cursor_preview() || Should_show_square_cursor_preview() ||
+         controller_.Active_annotation_tool() == core::AnnotationToolId::Text)) {
         GREENFLAME_PROFILE_SCOPE(
             "OverlayWindow::Refresh_pointer_visual_overlays::Forced_redraw");
         Repaint_now();
@@ -1239,7 +1153,12 @@ void OverlayWindow::Restore_selection_state(core::OverlaySelectionState const &s
             (void)d2d_resources_->Upload_lifted_window_capture(
                 resources_->window_capture.display_capture);
         }
-        d2d_resources_->Invalidate_annotations();
+        // Annotations do not depend on the selection: the frozen frame is keyed by it,
+        // and a changed lifted window invalidates through Set_lifted_view. Restoring
+        // no selection resets the annotations, though.
+        if (state.final_selection.Is_empty()) {
+            d2d_resources_->Invalidate_annotations();
+        }
     }
     Request_repaint();
 }
@@ -3149,7 +3068,7 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
         break;
     case core::OverlayAction::InvalidateFrozenCache:
         if (d2d_resources_) {
-            d2d_resources_->Invalidate_annotations();
+            d2d_resources_->Apply_overlay_action(action);
         }
         Request_repaint();
         break;
@@ -3447,11 +3366,16 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
         return 0;
     }
     if (eff_ctrl && wparam == L'Z') {
+        // A selection undo leaves the annotations alone: rebuild them only when the
+        // undone or redone command changed them.
+        std::vector<core::Annotation> const annotations_before(
+            controller_.Annotations().begin(), controller_.Annotations().end());
         bool const applied = eff_shift ? controller_.Redo() : controller_.Undo();
         if (!applied) {
             return 0;
         }
-        if (d2d_resources_) {
+        if (d2d_resources_ &&
+            !std::ranges::equal(annotations_before, controller_.Annotations())) {
             d2d_resources_->Invalidate_annotations();
         }
         Rebuild_toolbar_buttons();
@@ -4698,6 +4622,8 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         std::optional<core::TextDraftView> draft_text_view = std::nullopt;
         std::optional<core::Annotation> draft_obfuscate_preview = std::nullopt;
         std::vector<AnnotationPreviewPatch> patches;
+        std::vector<core::AnnotationEditPreview> const edit_previews =
+            controller_.Active_annotation_edit_previews();
         input.draft_freehand_points = controller_.Draft_freehand_points();
         input.draft_freehand_style = controller_.Draft_freehand_style();
         // Multi-point freehand drafts render from the split-tail preview below.
@@ -4721,40 +4647,10 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
                     "OverlayWindow::On_paint::Obfuscate_preview_patches");
                 std::vector<size_t> const preview_indices =
                     controller_.Active_obfuscate_preview_indices();
-                if (!preview_indices.empty()) {
-                    patches.reserve(preview_indices.size());
-                    for (size_t index : preview_indices) {
-                        if (index >= controller_.Annotations().size()) continue;
-
-                        // Build lower-annotations span with already-computed patches
-                        // applied for correct stacking when multiple obfuscates
-                        // overlap.
-                        std::span<const core::Annotation> lower_span =
-                            controller_.Annotations().first(index);
-                        std::vector<core::Annotation> lower_scratch;
-                        for (auto const &patch : patches) {
-                            if (patch.index < index) {
-                                if (lower_scratch.empty()) {
-                                    lower_scratch.assign(lower_span.begin(),
-                                                         lower_span.end());
-                                }
-                                lower_scratch[patch.index] = patch.annotation;
-                            }
-                        }
-                        if (!lower_scratch.empty()) {
-                            lower_span = lower_scratch;
-                        }
-
-                        std::optional<core::Annotation> rebuilt =
-                            Build_preview_obfuscate_annotation(
-                                controller_.Annotations()[index], lower_span,
-                                *obfuscate_source_provider_);
-                        if (rebuilt.has_value()) {
-                            patches.push_back({index, std::move(*rebuilt)});
-                            has_live_obfuscate_preview = true;
-                        }
-                    }
-                }
+                patches = Build_obfuscate_preview_patches(controller_.Annotations(),
+                                                          preview_indices,
+                                                          *obfuscate_source_provider_);
+                has_live_obfuscate_preview = !patches.empty();
 
                 if (paint_draft_annotation != nullptr &&
                     std::holds_alternative<core::ObfuscateAnnotation>(
@@ -4779,6 +4675,7 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         input.handle_dragging = s.handle_dragging;
         input.move_dragging = s.move_dragging;
         input.annotation_editing = controller_.Has_active_annotation_edit();
+        input.annotation_edit_previews = edit_previews;
         input.modifier_preview = s.modifier_preview;
         if (config_ != nullptr) {
             input.show_selection_size_side_labels =

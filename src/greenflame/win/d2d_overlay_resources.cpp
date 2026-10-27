@@ -1,6 +1,7 @@
 #include "greenflame/win/d2d_overlay_resources.h"
 
 #include "greenflame/win/d2d_draw_helpers.h"
+#include "greenflame_core/overlay_controller.h"
 
 namespace greenflame {
 
@@ -381,6 +382,8 @@ void D2DOverlayResources::Release_targets() noexcept {
 }
 
 bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
+    // Highlighters below an edit multiply onto the screenshot.
+    edit_cache = {};
     return Upload_capture_bitmap(hwnd_rt.Get(), cap, Target_dpi(), screenshot);
 }
 
@@ -389,6 +392,8 @@ void D2DOverlayResources::Set_lifted_view(LiftedWindowView const &view) noexcept
         lifted_view = view;
         annotations_valid = false;
         frozen_valid = false;
+        // Highlighters below an edit tint the lifted window.
+        edit_cache = {};
     }
 }
 
@@ -697,6 +702,23 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
         }
     }
 
+    // edit_below_bitmap: BGRA premultiplied, the annotations below an edit, copied to
+    // and from annotations_rt's bitmap.
+    {
+        D2D1_BITMAP_PROPERTIES pf{};
+        pf.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        pf.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+        pf.dpiX = Target_dpi();
+        pf.dpiY = Target_dpi();
+        HRESULT const hr =
+            hwnd_rt->CreateBitmap(D2D1::SizeU(uw, uh), nullptr, 0, pf,
+                                  edit_below_bitmap.ReleaseAndGetAddressOf());
+        if (FAILED(hr)) {
+            return false;
+        }
+    }
+    edit_cache = {};
+
     annotations_valid = false;
     frozen_valid = false;
     freehand_draft = {};
@@ -730,6 +752,7 @@ D2DOverlayResources::Toolbar_glyph_bitmap(OverlayToolbarGlyphId glyph) const noe
 }
 
 void D2DOverlayResources::Invalidate_annotations() noexcept {
+    edit_cache = {};
     obfuscate_bitmaps.clear();
     text_bitmaps.clear();
     bubble_bitmaps.clear();
@@ -738,6 +761,12 @@ void D2DOverlayResources::Invalidate_annotations() noexcept {
 }
 
 void D2DOverlayResources::Invalidate_frozen() noexcept { frozen_valid = false; }
+
+void D2DOverlayResources::Apply_overlay_action(core::OverlayAction action) noexcept {
+    if (action == core::OverlayAction::InvalidateFrozenCache) {
+        Invalidate_annotations();
+    }
+}
 
 void D2DOverlayResources::Release_device_resources() {
     screenshot.Reset();
@@ -751,6 +780,8 @@ void D2DOverlayResources::Release_device_resources() {
     draft_stroke_bitmap.Reset();
     draft_stroke_body_bitmap.Reset();
     base_composite_bitmap.Reset();
+    edit_below_bitmap.Reset();
+    edit_cache = {};
     freehand_draft = {};
     multiply_effect.Reset();
     base_composite_effect.Reset();

@@ -192,6 +192,9 @@ class OverlayController final {
     [[nodiscard]] std::optional<AnnotationEditHandleKind>
     Active_annotation_edit_handle() const noexcept;
     [[nodiscard]] std::vector<size_t> Active_obfuscate_preview_indices() const;
+    // The annotations the active edit changes, with their state at the edit's start.
+    [[nodiscard]] std::vector<AnnotationEditPreview>
+    Active_annotation_edit_previews() const;
     [[nodiscard]] COLORREF Annotation_color() const noexcept;
     [[nodiscard]] COLORREF Brush_annotation_color() const noexcept;
     [[nodiscard]] COLORREF Highlighter_color() const noexcept;
