@@ -255,7 +255,8 @@ OverlayAction OverlayController::On_delete_selected_annotation() {
     if (annotation_controller_.Delete_selected_annotation(undo_stack_)) {
         return OverlayAction::InvalidateFrozenCache;
     }
-    return OverlayAction::None;
+    return annotation_controller_.Obfuscate_rebuild_failed() ? OverlayAction::FailClose
+                                                             : OverlayAction::None;
 }
 
 std::vector<AnnotationToolbarButtonView>
@@ -324,6 +325,10 @@ void OverlayController::Set_spell_check_service(ISpellCheckService *service) noe
 void OverlayController::Set_obfuscate_source_provider(
     IObfuscateSourceProvider *provider) noexcept {
     annotation_controller_.Set_obfuscate_source_provider(provider);
+}
+
+bool OverlayController::Recompute_obfuscates() {
+    return annotation_controller_.Recompute_obfuscates();
 }
 
 bool OverlayController::Has_active_text_edit() const noexcept {
@@ -1096,8 +1101,11 @@ OverlayAction OverlayController::On_primary_release(OverlayModifierState mods,
 
     if (annotation_controller_.Has_active_gesture()) {
         (void)annotation_controller_.On_pointer_move(clamped_cursor, mods.primary_down);
-        return annotation_controller_.On_primary_release(undo_stack_)
-                   ? OverlayAction::InvalidateFrozenCache
+        if (annotation_controller_.On_primary_release(undo_stack_)) {
+            return OverlayAction::InvalidateFrozenCache;
+        }
+        return annotation_controller_.Obfuscate_rebuild_failed()
+                   ? OverlayAction::FailClose
                    : OverlayAction::None;
     }
 

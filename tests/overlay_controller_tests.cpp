@@ -44,7 +44,7 @@ struct FakeObfuscateSourceProvider final : public IObfuscateSourceProvider {
     [[nodiscard]] std::optional<BgraBitmap> Build_composited_source(
         RectPx bounds, std::span<const Annotation> /*lower_annotations*/) override {
         RectPx const normalized_bounds = bounds.Normalized();
-        if (normalized_bounds.Is_empty()) {
+        if (normalized_bounds.Is_empty() || fail) {
             return std::nullopt;
         }
 
@@ -59,6 +59,8 @@ struct FakeObfuscateSourceProvider final : public IObfuscateSourceProvider {
                 static_cast<size_t>(row_bytes) * static_cast<size_t>(height), 0xCC),
         };
     }
+
+    bool fail = false; // no source can be built
 };
 
 class OpaqueTextLayoutEngine final : public ITextLayoutEngine {
@@ -2715,4 +2717,34 @@ TEST(overlay_controller,
     ASSERT_EQ(Move(c, {240, 240}), OverlayAction::Repaint);
     EXPECT_EQ(c.Active_obfuscate_preview_indices(), (std::vector<size_t>{1}));
     EXPECT_EQ(Release(c, {240, 240}), OverlayAction::InvalidateFrozenCache);
+}
+
+TEST(overlay_controller, FailedObfuscateRebuildClosesTheOverlay) {
+    auto c = Make_controller();
+    FakeObfuscateSourceProvider source_provider;
+    c.Set_obfuscate_source_provider(&source_provider);
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    ASSERT_EQ(Press(c, {210, 210}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {250, 250}), OverlayAction::Repaint);
+    ASSERT_EQ(Release(c, {250, 250}), OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    std::vector<Annotation> const before(c.Annotations().begin(),
+                                         c.Annotations().end());
+
+    // Moving the obfuscate, then its rebuild fails at the release.
+    ASSERT_EQ(Press(c, {220, 220}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {240, 240}), OverlayAction::Repaint);
+    source_provider.fail = true;
+    EXPECT_EQ(Release(c, {240, 240}), OverlayAction::FailClose);
+    EXPECT_TRUE(std::ranges::equal(c.Annotations(), before));
+
+    // A capture rebuild (Ctrl+K) that cannot rebuild the obfuscates reports it, so
+    // the window closes the overlay.
+    EXPECT_FALSE(c.Recompute_obfuscates());
+    source_provider.fail = false;
+    EXPECT_TRUE(c.Recompute_obfuscates());
 }

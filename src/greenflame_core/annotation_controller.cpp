@@ -41,9 +41,8 @@ constexpr int32_t kBubbleDiameterStepOffsetPx = 20;
     return false;
 }
 
-[[nodiscard]] bool Bounds_intersect(std::optional<RectPx> a,
-                                    std::optional<RectPx> b) noexcept {
-    return a.has_value() && b.has_value() && RectPx::Intersect(*a, *b).has_value();
+[[nodiscard]] bool Rects_touch(RectPx a, RectPx b) noexcept {
+    return RectPx::Intersect(a, b).has_value();
 }
 
 [[nodiscard]] bool Is_obfuscate_annotation(Annotation const &annotation) noexcept {
@@ -393,27 +392,38 @@ Obfuscate_preview_indices(std::span<const Annotation> annotations,
         return indices;
     }
 
+    // An obfuscate's source holds the annotations below it whose visual bounds touch
+    // it (the capture renderer skips the rest), so only those can change it.
     for (size_t index = 0; index < annotations.size(); ++index) {
         Annotation const &annotation = annotations[index];
         if (!Is_obfuscate_annotation(annotation)) {
             continue;
         }
 
+        RectPx const bounds = Annotation_visual_bounds(annotation);
         bool include_index = false;
         for (AnnotationEditPreview const &preview : previews) {
             if (preview.index >= annotations.size()) {
                 continue;
             }
-            std::optional<RectPx> const old_bounds =
-                Annotation_bounds(preview.annotation_before);
-            std::optional<RectPx> const new_bounds =
-                Annotation_bounds(preview.annotation_after);
             if (index == preview.index ||
-                Bounds_intersect(Annotation_bounds(annotation), old_bounds) ||
-                Bounds_intersect(Annotation_bounds(annotation), new_bounds)) {
+                (preview.index < index &&
+                 (Rects_touch(Annotation_visual_bounds(preview.annotation_before),
+                              bounds) ||
+                  Rects_touch(Annotation_visual_bounds(preview.annotation_after),
+                              bounds)))) {
                 include_index = true;
                 break;
             }
+        }
+        // Closed upward: a preview obfuscate below that touches this one changes its
+        // source too.
+        for (size_t const lower : indices) {
+            if (include_index) {
+                break;
+            }
+            include_index =
+                Rects_touch(Annotation_visual_bounds(annotations[lower]), bounds);
         }
 
         if (include_index) {
@@ -421,6 +431,38 @@ Obfuscate_preview_indices(std::span<const Annotation> annotations,
         }
     }
     return indices;
+}
+
+std::optional<Annotation>
+Rebuild_obfuscate_from_source(Annotation annotation,
+                              std::span<const Annotation> lower_annotations,
+                              IObfuscateSourceProvider &source_provider) {
+    ObfuscateAnnotation *const obfuscate =
+        std::get_if<ObfuscateAnnotation>(&annotation.data);
+    if (obfuscate == nullptr) {
+        return std::nullopt;
+    }
+
+    RectPx const normalized_bounds = obfuscate->bounds.Normalized();
+    if (normalized_bounds.Is_empty()) {
+        return std::nullopt;
+    }
+
+    std::optional<BgraBitmap> const source =
+        source_provider.Build_composited_source(normalized_bounds, lower_annotations);
+    if (!source.has_value() || !source->Is_valid()) {
+        return std::nullopt;
+    }
+
+    BgraBitmap raster = Rasterize_obfuscate(*source, obfuscate->block_size);
+    if (!raster.Is_valid()) {
+        return std::nullopt;
+    }
+
+    obfuscate->bounds = normalized_bounds;
+    obfuscate->block_size = Clamp_obfuscate_block_size(obfuscate->block_size);
+    Set_obfuscate_raster(*obfuscate, std::move(raster));
+    return annotation;
 }
 
 bool AnnotationController::Has_active_gesture() const noexcept {
@@ -637,6 +679,7 @@ bool AnnotationController::On_pointer_move(PointPx cursor, bool primary_down) {
 bool AnnotationController::On_primary_release(UndoStack &undo_stack) {
     GREENFLAME_PROFILE_FUNCTION();
 
+    obfuscate_rebuild_failed_ = false;
     if (active_edit_interaction_ != nullptr) {
         std::vector<Annotation> const annotations_before = document_.annotations;
         std::vector<AnnotationEditCommandData> commands =
@@ -646,6 +689,19 @@ bool AnnotationController::On_primary_release(UndoStack &undo_stack) {
             return false;
         }
 
+        // An obfuscate the edit changes could not be rebuilt: put the document back as
+        // it was before the edit and push nothing. The overlay closes.
+        auto const fail_closed = [&]() {
+            for (AnnotationEditCommandData const &command : commands) {
+                if (command.index < document_.annotations.size()) {
+                    document_.annotations[command.index] = command.annotation_before;
+                }
+            }
+            document_.selected_annotation_ids = commands.front().selection_before;
+            obfuscate_rebuild_failed_ = true;
+            return false;
+        };
+
         std::vector<std::unique_ptr<ICommand>> primary_commands = {};
         primary_commands.reserve(commands.size());
         for (AnnotationEditCommandData &command : commands) {
@@ -654,7 +710,7 @@ bool AnnotationController::On_primary_release(UndoStack &undo_stack) {
                 std::optional<Annotation> const rebuilt = Rebuild_obfuscate_annotation(
                     annotations_before, command.index, annotation_after);
                 if (!rebuilt.has_value()) {
-                    return false;
+                    return fail_closed();
                 }
                 annotation_after = *rebuilt;
                 if (command.index < document_.annotations.size()) {
@@ -668,12 +724,15 @@ bool AnnotationController::On_primary_release(UndoStack &undo_stack) {
                 command.selection_after, command.description));
         }
 
-        std::vector<std::unique_ptr<ICommand>> reactive_commands =
+        std::optional<std::vector<std::unique_ptr<ICommand>>> reactive_commands =
             Build_reactive_obfuscate_update_commands(
                 annotations_before, document_.annotations,
                 document_.selected_annotation_ids, document_.selected_annotation_ids);
+        if (!reactive_commands.has_value()) {
+            return fail_closed();
+        }
         Push_annotation_commands(
-            undo_stack, std::move(primary_commands), std::move(reactive_commands),
+            undo_stack, std::move(primary_commands), std::move(*reactive_commands),
             commands.size() > 1 ? "Move annotations" : "Compound annotation change");
         return true;
     }
@@ -707,6 +766,7 @@ bool AnnotationController::On_cancel() {
 }
 
 bool AnnotationController::Delete_selected_annotation(UndoStack &undo_stack) {
+    obfuscate_rebuild_failed_ = false;
     if (Has_active_edit_interaction() || document_.selected_annotation_ids.empty()) {
         return false;
     }
@@ -737,12 +797,17 @@ bool AnnotationController::Delete_selected_annotation(UndoStack &undo_stack) {
             this, index, deleted_annotation, selection_before, AnnotationSelection{}));
     }
 
-    std::vector<std::unique_ptr<ICommand>> reactive_commands =
+    std::optional<std::vector<std::unique_ptr<ICommand>>> reactive_commands =
         Build_reactive_obfuscate_update_commands(annotations_before, annotations_after,
                                                  selection_before,
                                                  AnnotationSelection{});
+    if (!reactive_commands.has_value()) {
+        // Nothing was applied yet: the document stays as it was. The overlay closes.
+        obfuscate_rebuild_failed_ = true;
+        return false;
+    }
     Push_annotation_commands(undo_stack, std::move(primary_commands),
-                             std::move(reactive_commands), "Delete annotations");
+                             std::move(*reactive_commands), "Delete annotations");
     return true;
 }
 
@@ -983,39 +1048,29 @@ AnnotationSelection AnnotationController::Normalized_selection(
 std::optional<Annotation> AnnotationController::Rebuild_obfuscate_annotation(
     std::span<const Annotation> annotations, size_t index,
     Annotation annotation) const {
-    ObfuscateAnnotation *const obfuscate =
-        std::get_if<ObfuscateAnnotation>(&annotation.data);
-    if (obfuscate == nullptr || obfuscate_source_provider_ == nullptr) {
+    if (obfuscate_source_provider_ == nullptr) {
         return std::nullopt;
     }
-
-    RectPx const normalized_bounds = obfuscate->bounds.Normalized();
-    if (normalized_bounds.Is_empty()) {
-        return std::nullopt;
-    }
-
-    std::optional<BgraBitmap> const source =
-        obfuscate_source_provider_->Build_composited_source(normalized_bounds,
-                                                            annotations.first(index));
-    if (!source.has_value() || !source->Is_valid()) {
-        return std::nullopt;
-    }
-
-    BgraBitmap const raster = Rasterize_obfuscate(*source, obfuscate->block_size);
-    if (!raster.Is_valid()) {
-        return std::nullopt;
-    }
-
-    obfuscate->bounds = normalized_bounds;
-    obfuscate->block_size = Clamp_obfuscate_block_size(obfuscate->block_size);
-    obfuscate->bitmap_width_px = raster.width_px;
-    obfuscate->bitmap_height_px = raster.height_px;
-    obfuscate->bitmap_row_bytes = raster.row_bytes;
-    obfuscate->premultiplied_bgra = raster.premultiplied_bgra;
-    return annotation;
+    return Rebuild_obfuscate_from_source(
+        std::move(annotation), annotations.first(index), *obfuscate_source_provider_);
 }
 
-std::vector<std::unique_ptr<ICommand>>
+bool AnnotationController::Recompute_obfuscates() {
+    for (size_t index = 0; index < document_.annotations.size(); ++index) {
+        if (!Is_obfuscate_annotation(document_.annotations[index])) {
+            continue;
+        }
+        std::optional<Annotation> rebuilt = Rebuild_obfuscate_annotation(
+            document_.annotations, index, document_.annotations[index]);
+        if (!rebuilt.has_value()) {
+            return false;
+        }
+        document_.annotations[index] = std::move(*rebuilt);
+    }
+    return true;
+}
+
+std::optional<std::vector<std::unique_ptr<ICommand>>>
 AnnotationController::Build_reactive_obfuscate_update_commands(
     std::vector<Annotation> const &before_annotations,
     std::vector<Annotation> after_annotations,
@@ -1030,7 +1085,8 @@ AnnotationController::Build_reactive_obfuscate_update_commands(
         std::optional<Annotation> const rebuilt = Rebuild_obfuscate_annotation(
             after_annotations, index, after_annotations[index]);
         if (!rebuilt.has_value()) {
-            continue;
+            // A stale raster would show pixels from before the change: fail closed.
+            return std::nullopt;
         }
         std::optional<size_t> const before_index =
             Index_of_annotation_id(before_annotations, after_annotations[index].id);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "greenflame/win/d2d_annotation_draw.h"
 #include "greenflame/win/gdi_capture.h"
 #include "greenflame/win/overlay_button.h"
 #include "greenflame_core/annotation_types.h"
@@ -174,8 +175,12 @@ struct D2DOverlayResources final {
         toolbar_glyphs = {};
 
     // Per-annotation bitmap caches: keyed by annotation ID.
-    // Cleared on Invalidate_annotations() and Release_device_resources().
-    std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> obfuscate_bitmaps;
+    // Cleared on Invalidate_annotations() and Release_device_resources(). An obfuscate
+    // entry is drawn only for the raster it was uploaded from; an edit's preview
+    // entries are dropped when the edit ends.
+    D2DObfuscateBitmapMap obfuscate_bitmaps;
+    // Obfuscate uploads since the bench last reset it.
+    D2DUploadStats obfuscate_uploads = {};
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> text_bitmaps;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> bubble_bitmaps;
 
@@ -215,6 +220,8 @@ struct D2DOverlayResources final {
         // can recomposite only what the edit changed. Decided at the edit's first
         // frame; cleared when frozen_bitmap is rebuilt and when the edit ends.
         std::optional<bool> frozen_is_edit_start = std::nullopt;
+        // Ids of the obfuscates drawn from preview patches during the edit.
+        std::vector<uint64_t> patch_ids = {};
     };
     EditCache edit_cache = {};
     // False: edit frames take the full rebuild and the dynamic path (render bench

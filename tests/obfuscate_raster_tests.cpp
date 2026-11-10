@@ -104,3 +104,58 @@ TEST(obfuscate_raster, BlurMode_SmoothsNonUniformSourceAndKeepsOpaqueAlpha) {
         EXPECT_EQ(result.premultiplied_bgra[index], 255u);
     }
 }
+
+TEST(obfuscate_raster, HashRasterPixels_FollowsContentAndIsNeverZero) {
+    std::vector<uint8_t> const a = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    std::vector<uint8_t> b = a;
+    EXPECT_NE(Hash_raster_pixels(a), 0u);
+    EXPECT_NE(Hash_raster_pixels({}), 0u);
+    EXPECT_EQ(Hash_raster_pixels(a), Hash_raster_pixels(b));
+    b.back() = 13; // the tail past the last whole word counts
+    EXPECT_NE(Hash_raster_pixels(a), Hash_raster_pixels(b));
+    b = a;
+    b.front() = 0;
+    EXPECT_NE(Hash_raster_pixels(a), Hash_raster_pixels(b));
+}
+
+TEST(obfuscate_raster, SetObfuscateRaster_StoresPixelsWithTheirHash) {
+    ObfuscateAnnotation annotation{};
+    BgraBitmap raster = Make_bitmap(2, 1, {RGB(10, 20, 30), RGB(40, 50, 60)});
+    std::vector<uint8_t> const pixels = raster.premultiplied_bgra;
+    Set_obfuscate_raster(annotation, std::move(raster));
+    EXPECT_EQ(annotation.bitmap_width_px, 2);
+    EXPECT_EQ(annotation.bitmap_height_px, 1);
+    EXPECT_EQ(annotation.bitmap_row_bytes, 8);
+    EXPECT_EQ(annotation.premultiplied_bgra, pixels);
+    EXPECT_EQ(annotation.raster_hash, Hash_raster_pixels(pixels));
+}
+
+// The GPU upload of a raster is drawn again only for the very same raster. A raster
+// rewritten in place (same storage, same size, the address an upload is keyed by)
+// with other pixels must not match: that is what the hash is for.
+TEST(obfuscate_raster, SameObfuscateRaster_RejectsOtherPixelsAtTheSameAddress) {
+    ObfuscateAnnotation annotation{};
+    Set_obfuscate_raster(annotation,
+                         Make_bitmap(2, 1, {RGB(10, 20, 30), RGB(40, 50, 60)}));
+    ObfuscateRasterIdentity const uploaded = Obfuscate_raster_identity(annotation);
+    EXPECT_TRUE(
+        Is_same_obfuscate_raster(uploaded, Obfuscate_raster_identity(annotation)));
+
+    uint8_t const *const storage = annotation.premultiplied_bgra.data();
+    std::vector<uint8_t> const other =
+        Make_bitmap(2, 1, {RGB(11, 20, 30), RGB(40, 50, 60)}).premultiplied_bgra;
+    annotation.premultiplied_bgra.assign(other.begin(), other.end());
+    annotation.raster_hash = Hash_raster_pixels(annotation.premultiplied_bgra);
+    ASSERT_EQ(annotation.premultiplied_bgra.data(), storage);
+    EXPECT_FALSE(
+        Is_same_obfuscate_raster(uploaded, Obfuscate_raster_identity(annotation)));
+
+    // A copy elsewhere is another upload's business; a raster with no hash never
+    // matches.
+    ObfuscateAnnotation const copy = annotation;
+    EXPECT_FALSE(Is_same_obfuscate_raster(Obfuscate_raster_identity(annotation),
+                                          Obfuscate_raster_identity(copy)));
+    annotation.raster_hash = 0;
+    EXPECT_FALSE(Is_same_obfuscate_raster(Obfuscate_raster_identity(annotation),
+                                          Obfuscate_raster_identity(annotation)));
+}

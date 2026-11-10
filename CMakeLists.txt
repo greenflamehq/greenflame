@@ -293,6 +293,8 @@ add_library(greenflame_core STATIC
     src/greenflame_core/annotation_types.h
     src/greenflame_core/annotation_tool.h
     src/greenflame_core/obfuscate_annotation_types.h
+    src/greenflame_core/obfuscate_patch_cache.cpp
+    src/greenflame_core/obfuscate_patch_cache.h
     src/greenflame_core/obfuscate_raster.cpp
     src/greenflame_core/obfuscate_raster.h
     src/greenflame_core/text_annotation_types.h

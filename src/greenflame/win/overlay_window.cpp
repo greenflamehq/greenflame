@@ -706,6 +706,9 @@ struct OverlayWindow::OverlayResources {
     std::optional<CapturedCursorSnapshot> captured_cursor = std::nullopt;
     core::PointPx capture_origin_px = {};
     WindowCaptureState window_capture = {};
+    // Bumped whenever display_capture or window_capture is rebuilt: obfuscate preview
+    // patches built from the old pixels must not be kept.
+    uint64_t capture_generation = 0;
     std::array<std::shared_ptr<OverlayButtonGlyph const>,
                static_cast<size_t>(OverlayToolbarGlyphId::Count)>
         toolbar_glyphs = {};
@@ -740,6 +743,7 @@ struct OverlayWindow::OverlayResources {
     }
 
     void Reset() noexcept {
+        ++capture_generation;
         base_capture.Free();
         display_capture.Free();
         captured_cursor.reset();
@@ -751,45 +755,80 @@ struct OverlayWindow::OverlayResources {
     }
 };
 
+// The commit path and the preview patches both build sources here. It keeps one
+// capture renderer (COM reference and factories) for the overlay's lifetime.
 struct OverlayWindow::ObfuscateSourceProvider final
     : public core::IObfuscateSourceProvider {
-    explicit ObfuscateSourceProvider(OverlayWindow *owner) noexcept : owner_(owner) {}
+    explicit ObfuscateSourceProvider(OverlayWindow *owner) : owner_(owner) {}
+    ObfuscateSourceProvider(ObfuscateSourceProvider const &) = delete;
+    ObfuscateSourceProvider &operator=(ObfuscateSourceProvider const &) = delete;
+    ObfuscateSourceProvider(ObfuscateSourceProvider &&) = delete;
+    ObfuscateSourceProvider &operator=(ObfuscateSourceProvider &&) = delete;
+    ~ObfuscateSourceProvider() override = default;
 
     [[nodiscard]] std::optional<core::BgraBitmap> Build_composited_source(
         core::RectPx bounds,
         std::span<const core::Annotation> lower_annotations) override {
-        if (owner_ == nullptr || owner_->resources_ == nullptr) {
-            return std::nullopt;
-        }
-
         core::RectPx const normalized_bounds = bounds.Normalized();
         if (normalized_bounds.Is_empty()) {
             return std::nullopt;
         }
+        Source const source = Current_source();
+        if (source.capture == nullptr) {
+            return std::nullopt;
+        }
+        return Build_obfuscate_source(*source.capture, source.bounds, normalized_bounds,
+                                      lower_annotations, renderer_);
+    }
 
-        GdiCaptureResult const *source_capture = nullptr;
-        core::RectPx source_bounds = {};
+    // Changes whenever the pixels sources are cut from may have: a capture rebuilt
+    // (Ctrl+K, a window capture), or a switch between the screenshot and a window.
+    [[nodiscard]] uint64_t Source_generation() {
+        Source const source = Current_source();
+        uint64_t const capture_generation =
+            owner_ != nullptr && owner_->resources_ != nullptr
+                ? owner_->resources_->capture_generation
+                : 0;
+        if (source.capture != last_source_.capture ||
+            source.bounds != last_source_.bounds ||
+            capture_generation != last_capture_generation_) {
+            last_source_ = source;
+            last_capture_generation_ = capture_generation;
+            ++generation_;
+        }
+        return generation_;
+    }
+
+  private:
+    struct Source final {
+        GdiCaptureResult const *capture = nullptr;
+        core::RectPx bounds = {}; // where the capture's top-left sits, client pixels
+    };
+
+    [[nodiscard]] Source Current_source() const {
+        if (owner_ == nullptr || owner_->resources_ == nullptr) {
+            return {};
+        }
         auto const &state = owner_->controller_.State();
         if (state.selection_uses_full_window_capture &&
             owner_->resources_->window_capture.display_capture.Is_valid() &&
             !state.selection_capture_rect_screen.Is_empty()) {
             core::PointPx const origin = owner_->Desktop_origin_px();
-            source_capture = &owner_->resources_->window_capture.display_capture;
-            source_bounds = core::Screen_rect_to_client_rect(
-                state.selection_capture_rect_screen, origin.x, origin.y);
-        } else if (owner_->resources_->display_capture.Is_valid()) {
-            source_capture = &owner_->resources_->display_capture;
-            source_bounds = {};
-        } else {
-            return std::nullopt;
+            return {&owner_->resources_->window_capture.display_capture,
+                    core::Screen_rect_to_client_rect(
+                        state.selection_capture_rect_screen, origin.x, origin.y)};
         }
-
-        return Build_obfuscate_source(*source_capture, source_bounds, normalized_bounds,
-                                      lower_annotations);
+        if (owner_->resources_->display_capture.Is_valid()) {
+            return {&owner_->resources_->display_capture, {}};
+        }
+        return {};
     }
 
-  private:
     OverlayWindow *owner_ = nullptr;
+    AnnotationCaptureRenderer renderer_ = {};
+    Source last_source_ = {};
+    uint64_t last_capture_generation_ = 0;
+    uint64_t generation_ = 0;
 };
 
 // While a Save As dialog or message box runs its modal loop, the other overlay
@@ -886,6 +925,7 @@ bool OverlayWindow::Rebuild_display_capture() {
     if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
         return false;
     }
+    ++resources_->capture_generation;
     if (!Rebuild_capture_display(resources_->base_capture, resources_->captured_cursor,
                                  Is_captured_cursor_visible(),
                                  resources_->capture_origin_px,
@@ -1009,6 +1049,7 @@ bool OverlayWindow::Update_ctrl_window_preview(HWND window,
                              Format_rect_for_debug_log(visible_rect_screen));
 
     window_capture.Reset();
+    ++resources_->capture_generation;
     window_capture.window = window;
     window_capture.capture_rect_screen = normalized_capture_rect;
     window_capture.visible_rect_screen = visible_rect_screen;
@@ -1178,6 +1219,12 @@ void OverlayWindow::Toggle_captured_cursor_visibility() {
     }
 
     (void)Save_app_config(*config_);
+    // Committed obfuscates were pixelated from the old capture: rebuild them through
+    // the commit path, so the overlay and Save show the new one.
+    if (!controller_.Recompute_obfuscates()) {
+        Post_fail_close(L"an obfuscation could not be rebuilt.");
+        return;
+    }
     Rebuild_toolbar_buttons();
     if (d2d_resources_ != nullptr) {
         if (!d2d_resources_->Upload_screenshot(resources_->display_capture)) {
@@ -3093,6 +3140,9 @@ void OverlayWindow::Apply_action(core::OverlayAction action) {
     case core::OverlayAction::PinToDesktop:
         Pin_to_desktop_and_close();
         break;
+    case core::OverlayAction::FailClose:
+        Post_fail_close(L"an obfuscation could not be rebuilt.");
+        break;
     case core::OverlayAction::None:
         break;
     }
@@ -3109,10 +3159,14 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
     bool const had_text_edit = controller_.Has_active_text_edit();
 
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
-    // Debug hooks for the close paths: Ctrl+Shift+Alt+F11 reports a lost device on the
-    // next paint, Ctrl+Shift+Alt+F12 a streak of frame-wait timeouts.
-    if (ctrl && shift && alt && (wparam == VK_F11 || wparam == VK_F12)) {
-        if (wparam == VK_F11) {
+    // Debug hooks for the close paths: Ctrl+Shift+Alt+F10 fails the next obfuscate
+    // preview build (mid-edit), F11 reports a lost device on the next paint, F12 a
+    // streak of frame-wait timeouts.
+    if (ctrl && shift && alt &&
+        (wparam == VK_F10 || wparam == VK_F11 || wparam == VK_F12)) {
+        if (wparam == VK_F10) {
+            debug_force_patch_failure_ = true;
+        } else if (wparam == VK_F11) {
             debug_force_device_lost_ = true;
         } else {
             debug_force_wait_timeouts_ = kFrameWaitTimeoutStreak;
@@ -4621,7 +4675,6 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
         D2DPaintInput input{};
         std::optional<core::TextDraftView> draft_text_view = std::nullopt;
         std::optional<core::Annotation> draft_obfuscate_preview = std::nullopt;
-        std::vector<AnnotationPreviewPatch> patches;
         std::vector<core::AnnotationEditPreview> const edit_previews =
             controller_.Active_annotation_edit_previews();
         input.draft_freehand_points = controller_.Draft_freehand_points();
@@ -4634,7 +4687,6 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
                     input.draft_freehand_points.size() <= 1
                 ? controller_.Draft_annotation()
                 : nullptr;
-        bool has_live_obfuscate_preview = false;
         {
             GREENFLAME_PROFILE_SCOPE("OverlayWindow::On_paint::Prepare_input");
             if (core::TextEditController *const text_edit =
@@ -4647,28 +4699,40 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
                     "OverlayWindow::On_paint::Obfuscate_preview_patches");
                 std::vector<size_t> const preview_indices =
                     controller_.Active_obfuscate_preview_indices();
-                patches = Build_obfuscate_preview_patches(controller_.Annotations(),
-                                                          preview_indices,
-                                                          *obfuscate_source_provider_);
-                has_live_obfuscate_preview = !patches.empty();
+                if (preview_indices.empty()) {
+                    obfuscate_patch_cache_.Clear();
+                } else {
+                    bool built = obfuscate_patch_cache_.Update(
+                        controller_.Annotations(), preview_indices,
+                        *obfuscate_source_provider_,
+                        obfuscate_source_provider_->Source_generation());
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+                    if (debug_force_patch_failure_) {
+                        debug_force_patch_failure_ = false;
+                        obfuscate_patch_cache_.Clear();
+                        built = false;
+                    }
+#endif
+                    if (!built) {
+                        // Fail closed: no stale raster, no fill. Keep the last frame
+                        // on screen and close.
+                        EndPaint(hwnd, &paint);
+                        Post_fail_close(L"an obfuscation preview could not be built.");
+                        return 0;
+                    }
+                }
 
                 if (paint_draft_annotation != nullptr &&
                     std::holds_alternative<core::ObfuscateAnnotation>(
                         paint_draft_annotation->data)) {
-                    draft_obfuscate_preview = Build_preview_obfuscate_annotation(
+                    draft_obfuscate_preview = core::Rebuild_obfuscate_from_source(
                         *paint_draft_annotation, controller_.Annotations(),
                         *obfuscate_source_provider_);
                     if (draft_obfuscate_preview.has_value()) {
                         paint_draft_annotation = &*draft_obfuscate_preview;
-                        has_live_obfuscate_preview = true;
                     }
                 }
             }
-        }
-        if (has_live_obfuscate_preview && d2d_resources_ != nullptr) {
-            // Obfuscate preview frames reuse real annotation IDs, so the normal
-            // per-ID bitmap cache would otherwise keep drawing stale content.
-            d2d_resources_->obfuscate_bitmaps.clear();
         }
         input.dragging = s.dragging;
         input.annotation_selection_dragging = s.annotation_selection_dragging;
@@ -4718,7 +4782,7 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
             };
         }
         input.annotations = controller_.Annotations();
-        input.annotation_patches = patches;
+        input.annotation_patches = obfuscate_patch_cache_.Patches();
         input.draft_freehand_smoothing_mode =
             controller_.Draft_freehand_smoothing_mode();
         input.draft_freehand_tip_shape =
@@ -4974,8 +5038,10 @@ LRESULT OverlayWindow::On_destroy() {
     wait_timeout_streak_ = 0;
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
     debug_force_device_lost_ = false;
+    debug_force_patch_failure_ = false;
     debug_force_wait_timeouts_ = 0;
 #endif
+    obfuscate_patch_cache_.Clear();
 #if defined(GREENFLAME_LOG)
     gesture_frames_active_ = false;
 #endif

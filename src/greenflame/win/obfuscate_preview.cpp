@@ -1,39 +1,15 @@
 #include "greenflame/win/obfuscate_preview.h"
 
 #include "greenflame/win/annotation_capture_renderer.h"
-#include "greenflame_core/obfuscate_raster.h"
 #include "greenflame_core/pixel_ops.h"
 
 namespace greenflame {
 
-namespace {
-
-[[nodiscard]] bool Read_capture_pixels(GdiCaptureResult const &capture,
-                                       std::span<uint8_t> pixels) {
-    if (!capture.Is_valid()) {
-        return false;
-    }
-
-    HDC const dc = GetDC(nullptr);
-    if (dc == nullptr) {
-        return false;
-    }
-
-    BITMAPINFOHEADER bmi{};
-    Fill_bmi32_top_down(bmi, capture.width, capture.height);
-    int const result =
-        GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
-    ReleaseDC(nullptr, dc);
-    return result != 0;
-}
-
-} // namespace
-
 std::optional<core::BgraBitmap>
 Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bounds,
                        core::RectPx bounds,
-                       std::span<const core::Annotation> lower_annotations) {
+                       std::span<const core::Annotation> lower_annotations,
+                       AnnotationCaptureRenderer &renderer) {
     core::RectPx const normalized_bounds = bounds.Normalized();
     if (normalized_bounds.Is_empty() || !capture.Is_valid()) {
         return std::nullopt;
@@ -48,8 +24,7 @@ Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bou
     }
 
     if (!lower_annotations.empty() &&
-        !Render_annotations_into_capture(cropped, lower_annotations,
-                                         normalized_bounds)) {
+        !renderer.Render(cropped, lower_annotations, normalized_bounds)) {
         cropped.Free();
         return std::nullopt;
     }
@@ -71,42 +46,6 @@ Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bou
 
     core::Force_alpha_opaque(bitmap.premultiplied_bgra);
     return bitmap;
-}
-
-std::optional<core::Annotation>
-Build_preview_obfuscate_annotation(core::Annotation annotation,
-                                   std::span<const core::Annotation> lower_annotations,
-                                   core::IObfuscateSourceProvider &source_provider) {
-    core::ObfuscateAnnotation *const obfuscate =
-        std::get_if<core::ObfuscateAnnotation>(&annotation.data);
-    if (obfuscate == nullptr) {
-        return std::nullopt;
-    }
-
-    core::RectPx const normalized_bounds = obfuscate->bounds.Normalized();
-    if (normalized_bounds.Is_empty()) {
-        return std::nullopt;
-    }
-
-    std::optional<core::BgraBitmap> const source =
-        source_provider.Build_composited_source(normalized_bounds, lower_annotations);
-    if (!source.has_value() || !source->Is_valid()) {
-        return std::nullopt;
-    }
-
-    core::BgraBitmap const raster =
-        core::Rasterize_obfuscate(*source, obfuscate->block_size);
-    if (!raster.Is_valid()) {
-        return std::nullopt;
-    }
-
-    obfuscate->bounds = normalized_bounds;
-    obfuscate->block_size = core::Clamp_obfuscate_block_size(obfuscate->block_size);
-    obfuscate->bitmap_width_px = raster.width_px;
-    obfuscate->bitmap_height_px = raster.height_px;
-    obfuscate->bitmap_row_bytes = raster.row_bytes;
-    obfuscate->premultiplied_bgra = raster.premultiplied_bgra;
-    return annotation;
 }
 
 std::vector<AnnotationPreviewPatch>
@@ -136,7 +75,7 @@ Build_obfuscate_preview_patches(std::span<const core::Annotation> annotations,
             lower_span = lower_scratch;
         }
 
-        std::optional<core::Annotation> rebuilt = Build_preview_obfuscate_annotation(
+        std::optional<core::Annotation> rebuilt = core::Rebuild_obfuscate_from_source(
             annotations[index], lower_span, source_provider);
         if (rebuilt.has_value()) {
             patches.push_back({index, std::move(*rebuilt)});

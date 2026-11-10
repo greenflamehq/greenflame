@@ -31,6 +31,9 @@ enum class OverlayAction : uint8_t {
     SaveAsAndCopyFile,     // Ctrl+Shift+Alt+S
     CopyToClipboard,       // Ctrl+C
     PinToDesktop,          // Ctrl+P
+    // An obfuscate the change touches could not be rebuilt; the document is as it
+    // was. Close the overlay and cancel the capture (fail closed).
+    FailClose,
 };
 
 struct OverlaySelectionState final {
@@ -219,6 +222,9 @@ class OverlayController final {
     [[nodiscard]] bool Is_annotation_dragging() const noexcept;
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
+    // Rebuilds every obfuscate's raster from the current source (after Ctrl+K rebuilt
+    // the capture). False when one cannot be rebuilt: close the overlay.
+    [[nodiscard]] bool Recompute_obfuscates();
 
     // True while the pointer is down on a drawing, an annotation edit, a selection
     // drag or a marquee. Style, tool and document commands (undo, redo, save, copy,

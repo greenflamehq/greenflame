@@ -304,3 +304,42 @@ TEST(pixel_ops, PremultipliedLayerComposition_PreservesLayerOrder) {
     EXPECT_NE(pixels[0], reverse_expected_blue);
     EXPECT_NE(pixels[2], reverse_expected_red);
 }
+
+// The capture renderer skips an annotation whose visual bounds miss the capture. That
+// is exact only because a layer is composited inside its bounds alone: an opaque layer
+// whose bounds miss the pixels writes nothing, on every composite path.
+TEST(pixel_ops, LayerWhoseBoundsMissThePixelsWritesNothing) {
+    constexpr int width = 4;
+    constexpr int height = 3;
+    constexpr int row_bytes = width * kBytesPerPixel;
+    constexpr uint8_t base_value = 77;
+    constexpr uint8_t layer_value = 200;
+    std::vector<uint8_t> const original(static_cast<size_t>(row_bytes * height),
+                                        base_value);
+    std::vector<uint8_t> const layer(original.size(), layer_value);
+    std::array<RectPx, 4> const missing = {
+        RectPx::From_ltrb(width, 0, width + 2, height),
+        RectPx::From_ltrb(-3, 0, 0, height),
+        RectPx::From_ltrb(0, height, width, height + 1),
+        RectPx::From_ltrb(0, -2, width, 0),
+    };
+    for (RectPx const &bounds : missing) {
+        std::vector<uint8_t> pixels = original;
+        Blend_premultiplied_layer_onto_opaque_pixels(pixels, width, height, row_bytes,
+                                                     layer, row_bytes, bounds);
+        EXPECT_EQ(pixels, original);
+        Multiply_premultiplied_layer_onto_opaque_pixels(
+            pixels, width, height, row_bytes, layer, row_bytes, bounds);
+        EXPECT_EQ(pixels, original);
+        Blend_premultiplied_bitmap_onto_opaque_pixels(
+            pixels, width, height, row_bytes, layer, width, height, row_bytes, bounds);
+        EXPECT_EQ(pixels, original);
+    }
+
+    // The same layer inside the pixels does write, so the checks above can fail.
+    std::vector<uint8_t> pixels = original;
+    Blend_premultiplied_layer_onto_opaque_pixels(pixels, width, height, row_bytes,
+                                                 layer, row_bytes,
+                                                 RectPx::From_ltrb(0, 0, 1, 1));
+    EXPECT_NE(pixels, original);
+}

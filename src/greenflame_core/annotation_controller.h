@@ -25,11 +25,21 @@ class IObfuscateSourceProvider {
                             std::span<const Annotation> lower_annotations) = 0;
 };
 
-// Indices of the obfuscates an edit preview changes: the edited obfuscates, and every
-// obfuscate whose bounds touch an edited annotation's old or new bounds. Ascending.
+// Indices of the obfuscates an edit preview changes, ascending: the edited obfuscates,
+// every obfuscate above an edited annotation whose old or new visual bounds touch it,
+// and, closed upward, every obfuscate above one of those that touches it (its source
+// holds the lower one's new raster). Obfuscates below every edit keep their source.
 [[nodiscard]] std::vector<size_t>
 Obfuscate_preview_indices(std::span<const Annotation> annotations,
                           std::span<const AnnotationEditPreview> previews);
+
+// The obfuscate annotation with its raster rebuilt from its source: the capture under
+// its bounds with lower_annotations composited in z-order. nullopt when annotation is
+// not an obfuscate, its bounds are empty, or the source cannot be built.
+[[nodiscard]] std::optional<Annotation>
+Rebuild_obfuscate_from_source(Annotation annotation,
+                              std::span<const Annotation> lower_annotations,
+                              IObfuscateSourceProvider &source_provider);
 
 class AnnotationController final : public IAnnotationToolHost,
                                    public IAnnotationEditInteractionHost {
@@ -151,6 +161,16 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] bool On_primary_press(PointPx cursor);
     [[nodiscard]] bool On_pointer_move(PointPx cursor, bool primary_down = false);
     [[nodiscard]] bool On_primary_release(UndoStack &undo_stack);
+    // True when the last edit release or delete could not rebuild an obfuscate it
+    // changes. The document is back as it was before the edit (a delete changes
+    // nothing) and nothing went on the undo stack; the overlay must close.
+    [[nodiscard]] bool Obfuscate_rebuild_failed() const noexcept {
+        return obfuscate_rebuild_failed_;
+    }
+    // Rebuilds every obfuscate's raster from the current source, in z-order, as a
+    // commit does: after the source capture changed (Ctrl+K). False when one cannot be
+    // rebuilt; the overlay must then close.
+    [[nodiscard]] bool Recompute_obfuscates();
     [[nodiscard]] bool On_cancel();
     [[nodiscard]] bool Delete_selected_annotation(UndoStack &undo_stack);
     void Clear_annotations() noexcept;
@@ -220,7 +240,8 @@ class AnnotationController final : public IAnnotationToolHost,
                                  Annotation annotation) const;
     [[nodiscard]] FreehandSmoothingMode
     Current_freehand_smoothing_mode() const noexcept;
-    [[nodiscard]] std::vector<std::unique_ptr<ICommand>>
+    // nullopt when an obfuscate could not be rebuilt.
+    [[nodiscard]] std::optional<std::vector<std::unique_ptr<ICommand>>>
     Build_reactive_obfuscate_update_commands(
         std::vector<Annotation> const &before_annotations,
         std::vector<Annotation> after_annotations,
@@ -252,6 +273,7 @@ class AnnotationController final : public IAnnotationToolHost,
     ITextLayoutEngine *text_layout_engine_ = nullptr;
     ISpellCheckService *spell_check_service_ = nullptr;
     IObfuscateSourceProvider *obfuscate_source_provider_ = nullptr;
+    bool obfuscate_rebuild_failed_ = false;
     std::optional<TextEditController> text_edit_ctrl_ = std::nullopt;
     std::optional<uint64_t> editing_annotation_id_ = std::nullopt;
     TextFontChoice text_current_font_ = TextFontChoice::Sans;

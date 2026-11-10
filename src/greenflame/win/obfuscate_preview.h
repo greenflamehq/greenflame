@@ -9,24 +9,21 @@
 
 namespace greenflame {
 
+class AnnotationCaptureRenderer;
+
 // The capture cut to bounds, with lower_annotations composited over it in z-order:
 // what an obfuscate at bounds pixelates. capture_bounds is where the capture's
 // top-left pixel sits in overlay client pixels (zero for the desktop screenshot).
 [[nodiscard]] std::optional<core::BgraBitmap>
 Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bounds,
                        core::RectPx bounds,
-                       std::span<const core::Annotation> lower_annotations);
+                       std::span<const core::Annotation> lower_annotations,
+                       AnnotationCaptureRenderer &renderer);
 
-// The obfuscate annotation with its raster rebuilt from its current source, or nullopt
-// when annotation is not an obfuscate or its source cannot be built.
-[[nodiscard]] std::optional<core::Annotation>
-Build_preview_obfuscate_annotation(core::Annotation annotation,
-                                   std::span<const core::Annotation> lower_annotations,
-                                   core::IObfuscateSourceProvider &source_provider);
-
-// One patch per preview index, in order. Each obfuscate's source takes the patches
-// already built below it, so stacked obfuscates see each other's new rasters.
-// Indices past the end, and obfuscates whose source cannot be built, get no patch.
+// One patch per preview index, in order, built from scratch with no cache: each
+// obfuscate's source takes every annotation below it, with the patches already built
+// applied. Indices past the end, and obfuscates whose source cannot be built, get no
+// patch. The render bench checks core::ObfuscatePatchCache against it.
 [[nodiscard]] std::vector<AnnotationPreviewPatch>
 Build_obfuscate_preview_patches(std::span<const core::Annotation> annotations,
                                 std::span<const size_t> preview_indices,

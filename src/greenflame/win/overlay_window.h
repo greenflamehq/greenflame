@@ -1,6 +1,7 @@
 #pragma once
 
 #include "greenflame_core/mouse_move_history.h"
+#include "greenflame_core/obfuscate_patch_cache.h"
 #include "greenflame_core/overlay_controller.h"
 #include "greenflame_core/overlay_help_content.h"
 #include "greenflame_core/overlay_surface_layout.h"
@@ -326,6 +327,9 @@ class OverlayWindow final {
     HINSTANCE hinstance_ = nullptr;
     std::unique_ptr<OverlayResources> resources_;
     std::unique_ptr<ObfuscateSourceProvider> obfuscate_source_provider_;
+    // The obfuscate preview patches of the active edit, kept while their source holds.
+    // Emptied whenever no edit previews obfuscates.
+    core::ObfuscatePatchCache obfuscate_patch_cache_ = {};
     std::unique_ptr<D2DOverlayResources> d2d_resources_;
     std::unique_ptr<D2DTextLayoutEngine> text_layout_engine_;
     std::unique_ptr<Win32SpellCheckService> spell_check_service_;
@@ -342,8 +346,9 @@ class OverlayWindow final {
     int modal_depth_ = 0; // a Save As dialog or message box is up
     int wait_timeout_streak_ = 0;
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
-    // Debug hooks (Ctrl+Shift+Alt+F11 / F12): the next paints report a lost device or
-    // frame-wait timeouts, to exercise the close paths.
+    // Debug hooks (Ctrl+Shift+Alt+F10 / F11 / F12): the next obfuscate preview build
+    // fails, or the next paints report a lost device or frame-wait timeouts, to
+    // exercise the close paths.
     int debug_force_wait_timeouts_ = 0;
 #endif
     int mouse_wheel_delta_remainder_ = 0;
@@ -361,6 +366,7 @@ class OverlayWindow final {
     bool display_off_ = false;
 #if defined(DEBUG) || defined(GREENFLAME_LOG)
     bool debug_force_device_lost_ = false;
+    bool debug_force_patch_failure_ = false;
 #endif
     bool testing_toolbar_ = false;
     bool caret_blink_visible_ = true;

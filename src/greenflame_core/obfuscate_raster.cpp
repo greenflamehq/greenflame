@@ -277,4 +277,49 @@ BgraBitmap Rasterize_obfuscate(BgraBitmap const &source, int32_t block_size) {
     return Pixelate_bitmap(source, block_size);
 }
 
+uint64_t Hash_raster_pixels(std::span<const uint8_t> pixels) noexcept {
+    // FNV-1a's offset basis, then per 8-byte word a multiply by the 64-bit golden
+    // ratio and a fold: cheap next to building the raster it hashes.
+    constexpr uint64_t offset_basis = 14695981039346656037ull;
+    constexpr uint64_t multiplier = 0x9E3779B97F4A7C15ull;
+    constexpr unsigned fold_shift = 32;
+    constexpr size_t word_bytes = sizeof(uint64_t);
+    uint64_t hash = offset_basis ^ static_cast<uint64_t>(pixels.size());
+    size_t at = 0;
+    for (; at + word_bytes <= pixels.size(); at += word_bytes) {
+        uint64_t word = 0;
+        std::span<const uint8_t> const bytes = pixels.subspan(at, word_bytes);
+        std::copy_n(bytes.begin(), word_bytes, reinterpret_cast<uint8_t *>(&word));
+        hash = (hash ^ word) * multiplier;
+        hash ^= hash >> fold_shift;
+    }
+    for (; at < pixels.size(); ++at) {
+        hash = (hash ^ pixels[at]) * multiplier;
+        hash ^= hash >> fold_shift;
+    }
+    return hash == 0 ? 1 : hash;
+}
+
+void Set_obfuscate_raster(ObfuscateAnnotation &annotation, BgraBitmap raster) noexcept {
+    annotation.bitmap_width_px = raster.width_px;
+    annotation.bitmap_height_px = raster.height_px;
+    annotation.bitmap_row_bytes = raster.row_bytes;
+    annotation.premultiplied_bgra = std::move(raster.premultiplied_bgra);
+    annotation.raster_hash = Hash_raster_pixels(annotation.premultiplied_bgra);
+}
+
+ObfuscateRasterIdentity
+Obfuscate_raster_identity(ObfuscateAnnotation const &annotation) noexcept {
+    return ObfuscateRasterIdentity{
+        .data = annotation.premultiplied_bgra.data(),
+        .size = annotation.premultiplied_bgra.size(),
+        .hash = annotation.raster_hash,
+    };
+}
+
+bool Is_same_obfuscate_raster(ObfuscateRasterIdentity uploaded,
+                              ObfuscateRasterIdentity current) noexcept {
+    return current.hash != 0 && uploaded == current;
+}
+
 } // namespace greenflame::core
