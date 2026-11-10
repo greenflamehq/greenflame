@@ -179,9 +179,10 @@ TEST(obfuscate_patch_cache, RebuildsWhenBoundsBlockSizeOrSourceChange) {
     ObfuscatePatchCache cache;
     ASSERT_TRUE(cache.Update(scene.doc, scene.indices, scene.source, 1));
 
-    // The obfuscate itself moves, over the same (empty) source.
+    // The obfuscate itself moves a little: the same rectangle still touches it, so
+    // only its bounds tell the old patch from the new one.
     auto &obfuscate = std::get<ObfuscateAnnotation>(scene.doc[2].data);
-    obfuscate.bounds = RectPx::From_ltrb(100, 100, 140, 140);
+    obfuscate.bounds = RectPx::From_ltrb(2, 0, 42, 40);
     ASSERT_TRUE(cache.Update(scene.doc, scene.indices, scene.source, 1));
     EXPECT_EQ(cache.Statistics().builds, 2u);
     Expect_patches_equal(cache.Patches(),
