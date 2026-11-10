@@ -246,6 +246,7 @@ struct Args final {
     bool draft_source = false;      // --draft-source
     std::string capture_dump = {};  // --capture-dump FILE.bmp
     bool capture_whole = false;     // --capture-whole
+    bool capture_before = false;    // --capture-before
     bool reverse = false;           // --reverse: freehand runs right to left
     bool split_monitors = false;    // --split-monitors: one target per monitor
     bool mask_monitors = false;     // --mask-monitors: diff only monitor pixels
@@ -321,6 +322,8 @@ void Print_usage() {
         "in)\n"
         "  --capture-whole              with --capture-dump: the whole desktop as the "
         "selection\n"
+        "  --capture-before             with --capture-dump: write it before the drag "
+        "instead of after the release\n"
         "  --resize                     move: drag the right edge instead of the body; "
         "select: resize a committed selection, inset "
         "by an eighth of the desktop, by a handle\n"
@@ -544,6 +547,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.draft_source = true;
         } else if (key == "--capture-whole") {
             args.capture_whole = true;
+        } else if (key == "--capture-before") {
+            args.capture_before = true;
         } else if (key == "--capture-dump") {
             std::optional<std::string_view> const v = next();
             if (!v) return std::nullopt;
@@ -1182,8 +1187,8 @@ constexpr int32_t kEditMultiGapPx = 24;
 constexpr int32_t kEditObfuscateWidthPx = 384;
 constexpr int32_t kEditObfuscateHeightPx = 224;
 constexpr int32_t kEditObfuscateBlockPx = 12;
-// --stacked: rows the second obfuscate shares with the first.
-constexpr int32_t kStackedOverlapPx = 24;
+// --stacked: rows between the second obfuscate's bottom and the moved box's top.
+constexpr int32_t kStackedGapPx = 4;
 constexpr int32_t kEditStrokeWidthPx = 6;
 constexpr int32_t kEditZigzagPoints = 64;
 constexpr uint8_t kEditRed = 0;
@@ -1430,11 +1435,14 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
         obfuscates.push_back(*Make_edit_annotation("obfuscate", box, next_id++));
     }
     if (args.stacked && !obfuscates.empty()) {
-        // Above the first obfuscate and overlapping it, but off the move's path: its
-        // source holds the first one's raster, which the move changes.
+        // Above the first obfuscate and overlapping it, but off the move's path (its
+        // bottom just above the moved box's top). Its source holds the first one's
+        // raster, whose pixelation blocks straddle that gap: the move changes them
+        // inside the second one's bounds without touching it.
         core::RectPx const first =
             std::get<core::ObfuscateAnnotation>(obfuscates.front().data).bounds;
-        int32_t const shift = kEditObfuscateHeightPx - kStackedOverlapPx;
+        int32_t const bottom = mid_y - kEditBoxHeightPx / 2 - kStackedGapPx;
+        int32_t const shift = first.bottom - bottom;
         obfuscates.push_back(*Make_edit_annotation(
             "obfuscate",
             core::RectPx::From_ltrb(first.left, first.top - shift, first.right,
@@ -2000,6 +2008,17 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         input.final_selection = Inset_selection(ctx.width, ctx.height);
         input.annotations = edit->doc;
         Rebuild_annotations_bitmap(*ctx.res, edit->doc);
+        // --capture-before: Save and Copy output of the committed scene, before any
+        // edit rebuilds an obfuscate.
+        if (args.capture_before &&
+            !Write_capture_dump(*edit->source, edit->doc,
+                                args.capture_whole ? core::RectPx::From_ltrb(
+                                                         0, 0, ctx.width, ctx.height)
+                                                   : input.final_selection,
+                                *ctx.monitors_client, args.capture_dump)) {
+            Print("capture-dump: failed to write {}\n", args.capture_dump);
+            return std::nullopt;
+        }
     }
     ctx.res->edit_fast_paths = !args.edit_dynamic;
     if (args.stale_frozen && edit.has_value() && scenario == "move") {
@@ -2257,7 +2276,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Print("dump: release frame of {} written to {}\n", scenario,
                   args.dump_path);
         }
-        if (!args.capture_dump.empty()) {
+        if (!args.capture_dump.empty() && !args.capture_before) {
             core::RectPx const selection =
                 args.capture_whole
                     ? core::RectPx::From_ltrb(0, 0, ctx.width, ctx.height)

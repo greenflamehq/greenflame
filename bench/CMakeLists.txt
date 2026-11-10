@@ -437,11 +437,12 @@ if(BUILD_TESTING)
 
     # Ctrl+K rebuilds the capture and every committed obfuscate from it. A scene whose
     # source changes after its commit must then show and save exactly what a scene
-    # built on the new source from the start does: the release frame, and the Save and
-    # Copy output.
+    # built on the new source from the start does, before any edit rebuilds an
+    # obfuscate: the first frame (the obfuscate is off the box's path there), and the
+    # Save and Copy output.
     set(greenflame_recapture_args
         --adapter warp --layout single-1080 --scenario move --annotated
-        --obfuscations 1 --frames 3 --dump-frame 3)
+        --obfuscations 1 --frames 3 --capture-before --dump-frame 0)
     foreach(greenflame_recapture_case recapture alt_source)
         string(REPLACE "_" "-" greenflame_recapture_flag ${greenflame_recapture_case})
         add_test(

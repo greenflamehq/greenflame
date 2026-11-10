@@ -290,11 +290,12 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   - `--recapture`: after the scene is committed, the obfuscate source switches to
     other pixels and every obfuscate is rebuilt through the commit path, as Ctrl+K
     does. `--alt-source` builds the scene on those pixels from the start. `ctest`
-    checks that the two runs' release frames and `--capture-dump` outputs match.
+    checks that the two runs' first frames and `--capture-before` outputs match.
   - `--capture-dump FILE.bmp`: after the release, writes what Save and Copy produce
     for the selection (the screenshot with the annotations rendered in through the
     software renderer), and prints how many annotations straddle a monitor edge.
-    `--capture-whole` uses the whole desktop as the selection.
+    `--capture-whole` uses the whole desktop as the selection; `--capture-before`
+    writes it before the drag instead, before any edit rebuilds an obfuscate.
 - `--draft-source` (obfuscate): the draft's raster is built every frame from the
   screenshot and the `--annotated` strokes under it, through the overlay's builder.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
