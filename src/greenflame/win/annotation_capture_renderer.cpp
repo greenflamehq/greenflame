@@ -14,20 +14,6 @@ constexpr float kCaptureScratchDpi = 96.f;
 #define LOG_ANNOTATION_CAPTURE_MESSAGE(message_expression)                             \
     GREENFLAME_LOG_WRITE(L"annotation_capture", (message_expression))
 
-struct CoInitGuard final {
-    bool owned = false;
-
-    explicit CoInitGuard(bool owns) noexcept : owned(owns) {}
-    ~CoInitGuard() {
-        if (owned) {
-            CoUninitialize();
-        }
-    }
-
-    CoInitGuard(CoInitGuard const &) = delete;
-    CoInitGuard &operator=(CoInitGuard const &) = delete;
-};
-
 [[nodiscard]] bool
 Is_highlighter_annotation(core::Annotation const &annotation) noexcept {
     auto const *freehand =
@@ -137,22 +123,6 @@ Extract_bitmap_from_pixels(std::span<const uint8_t> pixels, int width, int heigh
     return DynamicObfuscateLayer{*clipped_bounds, raster};
 }
 
-[[nodiscard]] bool Read_capture_pixels(GdiCaptureResult const &capture,
-                                       std::span<uint8_t> pixels) {
-    HDC const dc = GetDC(nullptr);
-    if (dc == nullptr) {
-        return false;
-    }
-
-    BITMAPINFOHEADER bmi{};
-    Fill_bmi32_top_down(bmi, capture.width, capture.height);
-    int const result =
-        GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
-                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
-    ReleaseDC(nullptr, dc);
-    return result != 0;
-}
-
 [[nodiscard]] bool Write_capture_pixels(GdiCaptureResult &capture,
                                         std::span<const uint8_t> pixels) {
     HDC const dc = GetDC(nullptr);
@@ -199,11 +169,37 @@ Create_scratch_render_target(IWICImagingFactory *wic_factory, ID2D1Factory *d2d_
 
 } // namespace
 
-bool Render_annotations_into_capture(GdiCaptureResult &capture,
-                                     std::span<const core::Annotation> annotations,
-                                     core::RectPx target_bounds) {
+AnnotationCaptureRenderer::AnnotationCaptureRenderer() {
+    HRESULT const hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (hr == RPC_E_CHANGED_MODE) {
+        // Already initialized in another apartment mode: usable, not ours to release.
+        com_ok_ = true;
+    } else if (SUCCEEDED(hr)) {
+        com_ok_ = true;
+        com_owned_ = true;
+    } else {
+        LOG_ANNOTATION_CAPTURE_MESSAGE(
+            L"AnnotationCaptureRenderer CoInitializeEx failed");
+    }
+}
+
+AnnotationCaptureRenderer::~AnnotationCaptureRenderer() {
+    // The factories are COM objects: release them before the COM reference.
+    wic_factory_.Reset();
+    d2d_factory_.Reset();
+    if (com_owned_) {
+        CoUninitialize();
+    }
+}
+
+bool AnnotationCaptureRenderer::Render(GdiCaptureResult &capture,
+                                       std::span<const core::Annotation> annotations,
+                                       core::RectPx target_bounds) {
     if (!capture.Is_valid() || annotations.empty()) {
         return true;
+    }
+    if (!com_ok_) {
+        return false;
     }
 
     int const row_bytes = Row_bytes32(capture.width);
@@ -228,43 +224,42 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
             return false;
         }
 
-        HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        bool owns_com = SUCCEEDED(hr);
-        if (hr == RPC_E_CHANGED_MODE) {
-            owns_com = false;
-        } else if (FAILED(hr)) {
-            return false;
+        HRESULT hr = S_OK;
+        if (!d2d_factory_) {
+            hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
+                                   d2d_factory_.ReleaseAndGetAddressOf());
+            if (FAILED(hr) || !d2d_factory_) {
+                d2d_factory_.Reset();
+                return false;
+            }
         }
-        CoInitGuard const coinit_guard(owns_com);
-
-        Microsoft::WRL::ComPtr<ID2D1Factory1> d2d_factory;
-        hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED,
-                               d2d_factory.GetAddressOf());
-        if (FAILED(hr) || !d2d_factory) {
-            return false;
+        if (!wic_factory_) {
+            hr =
+                CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+                                 IID_PPV_ARGS(wic_factory_.ReleaseAndGetAddressOf()));
+            if (FAILED(hr) || !wic_factory_) {
+                wic_factory_.Reset();
+                return false;
+            }
         }
-
-        Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory;
-        hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                              IID_PPV_ARGS(wic_factory.GetAddressOf()));
-        if (FAILED(hr) || !wic_factory) {
-            return false;
-        }
+        ID2D1Factory1 *const d2d_factory = d2d_factory_.Get();
+        IWICImagingFactory *const wic_factory = wic_factory_.Get();
 
         Microsoft::WRL::ComPtr<IWICBitmap> scratch_bitmap;
         Microsoft::WRL::ComPtr<ID2D1RenderTarget> scratch_rt;
-        if (!Create_scratch_render_target(wic_factory.Get(), d2d_factory.Get(),
-                                          capture.width, capture.height, scratch_bitmap,
-                                          scratch_rt)) {
+        if (!Create_scratch_render_target(wic_factory, d2d_factory, capture.width,
+                                          capture.height, scratch_bitmap, scratch_rt)) {
             return false;
         }
 
         D2DAnnotationRenderResources annotation_resources{};
-        if (!annotation_resources.Initialize(d2d_factory.Get(), scratch_rt.Get())) {
+        if (!annotation_resources.Initialize(d2d_factory, scratch_rt.Get())) {
             return false;
         }
-        D2DAnnotationDrawContext const annotation_context =
-            annotation_resources.Build_context(d2d_factory.Get());
+        bool obfuscate_draw_failed = false;
+        D2DAnnotationDrawContext annotation_context =
+            annotation_resources.Build_context(d2d_factory);
+        annotation_context.obfuscate_draw_failed = &obfuscate_draw_failed;
 
         std::vector<uint8_t> layer_pixels(buffer_size);
         WICRect const copy_rect = {0, 0, capture.width, capture.height};
@@ -272,11 +267,25 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
             D2D1::Matrix3x2F::Translation(-static_cast<float>(target_bounds.left),
                                           -static_cast<float>(target_bounds.top));
         D2D1_MATRIX_3X2_F const identity_transform = D2D1::Matrix3x2F::Identity();
+        core::RectPx const capture_rect =
+            core::RectPx::From_ltrb(0, 0, capture.width, capture.height);
 
         for (core::Annotation const &annotation : annotations) {
-            if (core::ObfuscateAnnotation const *const obfuscate =
-                    std::get_if<core::ObfuscateAnnotation>(&annotation.data);
-                obfuscate != nullptr && obfuscate->premultiplied_bgra.empty()) {
+            core::ObfuscateAnnotation const *const obfuscate =
+                std::get_if<core::ObfuscateAnnotation>(&annotation.data);
+            bool const dynamic_obfuscate =
+                obfuscate != nullptr && obfuscate->premultiplied_bgra.empty();
+            // Each layer is composited only inside these bounds (the dynamic layer is
+            // cut to them, the blends clip to them), so a layer that misses the
+            // capture writes nothing: skip drawing it.
+            core::RectPx const layer_bounds =
+                dynamic_obfuscate
+                    ? Local_bounds_for_obfuscate(*obfuscate, target_bounds)
+                    : Annotation_local_bounds(annotation, target_bounds);
+            if (!core::RectPx::Intersect(layer_bounds, capture_rect).has_value()) {
+                continue;
+            }
+            if (dynamic_obfuscate) {
                 std::optional<DynamicObfuscateLayer> const layer =
                     Build_dynamic_obfuscate_layer(pixels, capture.width, capture.height,
                                                   row_bytes, *obfuscate, target_bounds);
@@ -298,7 +307,8 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
             Draw_d2d_annotation(scratch_rt.Get(), annotation_context, annotation);
             scratch_rt->SetTransform(identity_transform);
             hr = scratch_rt->EndDraw();
-            if (FAILED(hr)) {
+            if (FAILED(hr) || obfuscate_draw_failed) {
+                // An obfuscate missing from the output would leave its pixels clear.
                 return false;
             }
 
@@ -309,8 +319,6 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
                 return false;
             }
 
-            core::RectPx const layer_bounds =
-                Annotation_local_bounds(annotation, target_bounds);
             if (Is_highlighter_annotation(annotation)) {
                 core::Multiply_premultiplied_layer_onto_opaque_pixels(
                     pixels, capture.width, capture.height, row_bytes, layer_pixels,
@@ -336,6 +344,16 @@ bool Render_annotations_into_capture(GdiCaptureResult &capture,
             L"Render_annotations_into_capture unexpected exception");
         return false;
     }
+}
+
+bool Render_annotations_into_capture(GdiCaptureResult &capture,
+                                     std::span<const core::Annotation> annotations,
+                                     core::RectPx target_bounds) {
+    if (!capture.Is_valid() || annotations.empty()) {
+        return true;
+    }
+    AnnotationCaptureRenderer renderer;
+    return renderer.Render(capture, annotations, target_bounds);
 }
 
 } // namespace greenflame

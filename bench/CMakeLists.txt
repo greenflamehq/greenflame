@@ -410,12 +410,16 @@ if(BUILD_TESTING)
     set(greenflame_edit_args_click_moved_plain --click-first --click-moved)
     set(greenflame_edit_args_click_moved_obfuscate
         --obfuscations 1 --click-first --click-moved --edit-kind obfuscate)
+    # A second obfuscate over the first, off the move's path: its source holds the
+    # first one's new raster, so it must get a patch too. --verify-edit checks every
+    # obfuscate against a rebuild from scratch each frame.
+    set(greenflame_edit_args_stacked --obfuscations 1 --stacked)
     # Every case runs in one target. The per-target paths (the clip cull, the frozen
     # blit per monitor) also run split for a moved rectangle, a moved obfuscate and
     # the click replay; the other cases do not depend on the targets.
     set(greenflame_edit_split_cases rect obfuscate click)
     foreach(greenflame_edit_case rect below multi resize obfuscate highlighter lifted
-            stale click click_moved click_moved_plain click_moved_obfuscate)
+            stale click click_moved click_moved_plain click_moved_obfuscate stacked)
         set(greenflame_edit_targets_list span)
         if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)
             list(APPEND greenflame_edit_targets_list split)
@@ -430,6 +434,77 @@ if(BUILD_TESTING)
             )
         endforeach()
     endforeach()
+
+    # Ctrl+K rebuilds the capture and every committed obfuscate from it. A scene whose
+    # source changes after its commit must then show and save exactly what a scene
+    # built on the new source from the start does, before any edit rebuilds an
+    # obfuscate: the first frame (the obfuscate is off the box's path there), and the
+    # Save and Copy output.
+    set(greenflame_recapture_args
+        --adapter warp --layout single-1080 --scenario move --annotated
+        --obfuscations 1 --frames 3 --capture-before --dump-frame 0)
+    foreach(greenflame_recapture_case recapture alt_source)
+        string(REPLACE "_" "-" greenflame_recapture_flag ${greenflame_recapture_case})
+        add_test(
+            NAME greenflame_render_bench_${greenflame_recapture_case}
+            COMMAND greenflame_render_bench ${greenflame_recapture_args}
+                "${CMAKE_CURRENT_BINARY_DIR}/${greenflame_recapture_case}_frame.bmp"
+                --${greenflame_recapture_flag} --capture-dump
+                "${CMAKE_CURRENT_BINARY_DIR}/${greenflame_recapture_case}_save.bmp"
+        )
+        set_tests_properties(greenflame_render_bench_${greenflame_recapture_case}
+            PROPERTIES FIXTURES_SETUP greenflame_bench_recapture
+        )
+    endforeach()
+    foreach(greenflame_recapture_output frame save)
+        add_test(
+            NAME greenflame_render_bench_recapture_diff_${greenflame_recapture_output}
+            COMMAND greenflame_render_bench --diff
+                "${CMAKE_CURRENT_BINARY_DIR}/recapture_${greenflame_recapture_output}.bmp"
+                "${CMAKE_CURRENT_BINARY_DIR}/alt_source_${greenflame_recapture_output}.bmp"
+        )
+        set_tests_properties(
+            greenflame_render_bench_recapture_diff_${greenflame_recapture_output}
+            PROPERTIES FIXTURES_REQUIRED greenflame_bench_recapture
+        )
+    endforeach()
+
+    # An obfuscate dragged past the desktop's edges (and with --lifted past the window
+    # capture's): every frame's patches match an uncached build, and nothing fails.
+    foreach(greenflame_edge_side left bottom)
+        add_test(
+            NAME greenflame_render_bench_off_edge_${greenflame_edge_side}
+            COMMAND greenflame_render_bench --adapter warp --layout single-1080
+                --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
+                --frames 3 --verify-edit --off-edge ${greenflame_edge_side}
+        )
+    endforeach()
+
+    # A window capture's edge is the selection's: half the obfuscate past it, over the
+    # desktop. Then the window selection becomes a region (--reselect): Save must show
+    # no pixel of the obfuscate clear (the clear-pixel count fails the run otherwise).
+    add_test(
+        NAME greenflame_render_bench_off_edge_lifted_selection
+        COMMAND greenflame_render_bench --adapter warp --layout single-1080
+            --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
+            --frames 3 --verify-edit --lifted --off-edge selection-right --reselect
+            --capture-whole
+            --capture-dump "${CMAKE_CURRENT_BINARY_DIR}/off_edge_reselect_save.bmp"
+    )
+
+    # An obfuscate too wide to upload makes the paint fail closed.
+    add_test(
+        NAME greenflame_render_bench_draw_failure
+        COMMAND greenflame_render_bench --adapter warp --layout single-1080
+            --expect-draw-failure
+    )
+
+    # An obfuscate draft built every frame from what is under it, as the overlay does.
+    add_test(
+        NAME greenflame_render_bench_draft_source_smoke
+        COMMAND greenflame_render_bench --adapter warp --layout single-1080
+            --scenario obfuscate --annotated --draft-source --frames 3
+    )
 
     # A selection commit through the real overlay controller, with annotations.
     add_test(

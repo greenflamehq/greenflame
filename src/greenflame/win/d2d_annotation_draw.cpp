@@ -194,28 +194,43 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
     }
 
     core::RectPx const bounds = annotation.bounds.Normalized();
-    D2D1_BITMAP_PROPERTIES props{};
-    props.pixelFormat =
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
     float const dpi = Render_target_dpi(render_target);
-    props.dpiX = dpi;
-    props.dpiY = dpi;
-
-    // Obfuscate rasters can change every preview frame while keeping the same
-    // annotation id, so the bitmap must be refreshed instead of reusing a stale cache
-    // entry keyed only by id.
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
-    HRESULT const hr = render_target->CreateBitmap(
-        D2D1::SizeU(static_cast<UINT32>(annotation.bitmap_width_px),
-                    static_cast<UINT32>(annotation.bitmap_height_px)),
-        annotation.premultiplied_bgra.data(),
-        static_cast<UINT32>(annotation.bitmap_row_bytes), props, bitmap.GetAddressOf());
-    if (FAILED(hr) || !bitmap) {
-        return;
+    // A preview raster keeps the annotation's id while its pixels change, so the
+    // upload is reused only for the very same raster: same storage and content hash.
+    core::ObfuscateRasterIdentity const raster =
+        core::Obfuscate_raster_identity(annotation);
+    auto it = context.obfuscate_bitmaps->find(annotation_id);
+    if (it == context.obfuscate_bitmaps->end() ||
+        !core::Is_same_obfuscate_raster(it->second.raster, raster)) {
+        D2D1_BITMAP_PROPERTIES props{};
+        props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                                              D2D1_ALPHA_MODE_PREMULTIPLIED);
+        props.dpiX = dpi;
+        props.dpiY = dpi;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        HRESULT const hr = render_target->CreateBitmap(
+            D2D1::SizeU(static_cast<UINT32>(annotation.bitmap_width_px),
+                        static_cast<UINT32>(annotation.bitmap_height_px)),
+            annotation.premultiplied_bgra.data(),
+            static_cast<UINT32>(annotation.bitmap_row_bytes), props,
+            bitmap.GetAddressOf());
+        if (FAILED(hr) || !bitmap) {
+            if (context.obfuscate_draw_failed != nullptr) {
+                *context.obfuscate_draw_failed = true;
+            }
+            return;
+        }
+        if (context.obfuscate_uploads != nullptr) {
+            ++context.obfuscate_uploads->count;
+            context.obfuscate_uploads->bytes += annotation.premultiplied_bgra.size();
+        }
+        it = context.obfuscate_bitmaps
+                 ->insert_or_assign(annotation_id,
+                                    D2DObfuscateBitmap{raster, std::move(bitmap)})
+                 .first;
     }
 
-    (*context.obfuscate_bitmaps)[annotation_id] = bitmap;
-    render_target->DrawBitmap(bitmap.Get(), Rect(bounds), 1.f,
+    render_target->DrawBitmap(it->second.bitmap.Get(), Rect(bounds), 1.f,
                               D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
 }
 

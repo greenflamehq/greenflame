@@ -83,6 +83,10 @@ bool Composite_cursor_snapshot(CapturedCursorSnapshot const &cursor_snapshot,
 // --- Helpers for 32bpp top-down DIB (used by capture and bitmap interop) ---
 void Fill_bmi32_top_down(BITMAPINFOHEADER &bmi, int width, int height);
 int Row_bytes32(int width);
+// Reads the capture as 32bpp top-down rows of Row_bytes32(width) into pixels. False
+// when the capture is invalid, pixels is too small, or GetDIBits fails.
+[[nodiscard]] bool Read_capture_pixels(GdiCaptureResult const &capture,
+                                       std::span<uint8_t> pixels);
 
 // Scales src_bitmap to fit within max_width x max_height (preserving aspect
 // ratio). Returns an HBITMAP the caller must DeleteObject, or nullptr on failure.

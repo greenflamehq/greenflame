@@ -212,6 +212,8 @@ Build_annotation_draw_context(D2DOverlayResources &res) noexcept {
         .obfuscate_bitmaps = &res.obfuscate_bitmaps,
         .text_bitmaps = &res.text_bitmaps,
         .bubble_bitmaps = &res.bubble_bitmaps,
+        .obfuscate_uploads = &res.obfuscate_uploads,
+        .obfuscate_draw_failed = &res.obfuscate_draw_failed,
     };
 }
 
@@ -3423,6 +3425,13 @@ void Rebuild_annotations_for_edit(D2DOverlayResources &res,
     GREENFLAME_PROFILE_SCOPE("D2DPaint::Rebuild_annotations_for_edit");
     Draw_annotations_for_edit(res, input);
     res.edit_cache.active = true;
+    for (AnnotationPreviewPatch const &patch : input.annotation_patches) {
+        if (std::holds_alternative<core::ObfuscateAnnotation>(patch.annotation.data) &&
+            std::ranges::find(res.edit_cache.patch_ids, patch.annotation.id) ==
+                res.edit_cache.patch_ids.end()) {
+            res.edit_cache.patch_ids.push_back(patch.annotation.id);
+        }
+    }
     res.annotations_from_edit = true;
     res.annotations_source =
         res.annotations_valid && res.edit_cache.frozen_is_edit_start.value_or(false) &&
@@ -3439,6 +3448,11 @@ void Rebuild_annotations_for_edit(D2DOverlayResources &res,
 void End_edit(D2DOverlayResources &res, D2DPaintInput const &input, int vd_width,
               int vd_height) {
     GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::End_edit");
+    // Uploads of the edit's preview rasters are no use any more: drop them, even when
+    // the edit ended with no action.
+    for (uint64_t const id : res.edit_cache.patch_ids) {
+        res.obfuscate_bitmaps.erase(id);
+    }
     res.edit_cache = {};
     auto const shows_document =
         [&](std::shared_ptr<const std::vector<core::Annotation>> const &source) {
@@ -3769,6 +3783,13 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
 
     FramePlan plan{};
     Prepare_frame(res, input, vd_width, vd_height, plan);
+    // A cache drawn without one of its obfuscates must not reach the screen, now or
+    // in a paint before the close is processed: drop the caches too.
+    if (res.obfuscate_draw_failed) {
+        res.obfuscate_draw_failed = false;
+        res.Invalidate_annotations();
+        return D2DFrameStatus::DrawFailed;
+    }
 
     // Frame-latency throttle: with FRAME_LATENCY_WAITABLE_OBJECT and max latency 1,
     // this blocks until DWM has consumed every target's prior frame, so the paint
@@ -3821,6 +3842,12 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
         }
         if (hr == D2DERR_RECREATE_TARGET) {
             return D2DFrameStatus::DeviceLost;
+        }
+        if (res.obfuscate_draw_failed) {
+            // A draft obfuscate this target drew failed: do not present it.
+            res.obfuscate_draw_failed = false;
+            res.Invalidate_annotations();
+            return D2DFrameStatus::DrawFailed;
         }
         if (target.swap_chain) {
             GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Present");

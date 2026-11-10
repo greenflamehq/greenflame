@@ -38,6 +38,7 @@ add_executable(greenflame_tests
     app_config_tests.cpp
     annotation_hit_test_tests.cpp
     obfuscate_raster_tests.cpp
+    obfuscate_patch_cache_tests.cpp
     bubble_annotation_tests.cpp
     freehand_smoothing_tests.cpp
     mouse_move_history_tests.cpp

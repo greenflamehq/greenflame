@@ -31,6 +31,9 @@ enum class OverlayAction : uint8_t {
     SaveAsAndCopyFile,     // Ctrl+Shift+Alt+S
     CopyToClipboard,       // Ctrl+C
     PinToDesktop,          // Ctrl+P
+    // An obfuscate the change touches could not be rebuilt; the document is as it
+    // was. Close the overlay and cancel the capture (fail closed).
+    FailClose,
 };
 
 struct OverlaySelectionState final {
@@ -185,7 +188,12 @@ class OverlayController final {
     [[nodiscard]] bool Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
     [[nodiscard]] bool Set_bubble_current_font(TextFontChoice choice) noexcept;
+    // Commits the text being typed or re-edited. After it, Obfuscate_rebuild_failed()
+    // says whether an obfuscate above a re-edited text could not be rebuilt.
     bool Commit_active_text_edit();
+    // True when the last change (edit release, new obfuscate, delete, text re-edit)
+    // could not build an obfuscate: the overlay must close (OverlayAction::FailClose).
+    [[nodiscard]] bool Obfuscate_rebuild_failed() const noexcept;
     void Cancel_text_draft();
     [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
     [[nodiscard]] bool Has_active_annotation_edit() const noexcept;
@@ -219,6 +227,9 @@ class OverlayController final {
     [[nodiscard]] bool Is_annotation_dragging() const noexcept;
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
+    // Rebuilds every obfuscate's raster from the current source (after Ctrl+K rebuilt
+    // the capture). False when one cannot be rebuilt: close the overlay.
+    [[nodiscard]] bool Recompute_obfuscates();
 
     // True while the pointer is down on a drawing, an annotation edit, a selection
     // drag or a marquee. Style, tool and document commands (undo, redo, save, copy,

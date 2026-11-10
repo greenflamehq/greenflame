@@ -1,27 +1,46 @@
 #pragma once
 
 #include "greenflame_core/annotation_types.h"
+#include "greenflame_core/obfuscate_raster.h"
 
 namespace greenflame {
 
 using D2DAnnotationBitmapMap =
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>>;
 
+// An uploaded obfuscate raster and the raster it was made from. Drawn again only while
+// the annotation's raster has the same identity (address, size and content hash).
+struct D2DObfuscateBitmap final {
+    core::ObfuscateRasterIdentity raster = {};
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+};
+using D2DObfuscateBitmapMap = std::unordered_map<uint64_t, D2DObfuscateBitmap>;
+
+// Obfuscate raster uploads (CreateBitmap) and their bytes. The render bench reads it.
+struct D2DUploadStats final {
+    size_t count = 0;
+    size_t bytes = 0;
+};
+
 struct D2DAnnotationDrawContext final {
     ID2D1Factory *factory = nullptr;
     ID2D1SolidColorBrush *solid_brush = nullptr;
     ID2D1StrokeStyle *round_cap_style = nullptr;
     ID2D1StrokeStyle *flat_cap_style = nullptr;
-    D2DAnnotationBitmapMap *obfuscate_bitmaps = nullptr;
+    D2DObfuscateBitmapMap *obfuscate_bitmaps = nullptr;
     D2DAnnotationBitmapMap *text_bitmaps = nullptr;
     D2DAnnotationBitmapMap *bubble_bitmaps = nullptr;
+    D2DUploadStats *obfuscate_uploads = nullptr; // optional
+    // Set when an obfuscate could not be drawn (its upload failed): the target then
+    // shows what is under it in the clear, so the caller must fail closed.
+    bool *obfuscate_draw_failed = nullptr;
 };
 
 struct D2DAnnotationRenderResources final {
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> solid_brush;
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> round_cap_style;
     Microsoft::WRL::ComPtr<ID2D1StrokeStyle> flat_cap_style;
-    D2DAnnotationBitmapMap obfuscate_bitmaps = {};
+    D2DObfuscateBitmapMap obfuscate_bitmaps = {};
     D2DAnnotationBitmapMap text_bitmaps = {};
     D2DAnnotationBitmapMap bubble_bitmaps = {};
 

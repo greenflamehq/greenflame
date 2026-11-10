@@ -186,7 +186,10 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
     Box_blur_vertical(scratch.horizontal, radius, output);
 }
 
-[[nodiscard]] BgraBitmap Pixelate_bitmap(BgraBitmap const &source, int32_t block_size) {
+// Pixelates source in blocks of block_size whose grid starts phase_x and phase_y
+// pixels before the bitmap's top-left (0 for a grid anchored at it).
+[[nodiscard]] BgraBitmap Pixelate_bitmap(BgraBitmap const &source, int32_t block_size,
+                                         int32_t phase_x, int32_t phase_y) {
     BgraBitmap result{};
     result.width_px = source.width_px;
     result.height_px = source.height_px;
@@ -205,14 +208,16 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
 
     result.premultiplied_bgra.resize(source.premultiplied_bgra.size());
 
-    for (int32_t cell_top = 0; cell_top < source.height_px;
-         cell_top += clamped_block_size) {
+    for (int32_t cell_y = -phase_y; cell_y < source.height_px;
+         cell_y += clamped_block_size) {
+        int32_t const cell_top = std::max(cell_y, 0);
         int32_t const cell_bottom =
-            std::min(source.height_px, cell_top + clamped_block_size);
-        for (int32_t cell_left = 0; cell_left < source.width_px;
-             cell_left += clamped_block_size) {
+            std::min(source.height_px, cell_y + clamped_block_size);
+        for (int32_t cell_x = -phase_x; cell_x < source.width_px;
+             cell_x += clamped_block_size) {
+            int32_t const cell_left = std::max(cell_x, 0);
             int32_t const cell_right =
-                std::min(source.width_px, cell_left + clamped_block_size);
+                std::min(source.width_px, cell_x + clamped_block_size);
 
             uint64_t sum_b = 0;
             uint64_t sum_g = 0;
@@ -220,9 +225,14 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
             uint64_t sum_a = 0;
             uint64_t sample_count = 0;
 
+            // A pixel with alpha 0 has no source under it: it is left out of the
+            // average and stays transparent. An opaque source has none.
             for (int32_t y = cell_top; y < cell_bottom; ++y) {
                 for (int32_t x = cell_left; x < cell_right; ++x) {
                     size_t const offset = Pixel_offset(x, y, source.row_bytes);
+                    if (source.premultiplied_bgra[offset + kAlphaChannelOffset] == 0) {
+                        continue;
+                    }
                     sum_b += source.premultiplied_bgra[offset];
                     sum_g += source.premultiplied_bgra[offset + 1u];
                     sum_r += source.premultiplied_bgra[offset + 2u];
@@ -242,6 +252,10 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
 
             for (int32_t y = cell_top; y < cell_bottom; ++y) {
                 for (int32_t x = cell_left; x < cell_right; ++x) {
+                    if (source.premultiplied_bgra[Pixel_offset(x, y, source.row_bytes) +
+                                                  kAlphaChannelOffset] == 0) {
+                        continue;
+                    }
                     size_t const offset = Pixel_offset(x, y, result.row_bytes);
                     result.premultiplied_bgra[offset] = avg_b;
                     result.premultiplied_bgra[offset + 1u] = avg_g;
@@ -253,6 +267,93 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
     }
 
     return result;
+}
+
+// Where source has pixels with a source under them (alpha not 0): their bounding
+// rect, and whether every pixel in it has one. Usually a rect: an obfuscate cut by
+// one capture edge. A window capture reaching off the desktop can leave a corner out.
+struct PresentPixels final {
+    RectPx bounds = {};
+    bool solid = false;
+};
+
+[[nodiscard]] std::optional<PresentPixels> Present_pixels(BgraBitmap const &source) {
+    int32_t left = source.width_px;
+    int32_t top = source.height_px;
+    int32_t right = 0;
+    int32_t bottom = 0;
+    size_t count = 0;
+    for (int32_t y = 0; y < source.height_px; ++y) {
+        for (int32_t x = 0; x < source.width_px; ++x) {
+            if (source.premultiplied_bgra[Pixel_offset(x, y, source.row_bytes) +
+                                          kAlphaChannelOffset] == 0) {
+                continue;
+            }
+            ++count;
+            left = std::min(left, x);
+            top = std::min(top, y);
+            right = std::max(right, x + 1);
+            bottom = std::max(bottom, y + 1);
+        }
+    }
+    if (right <= left || bottom <= top) {
+        return std::nullopt;
+    }
+    RectPx const bounds = RectPx::From_ltrb(left, top, right, bottom);
+    return PresentPixels{
+        .bounds = bounds,
+        .solid = count == static_cast<size_t>(bounds.Width()) *
+                              static_cast<size_t>(bounds.Height()),
+    };
+}
+
+// Blur with holes (block size 1): each present pixel becomes the average of the
+// present pixels around it (the premultiplied blur divided by its own coverage), and
+// opaque; a pixel with no source stays transparent.
+void Blur_present_pixels(BgraBitmap const &source, BgraBitmap &result) {
+    result.premultiplied_bgra.resize(source.premultiplied_bgra.size());
+    Blur_bitmap(source, kObfuscateBlurRadiusPx, result);
+    constexpr uint32_t opaque = 255;
+    for (int32_t y = 0; y < source.height_px; ++y) {
+        for (int32_t x = 0; x < source.width_px; ++x) {
+            size_t const at = Pixel_offset(x, y, source.row_bytes);
+            size_t const out = Pixel_offset(x, y, result.row_bytes);
+            uint32_t const coverage =
+                result.premultiplied_bgra[out + kAlphaChannelOffset];
+            if (source.premultiplied_bgra[at + kAlphaChannelOffset] == 0 ||
+                coverage == 0) {
+                for (size_t c = 0; c < 4u; ++c) {
+                    result.premultiplied_bgra[out + c] = 0;
+                }
+                continue;
+            }
+            for (size_t c = 0; c < kAlphaChannelOffset; ++c) {
+                uint32_t const value =
+                    (result.premultiplied_bgra[out + c] * opaque + coverage / 2u) /
+                    coverage;
+                result.premultiplied_bgra[out + c] =
+                    static_cast<uint8_t>(std::min(value, opaque));
+            }
+            result.premultiplied_bgra[out + kAlphaChannelOffset] =
+                static_cast<uint8_t>(opaque);
+        }
+    }
+}
+
+// Copies rect of from into to, or of to into from's place: rows of rect.Width() pixels.
+void Copy_rect(BgraBitmap const &from, RectPx from_rect, BgraBitmap &to,
+               RectPx to_rect) {
+    size_t const row_size = static_cast<size_t>(Bytes_per_row(from_rect.Width()));
+    for (int32_t row = 0; row < from_rect.Height(); ++row) {
+        size_t const from_at =
+            Pixel_offset(from_rect.left, from_rect.top + row, from.row_bytes);
+        size_t const to_at =
+            Pixel_offset(to_rect.left, to_rect.top + row, to.row_bytes);
+        std::copy_n(from.premultiplied_bgra.begin() +
+                        static_cast<std::ptrdiff_t>(from_at),
+                    row_size,
+                    to.premultiplied_bgra.begin() + static_cast<std::ptrdiff_t>(to_at));
+    }
 }
 
 } // namespace
@@ -274,7 +375,106 @@ BgraBitmap Rasterize_obfuscate(BgraBitmap const &source, int32_t block_size) {
     if (!source.Is_valid()) {
         return {};
     }
-    return Pixelate_bitmap(source, block_size);
+    std::optional<PresentPixels> const present_pixels = Present_pixels(source);
+    RectPx const whole = RectPx::From_ltrb(0, 0, source.width_px, source.height_px);
+    if (present_pixels.has_value() && present_pixels->solid &&
+        present_pixels->bounds == whole) {
+        return Pixelate_bitmap(source, block_size, 0, 0);
+    }
+    if (present_pixels.has_value() && !present_pixels->solid) {
+        // Holes in the present part (rare): the blocks, on their usual grid, skip
+        // the missing pixels; the blur averages present pixels only.
+        if (Clamp_obfuscate_block_size(block_size) > 1) {
+            return Pixelate_bitmap(source, block_size, 0, 0);
+        }
+        BgraBitmap result{.width_px = source.width_px,
+                          .height_px = source.height_px,
+                          .row_bytes = source.row_bytes,
+                          .premultiplied_bgra = {}};
+        Blur_present_pixels(source, result);
+        return result;
+    }
+    std::optional<RectPx> const present =
+        present_pixels.has_value() ? std::optional<RectPx>{present_pixels->bounds}
+                                   : std::nullopt;
+
+    // Part of the obfuscate has no source under it: that part stays transparent (it
+    // draws nothing), and the rest is pixelated from what exists, on the grid
+    // anchored at the obfuscate's top-left. No fill colour is ever averaged in.
+    BgraBitmap result{
+        .width_px = source.width_px,
+        .height_px = source.height_px,
+        .row_bytes = Bytes_per_row(source.width_px),
+        .premultiplied_bgra =
+            std::vector<uint8_t>(static_cast<size_t>(Bytes_per_row(source.width_px)) *
+                                     static_cast<size_t>(source.height_px),
+                                 0),
+    };
+    if (!present.has_value()) {
+        return result;
+    }
+    RectPx const part = RectPx::From_ltrb(0, 0, present->Width(), present->Height());
+    BgraBitmap inside{
+        .width_px = part.Width(),
+        .height_px = part.Height(),
+        .row_bytes = Bytes_per_row(part.Width()),
+        .premultiplied_bgra =
+            std::vector<uint8_t>(static_cast<size_t>(Bytes_per_row(part.Width())) *
+                                 static_cast<size_t>(part.Height())),
+    };
+    Copy_rect(source, *present, inside, part);
+    int32_t const block = Clamp_obfuscate_block_size(block_size);
+    BgraBitmap const raster = Pixelate_bitmap(inside, block_size, present->left % block,
+                                              present->top % block);
+    Copy_rect(raster, part, result, *present);
+    return result;
+}
+
+uint64_t Hash_raster_pixels(std::span<const uint8_t> pixels) noexcept {
+    // FNV-1a's offset basis, then per 8-byte word a multiply by the 64-bit golden
+    // ratio and a fold: cheap next to building the raster it hashes.
+    constexpr uint64_t offset_basis = 14695981039346656037ull;
+    constexpr uint64_t multiplier = 0x9E3779B97F4A7C15ull;
+    constexpr unsigned fold_shift = 32;
+    constexpr size_t word_bytes = sizeof(uint64_t);
+    uint64_t hash = offset_basis ^ static_cast<uint64_t>(pixels.size());
+    size_t at = 0;
+    for (; at + word_bytes <= pixels.size(); at += word_bytes) {
+        uint64_t word = 0;
+        std::span<const uint8_t> const bytes = pixels.subspan(at, word_bytes);
+        std::copy_n(bytes.begin(), word_bytes, reinterpret_cast<uint8_t *>(&word));
+        hash = (hash ^ word) * multiplier;
+        hash ^= hash >> fold_shift;
+    }
+    for (; at < pixels.size(); ++at) {
+        hash = (hash ^ pixels[at]) * multiplier;
+        hash ^= hash >> fold_shift;
+    }
+    return hash == 0 ? 1 : hash;
+}
+
+void Set_obfuscate_raster(ObfuscateAnnotation &annotation, BgraBitmap raster) noexcept {
+    annotation.bitmap_width_px = raster.width_px;
+    annotation.bitmap_height_px = raster.height_px;
+    annotation.bitmap_row_bytes = raster.row_bytes;
+    annotation.premultiplied_bgra = std::move(raster.premultiplied_bgra);
+    annotation.raster_hash = Hash_raster_pixels(annotation.premultiplied_bgra);
+}
+
+ObfuscateRasterIdentity
+Obfuscate_raster_identity(ObfuscateAnnotation const &annotation) noexcept {
+    return ObfuscateRasterIdentity{
+        .data = annotation.premultiplied_bgra.data(),
+        .size = annotation.premultiplied_bgra.size(),
+        .width_px = annotation.bitmap_width_px,
+        .height_px = annotation.bitmap_height_px,
+        .hash = annotation.raster_hash,
+    };
+}
+
+bool Is_same_obfuscate_raster(ObfuscateRasterIdentity uploaded,
+                              ObfuscateRasterIdentity current) noexcept {
+    return current.hash != 0 && uploaded == current;
 }
 
 } // namespace greenflame::core

@@ -104,3 +104,277 @@ TEST(obfuscate_raster, BlurMode_SmoothsNonUniformSourceAndKeepsOpaqueAlpha) {
         EXPECT_EQ(result.premultiplied_bgra[index], 255u);
     }
 }
+
+TEST(obfuscate_raster, HashRasterPixels_FollowsContentAndIsNeverZero) {
+    std::vector<uint8_t> const a = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    std::vector<uint8_t> b = a;
+    EXPECT_NE(Hash_raster_pixels(a), 0u);
+    EXPECT_NE(Hash_raster_pixels({}), 0u);
+    EXPECT_EQ(Hash_raster_pixels(a), Hash_raster_pixels(b));
+    b.back() = 13; // the tail past the last whole word counts
+    EXPECT_NE(Hash_raster_pixels(a), Hash_raster_pixels(b));
+    b = a;
+    b.front() = 0;
+    EXPECT_NE(Hash_raster_pixels(a), Hash_raster_pixels(b));
+}
+
+TEST(obfuscate_raster, SetObfuscateRaster_StoresPixelsWithTheirHash) {
+    ObfuscateAnnotation annotation{};
+    BgraBitmap raster = Make_bitmap(2, 1, {RGB(10, 20, 30), RGB(40, 50, 60)});
+    std::vector<uint8_t> const pixels = raster.premultiplied_bgra;
+    Set_obfuscate_raster(annotation, std::move(raster));
+    EXPECT_EQ(annotation.bitmap_width_px, 2);
+    EXPECT_EQ(annotation.bitmap_height_px, 1);
+    EXPECT_EQ(annotation.bitmap_row_bytes, 8);
+    EXPECT_EQ(annotation.premultiplied_bgra, pixels);
+    EXPECT_EQ(annotation.raster_hash, Hash_raster_pixels(pixels));
+}
+
+// The GPU upload of a raster is drawn again only for the very same raster. A raster
+// rewritten in place (same storage, same size, the address an upload is keyed by)
+// with other pixels must not match: that is what the hash is for.
+TEST(obfuscate_raster, SameObfuscateRaster_RejectsOtherPixelsAtTheSameAddress) {
+    ObfuscateAnnotation annotation{};
+    Set_obfuscate_raster(annotation,
+                         Make_bitmap(2, 1, {RGB(10, 20, 30), RGB(40, 50, 60)}));
+    ObfuscateRasterIdentity const uploaded = Obfuscate_raster_identity(annotation);
+    EXPECT_TRUE(
+        Is_same_obfuscate_raster(uploaded, Obfuscate_raster_identity(annotation)));
+
+    uint8_t const *const storage = annotation.premultiplied_bgra.data();
+    std::vector<uint8_t> const other =
+        Make_bitmap(2, 1, {RGB(11, 20, 30), RGB(40, 50, 60)}).premultiplied_bgra;
+    annotation.premultiplied_bgra.assign(other.begin(), other.end());
+    annotation.raster_hash = Hash_raster_pixels(annotation.premultiplied_bgra);
+    ASSERT_EQ(annotation.premultiplied_bgra.data(), storage);
+    EXPECT_FALSE(
+        Is_same_obfuscate_raster(uploaded, Obfuscate_raster_identity(annotation)));
+
+    // A copy elsewhere is another upload's business; a raster with no hash never
+    // matches.
+    ObfuscateAnnotation const copy = annotation;
+    EXPECT_FALSE(Is_same_obfuscate_raster(Obfuscate_raster_identity(annotation),
+                                          Obfuscate_raster_identity(copy)));
+    annotation.raster_hash = 0;
+    EXPECT_FALSE(Is_same_obfuscate_raster(Obfuscate_raster_identity(annotation),
+                                          Obfuscate_raster_identity(annotation)));
+}
+
+namespace {
+
+// An opaque noise source of width x height.
+[[nodiscard]] BgraBitmap Make_noise(int32_t width, int32_t height) {
+    BgraBitmap bitmap{.width_px = width,
+                      .height_px = height,
+                      .row_bytes = width * 4,
+                      .premultiplied_bgra =
+                          std::vector<uint8_t>(static_cast<size_t>(width) * 4u *
+                                               static_cast<size_t>(height))};
+    constexpr uint32_t multiplier = 2654435761u;
+    for (size_t at = 0; at < bitmap.premultiplied_bgra.size(); ++at) {
+        bitmap.premultiplied_bgra[at] =
+            (at % 4u) == 3u
+                ? uint8_t{255}
+                : static_cast<uint8_t>((static_cast<uint32_t>(at) * multiplier) >> 24u);
+    }
+    return bitmap;
+}
+
+// The rect of bitmap as its own bitmap.
+[[nodiscard]] BgraBitmap Cut(BgraBitmap const &bitmap, RectPx rect) {
+    BgraBitmap cut{.width_px = rect.Width(),
+                   .height_px = rect.Height(),
+                   .row_bytes = rect.Width() * 4,
+                   .premultiplied_bgra =
+                       std::vector<uint8_t>(static_cast<size_t>(rect.Width()) * 4u *
+                                            static_cast<size_t>(rect.Height()))};
+    for (int32_t y = 0; y < rect.Height(); ++y) {
+        for (int32_t x = 0; x < rect.Width() * 4; ++x) {
+            cut.premultiplied_bgra[static_cast<size_t>(y * cut.row_bytes + x)] =
+                bitmap.premultiplied_bgra[static_cast<size_t>(
+                    (rect.top + y) * bitmap.row_bytes + rect.left * 4 + x)];
+        }
+    }
+    return cut;
+}
+
+// source with every pixel outside present made transparent (no source under it), as
+// Build_obfuscate_source leaves the part of an obfuscate outside the capture.
+[[nodiscard]] BgraBitmap Keep_only(BgraBitmap source, RectPx present) {
+    for (int32_t y = 0; y < source.height_px; ++y) {
+        for (int32_t x = 0; x < source.width_px; ++x) {
+            if (!present.Contains({x, y})) {
+                for (int32_t c = 0; c < 4; ++c) {
+                    source.premultiplied_bgra[static_cast<size_t>(y * source.row_bytes +
+                                                                  x * 4 + c)] = 0;
+                }
+            }
+        }
+    }
+    return source;
+}
+
+// Inside present, raster must equal expected; outside, every byte must be 0.
+void Expect_inside_matches(BgraBitmap const &raster, RectPx present,
+                           BgraBitmap const &expected) {
+    ASSERT_TRUE(raster.Is_valid());
+    for (int32_t y = 0; y < raster.height_px; ++y) {
+        for (int32_t x = 0; x < raster.width_px; ++x) {
+            for (int32_t c = 0; c < 4; ++c) {
+                uint8_t const actual = raster.premultiplied_bgra[static_cast<size_t>(
+                    y * raster.row_bytes + x * 4 + c)];
+                if (present.Contains({x, y})) {
+                    uint8_t const want =
+                        expected.premultiplied_bgra[static_cast<size_t>(
+                            (y - present.top) * expected.row_bytes +
+                            (x - present.left) * 4 + c)];
+                    ASSERT_EQ(actual, want) << "x=" << x << " y=" << y << " c=" << c;
+                } else {
+                    ASSERT_EQ(actual, 0) << "x=" << x << " y=" << y << " c=" << c;
+                }
+            }
+        }
+    }
+}
+
+} // namespace
+
+// An obfuscate that reaches past the capture (dragged off an edge) has no source for
+// that part. It must not fail, must not average a fill colour in, and must draw
+// nothing there; inside the capture it pixelates what is there.
+TEST(obfuscate_raster, PartWithNoSourceStaysTransparent_RightAndBottom) {
+    constexpr int32_t block = 8;
+    BgraBitmap const source = Make_noise(40, 30);
+    // The capture ends inside the obfuscate, off a block boundary.
+    RectPx const present = RectPx::From_ltrb(0, 0, 27, 19);
+    BgraBitmap const raster = Rasterize_obfuscate(Keep_only(source, present), block);
+    // The grid is anchored at the obfuscate's top-left, as for the clipped area.
+    Expect_inside_matches(raster, present,
+                          Rasterize_obfuscate(Cut(source, present), block));
+}
+
+TEST(obfuscate_raster, PartWithNoSourceStaysTransparent_LeftAndTopOnTheGrid) {
+    constexpr int32_t block = 8;
+    BgraBitmap const source = Make_noise(40, 30);
+    RectPx const present = RectPx::From_ltrb(16, 8, 40, 30);
+    BgraBitmap const raster = Rasterize_obfuscate(Keep_only(source, present), block);
+    Expect_inside_matches(raster, present,
+                          Rasterize_obfuscate(Cut(source, present), block));
+}
+
+TEST(obfuscate_raster, PartWithNoSourceKeepsTheGridAnchoredAtTheObfuscate) {
+    constexpr int32_t block = 8;
+    BgraBitmap const source = Make_noise(24, 16);
+    // The capture starts 3 px in: the first block column averages only its 5
+    // present pixels, and the next blocks sit where they would with no clip.
+    RectPx const present = RectPx::From_ltrb(3, 0, 24, 16);
+    BgraBitmap const raster = Rasterize_obfuscate(Keep_only(source, present), block);
+    BgraBitmap const full = Rasterize_obfuscate(source, block);
+    for (int32_t y = 0; y < 16; ++y) {
+        for (int32_t x = 0; x < 24; ++x) {
+            size_t const at = static_cast<size_t>(y * raster.row_bytes + x * 4);
+            if (x < 3) {
+                EXPECT_EQ(raster.premultiplied_bgra[at + 3u], 0);
+            } else if (x >= block) {
+                // Whole blocks: the same as with the source all there.
+                EXPECT_EQ(raster.premultiplied_bgra[at], full.premultiplied_bgra[at]);
+                EXPECT_EQ(raster.premultiplied_bgra[at + 3u], 255);
+            } else {
+                // The partial block: the average of its present pixels only.
+                uint64_t sum = 0;
+                uint64_t count = 0;
+                int32_t const cell_top = (y / block) * block;
+                for (int32_t sy = cell_top; sy < cell_top + block; ++sy) {
+                    for (int32_t sx = 3; sx < block; ++sx) {
+                        sum += source.premultiplied_bgra[static_cast<size_t>(
+                            sy * source.row_bytes + sx * 4)];
+                        ++count;
+                    }
+                }
+                EXPECT_EQ(raster.premultiplied_bgra[at],
+                          static_cast<uint8_t>(sum / count));
+                EXPECT_EQ(raster.premultiplied_bgra[at + 3u], 255);
+            }
+        }
+    }
+}
+
+TEST(obfuscate_raster, PartWithNoSourceStaysTransparent_Blur) {
+    BgraBitmap const source = Make_noise(40, 30);
+    RectPx const present = RectPx::From_ltrb(5, 4, 33, 30);
+    BgraBitmap const raster = Rasterize_obfuscate(Keep_only(source, present), 1);
+    Expect_inside_matches(raster, present,
+                          Rasterize_obfuscate(Cut(source, present), 1));
+}
+
+TEST(obfuscate_raster, NoSourceAtAllDrawsNothing) {
+    BgraBitmap const source = Make_noise(12, 10);
+    BgraBitmap const raster =
+        Rasterize_obfuscate(Keep_only(source, RectPx::From_ltrb(0, 0, 0, 0)), 4);
+    ASSERT_TRUE(raster.Is_valid());
+    EXPECT_TRUE(std::ranges::all_of(raster.premultiplied_bgra,
+                                    [](uint8_t value) { return value == 0; }));
+}
+
+TEST(obfuscate_raster, SameObfuscateRaster_RejectsOtherDimensions) {
+    // The same bytes read as 2x1 or 1x2 are different rasters.
+    ObfuscateAnnotation annotation{};
+    Set_obfuscate_raster(annotation,
+                         Make_bitmap(2, 1, {RGB(10, 20, 30), RGB(40, 50, 60)}));
+    ObfuscateRasterIdentity const uploaded = Obfuscate_raster_identity(annotation);
+    annotation.bitmap_width_px = 1;
+    annotation.bitmap_height_px = 2;
+    annotation.bitmap_row_bytes = 4;
+    EXPECT_FALSE(
+        Is_same_obfuscate_raster(uploaded, Obfuscate_raster_identity(annotation)));
+}
+
+// A window capture reaching off the desktop leaves the source with a missing corner:
+// not a rectangle. Missing pixels stay transparent and are never averaged in.
+TEST(obfuscate_raster, PartWithNoSourceThatIsNotARectangle) {
+    BgraBitmap const source = Make_noise(24, 16);
+    RectPx const missing = RectPx::From_ltrb(12, 0, 24, 8); // the top-right corner
+    BgraBitmap holed = source;
+    for (int32_t y = missing.top; y < missing.bottom; ++y) {
+        for (int32_t x = missing.left; x < missing.right; ++x) {
+            for (int32_t c = 0; c < 4; ++c) {
+                holed.premultiplied_bgra[static_cast<size_t>(y * holed.row_bytes +
+                                                             x * 4 + c)] = 0;
+            }
+        }
+    }
+    constexpr int32_t block = 8;
+    BgraBitmap const pixelated = Rasterize_obfuscate(holed, block);
+    BgraBitmap const blurred = Rasterize_obfuscate(holed, 1);
+    BgraBitmap const full = Rasterize_obfuscate(source, block);
+    for (int32_t y = 0; y < 16; ++y) {
+        for (int32_t x = 0; x < 24; ++x) {
+            size_t const at = static_cast<size_t>(y * 24 * 4 + x * 4);
+            if (missing.Contains({x, y})) {
+                for (size_t c = 0; c < 4u; ++c) {
+                    ASSERT_EQ(pixelated.premultiplied_bgra[at + c], 0);
+                    ASSERT_EQ(blurred.premultiplied_bgra[at + c], 0);
+                }
+                continue;
+            }
+            ASSERT_EQ(pixelated.premultiplied_bgra[at + 3u], 255);
+            ASSERT_EQ(blurred.premultiplied_bgra[at + 3u], 255);
+            // Blocks the hole does not reach are as with the whole source; the block
+            // it cuts (x 8-15, y 0-7) averages its present half only.
+            if (x < 8 || y >= 8) {
+                ASSERT_EQ(pixelated.premultiplied_bgra[at],
+                          full.premultiplied_bgra[at]);
+            } else {
+                uint64_t sum = 0;
+                for (int32_t sy = 0; sy < 8; ++sy) {
+                    for (int32_t sx = 8; sx < 12; ++sx) {
+                        sum += source.premultiplied_bgra[static_cast<size_t>(
+                            sy * source.row_bytes + sx * 4)];
+                    }
+                }
+                ASSERT_EQ(pixelated.premultiplied_bgra[at],
+                          static_cast<uint8_t>(sum / 32u));
+            }
+        }
+    }
+}

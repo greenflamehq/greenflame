@@ -5,6 +5,7 @@
 #include "greenflame_core/annotation_edit_interaction.h"
 #include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/freehand_smoothing.h"
+#include "greenflame_core/obfuscate_patch_cache.h"
 #include "greenflame_core/rect_px.h"
 #include "greenflame_core/selection_handles.h"
 #include "greenflame_core/selection_wheel.h"
@@ -20,12 +21,7 @@ struct D2DOverlayResources;
 class IOverlayButton;
 class IOverlayTopLayer;
 
-// Per-index override used by the obfuscate preview path to avoid a full annotation
-// deep-copy — only the changed indices are patched at render time.
-struct AnnotationPreviewPatch {
-    size_t index;
-    core::Annotation annotation;
-};
+using AnnotationPreviewPatch = core::AnnotationPreviewPatch;
 
 // Per-frame paint input for the Direct2D overlay renderer.
 struct D2DPaintInput {
@@ -126,6 +122,9 @@ enum class D2DFrameStatus : uint8_t {
     DeviceLost,
     // The frame-latency wait timed out; nothing was drawn or presented.
     WaitTimedOut,
+    // An obfuscate could not be drawn (its bitmap upload failed), here or in a cache
+    // rebuild since the last frame. The frame was not presented: fail closed.
+    DrawFailed,
 };
 
 // Draws one complete frame into every target of res. The work shared by all targets

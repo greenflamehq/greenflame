@@ -69,6 +69,27 @@ void Fill_bmi32_top_down(BITMAPINFOHEADER &bmi, int width, int height) {
 
 int Row_bytes32(int width) { return (width * 4 + 3) & ~3; }
 
+bool Read_capture_pixels(GdiCaptureResult const &capture, std::span<uint8_t> pixels) {
+    if (!capture.Is_valid() ||
+        pixels.size() < static_cast<size_t>(Row_bytes32(capture.width)) *
+                            static_cast<size_t>(capture.height)) {
+        return false;
+    }
+
+    HDC const dc = GetDC(nullptr);
+    if (dc == nullptr) {
+        return false;
+    }
+
+    BITMAPINFOHEADER bmi{};
+    Fill_bmi32_top_down(bmi, capture.width, capture.height);
+    int const result =
+        GetDIBits(dc, capture.bitmap, 0, static_cast<UINT>(capture.height),
+                  pixels.data(), reinterpret_cast<BITMAPINFO *>(&bmi), DIB_RGB_COLORS);
+    ReleaseDC(nullptr, dc);
+    return result != 0;
+}
+
 void GdiCaptureResult::Free() noexcept {
     if (bitmap) {
         DeleteObject(bitmap);

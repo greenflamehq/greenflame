@@ -131,8 +131,11 @@ A close after a failure writes `Overlay closed: ...`.
 ### Overlay debug hooks
 
 Debug builds, and builds with `GREENFLAME_ENABLE_DEBUG_LOG`, have hooks for the
-overlay's close paths (`GF-MAN-PMW-014`, `GF-MAN-PMW-015`). Release builds do not.
+overlay's close paths (`GF-MAN-PMW-014`, `GF-MAN-PMW-015`, `GF-MAN-ANN-004C`).
+Release builds do not.
 
+- Ctrl+Shift+Alt+F10: the next obfuscate preview build, during an annotation edit or
+  for an obfuscate draft, fails, so the overlay closes.
 - Ctrl+Shift+Alt+F11: the next paint reports a lost graphics device.
 - Ctrl+Shift+Alt+F12: the next paints report frame-wait timeouts, enough to close.
 - `GREENFLAME_FORCE_SPAN_FALLBACK=1` in Greenflame's environment: per-monitor setup
@@ -253,11 +256,17 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     path. `--verify-edit`: every frame is drawn again that way and the run fails
     unless the two match at tolerance 0. It also fails unless the edit fast paths
     ran: the changed-area path on some frame (on none with `--lifted` or
-    `--stale-frozen`) and, with `--annotated`, the below-edit cache.
+    `--stale-frozen`) and, with `--annotated`, the below-edit cache. Each move
+    frame also gets the privacy check: every obfuscate is rebuilt from scratch with
+    no cache, and each preview patch, and each obfuscate with no patch, must equal
+    its rebuild. Then the patch cache runs again on the unchanged frame and must
+    keep every patch, the redraw with the uploads kept must upload no obfuscate
+    raster, and a second redraw with every upload dropped is the one compared.
     `ctest` runs it on WARP, in one target on `single-1080`, for a rectangle,
     obfuscates below, a multi-selection, a resize, a moved obfuscate, a
     highlighter, `--lifted`, `--stale-frozen`, `--click-first` and `--click-moved`
-    (a rectangle with and without an obfuscation, and a moved obfuscate); and one per
+    (a rectangle with and without an obfuscation, and a moved obfuscate), and
+    `--stacked`; and one per
     monitor on `jocelyn-desk` for the rectangle, the moved obfuscate and
     `--click-first`. Each uses 3 frames (the middle one under the obfuscate) and at
     most one obfuscation, to keep `ctest` fast. Run the heavier variants by hand when edit drawing changes: every
@@ -270,8 +279,38 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     annotation moved, and the release (back at the start) does nothing. The steady
     frame after the selection commit must match one with every cache rebuilt.
   - `--raster-load`: 3 obfuscates of 1600x400 and 3 texts of 1600x200 below the
-    moved annotation, off its path, to measure large rasters.
+    moved annotation, off its path, to measure large rasters (`--raster-above`:
+    above it, so they draw every edit frame).
   - `--dump-frame` equal to `--frames` writes the frame after the release.
+  - `--stacked` (with `--obfuscations 1`): a second obfuscate above the first,
+    overlapping it but off the move's path. Its source holds the first one's new
+    raster, so it must get a patch too.
+  - `--full-preview`: every obfuscate gets a fresh preview patch every frame (a
+    forced full rebuild); frames must match without it.
+  - `--recapture`: after the scene is committed, the obfuscate source switches to
+    other pixels and every obfuscate is rebuilt through the commit path, as Ctrl+K
+    does. `--alt-source` builds the scene on those pixels from the start. `ctest`
+    checks that the two runs' first frames and `--capture-before` outputs match.
+  - `--capture-dump FILE.bmp`: after the release, writes what Save and Copy produce
+    for the selection (the screenshot with the annotations rendered in through the
+    software renderer), and prints how many annotations straddle a monitor edge.
+    `--capture-whole` uses the whole desktop as the selection; `--capture-before`
+    writes it before the drag instead, before any edit rebuilds an obfuscate.
+- `--off-edge left|right|top|bottom|selection-right` (move): the drag ends with the
+  moved annotation's centre on that edge of the desktop (or of the selection), half
+  of it past the capture. `ctest` runs it with `--verify-edit` for a moved
+  obfuscate at the desktop's left and bottom edges, and with `--lifted` at the
+  selection's (the window capture's) edge followed by `--reselect` and
+  `--capture-dump`.
+- `--reselect` (move, with `--lifted`): after the release the window selection
+  becomes a region over the desktop and every obfuscate is rebuilt from the desktop,
+  as the overlay does. `--capture-dump` fails the run when any pixel of an
+  obfuscate in the output equals the clear capture under it.
+- `--expect-draw-failure`: paints an obfuscate one pixel wider than the device's
+  largest bitmap and succeeds only if the paint reports `DrawFailed` and the
+  software renderer (Save and Copy) fails or draws it. `ctest` runs it on WARP.
+- `--draft-source` (obfuscate): the draft's raster is built every frame from the
+  screenshot and the `--annotated` strokes under it, through the overlay's builder.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
   mouse input delivers them. Larger values draw a longer stroke that wraps into rows
   and crosses itself.
@@ -337,7 +376,9 @@ Per scenario it prints p50/p90/p95/p99/max and the share of frames within 33.3 m
   frame up to a tick multiple.
 
 It also prints the pixels shaded per frame (`PSInvocations`, compared with the desktop
-area; WARP counts only effect passes, so most scenarios read 0 there), and for freehand
+area; WARP counts only effect passes, so most scenarios read 0 there), the obfuscate
+raster uploads per frame and their megabytes, `move`'s patch cache builds and hits,
+and for freehand
 the cost by stroke length and a `release` line. Next to CPU milliseconds these print
 `(N Mcycles)`: the thread's CPU cycles over the same span (`QueryThreadCycleTime`).
 Cycles leave out time the thread waits or is preempted, so they hold up on a loaded

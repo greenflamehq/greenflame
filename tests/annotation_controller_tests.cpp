@@ -119,11 +119,11 @@ struct RecordingObfuscateSourceProvider final : public IObfuscateSourceProvider 
     Build_composited_source(RectPx bounds,
                             std::span<const Annotation> lower_annotations) override {
         RectPx const normalized_bounds = bounds.Normalized();
-        if (normalized_bounds.Is_empty()) {
+        if (normalized_bounds.Is_empty() || requests.size() >= fail_from_request) {
             return std::nullopt;
         }
 
-        uint32_t hash = 0;
+        uint32_t hash = salt;
         for (Annotation const &annotation : lower_annotations) {
             hash += static_cast<uint32_t>(annotation.id);
             if (std::optional<RectPx> const annotation_bounds =
@@ -164,6 +164,10 @@ struct RecordingObfuscateSourceProvider final : public IObfuscateSourceProvider 
     }
 
     std::vector<Request> requests = {};
+    // Requests from this count on fail (a source that cannot be built).
+    size_t fail_from_request = ~size_t{0};
+    // The capture's pixels: changing it changes every source (Ctrl+K).
+    uint32_t salt = 0;
 };
 
 [[nodiscard]] uint32_t Obfuscate_bitmap_signature(Annotation const &annotation) {
@@ -2207,4 +2211,183 @@ TEST(annotation_controller, BubblePlacement_FullCounterSequence) {
     undo_stack.Redo();
     ASSERT_EQ(controller.Annotations().size(), 1u);
     EXPECT_EQ(controller.Current_bubble_counter(), 3);
+}
+
+namespace {
+
+// A rectangle under an obfuscate built from the provider, as committed.
+void Insert_rect_under_obfuscate(AnnotationController &controller,
+                                 RecordingObfuscateSourceProvider &source_provider) {
+    controller.Insert_annotation_at(
+        0, Make_rectangle(1, RectPx::From_ltrb(10, 10, 31, 31), 2), std::nullopt);
+    controller.Insert_annotation_at(
+        1,
+        Build_obfuscate_with_provider(source_provider, 2,
+                                      RectPx::From_ltrb(5, 5, 40, 40), 4,
+                                      controller.Annotations().first(1)),
+        std::nullopt);
+}
+
+} // namespace
+
+TEST(annotation_controller, EditRelease_FailedRebuildOfMovedObfuscateFailsClosed) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+    controller.Set_obfuscate_source_provider(&source_provider);
+    Insert_rect_under_obfuscate(controller, source_provider);
+    std::vector<Annotation> const before(controller.Annotations().begin(),
+                                         controller.Annotations().end());
+
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{2, AnnotationEditTargetKind::Body}, {20, 20}));
+    EXPECT_TRUE(controller.On_pointer_move({60, 70}));
+    source_provider.fail_from_request = source_provider.requests.size();
+    EXPECT_FALSE(controller.On_primary_release(undo_stack));
+
+    // Not left stretched with no undo: the document is as before the edit, and the
+    // overlay is told to close.
+    EXPECT_TRUE(controller.Obfuscate_rebuild_failed());
+    EXPECT_FALSE(controller.Has_active_edit_interaction());
+    EXPECT_TRUE(std::ranges::equal(controller.Annotations(), before));
+    EXPECT_FALSE(undo_stack.Can_undo());
+}
+
+TEST(annotation_controller, EditRelease_FailedReactiveRebuildFailsClosed) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+    controller.Set_obfuscate_source_provider(&source_provider);
+    Insert_rect_under_obfuscate(controller, source_provider);
+    std::vector<Annotation> const before(controller.Annotations().begin(),
+                                         controller.Annotations().end());
+
+    // The rectangle moves under the obfuscate, whose rebuild then fails. It must not
+    // keep its old raster silently.
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::Body}, {20, 20}));
+    EXPECT_TRUE(controller.On_pointer_move({25, 26}));
+    source_provider.fail_from_request = source_provider.requests.size();
+    EXPECT_FALSE(controller.On_primary_release(undo_stack));
+
+    EXPECT_TRUE(controller.Obfuscate_rebuild_failed());
+    EXPECT_TRUE(std::ranges::equal(controller.Annotations(), before));
+    EXPECT_FALSE(undo_stack.Can_undo());
+
+    // The next release that works clears the flag.
+    source_provider.fail_from_request = ~size_t{0};
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::Body}, {20, 20}));
+    EXPECT_TRUE(controller.On_pointer_move({25, 26}));
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_FALSE(controller.Obfuscate_rebuild_failed());
+}
+
+TEST(annotation_controller, Delete_FailedReactiveRebuildChangesNothing) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+    controller.Set_obfuscate_source_provider(&source_provider);
+    Insert_rect_under_obfuscate(controller, source_provider);
+    std::vector<Annotation> const before(controller.Annotations().begin(),
+                                         controller.Annotations().end());
+
+    ASSERT_TRUE(controller.Set_selected_annotation(1));
+    source_provider.fail_from_request = source_provider.requests.size();
+    EXPECT_FALSE(controller.Delete_selected_annotation(undo_stack));
+    EXPECT_TRUE(controller.Obfuscate_rebuild_failed());
+    EXPECT_TRUE(std::ranges::equal(controller.Annotations(), before));
+    EXPECT_FALSE(undo_stack.Can_undo());
+}
+
+TEST(annotation_controller, RecomputeObfuscates_RebuildsEveryObfuscateFromNewSource) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    controller.Set_obfuscate_source_provider(&source_provider);
+    Insert_rect_under_obfuscate(controller, source_provider);
+    controller.Insert_annotation_at(
+        2,
+        Build_obfuscate_with_provider(source_provider, 3,
+                                      RectPx::From_ltrb(30, 30, 70, 70), 4,
+                                      controller.Annotations().first(2)),
+        std::nullopt);
+    uint32_t const lower_before =
+        Obfuscate_bitmap_signature(controller.Annotations()[1]);
+    uint32_t const upper_before =
+        Obfuscate_bitmap_signature(controller.Annotations()[2]);
+
+    // The capture is rebuilt with other pixels (Ctrl+K).
+    constexpr uint32_t new_salt = 101;
+    source_provider.salt = new_salt;
+    ASSERT_TRUE(controller.Recompute_obfuscates());
+
+    // Each raster is what a fresh commit builds now, in z-order: the upper one over
+    // the lower one's new raster.
+    Annotation const lower_expected = Build_obfuscate_with_provider(
+        source_provider, 2, RectPx::From_ltrb(5, 5, 40, 40), 4,
+        controller.Annotations().first(1));
+    EXPECT_EQ(std::get<ObfuscateAnnotation>(controller.Annotations()[1].data)
+                  .premultiplied_bgra,
+              std::get<ObfuscateAnnotation>(lower_expected.data).premultiplied_bgra);
+    Annotation const upper_expected = Build_obfuscate_with_provider(
+        source_provider, 3, RectPx::From_ltrb(30, 30, 70, 70), 4,
+        controller.Annotations().first(2));
+    EXPECT_EQ(std::get<ObfuscateAnnotation>(controller.Annotations()[2].data)
+                  .premultiplied_bgra,
+              std::get<ObfuscateAnnotation>(upper_expected.data).premultiplied_bgra);
+    EXPECT_NE(Obfuscate_bitmap_signature(controller.Annotations()[1]), lower_before);
+    EXPECT_NE(Obfuscate_bitmap_signature(controller.Annotations()[2]), upper_before);
+
+    source_provider.fail_from_request = source_provider.requests.size();
+    EXPECT_FALSE(controller.Recompute_obfuscates());
+}
+
+TEST(annotation_controller, ObfuscatePreviewIndices_FollowZOrderAndCloseUpward) {
+    // 0: obfuscate below the move (its source cannot change)
+    // 1: the moved rectangle
+    // 2: obfuscate the rectangle passes under
+    // 3: obfuscate above 2, touching it, off the rectangle's path
+    // 4: obfuscate above everything, touching nothing that changes
+    std::vector<Annotation> annotations = {
+        Make_obfuscate(10, RectPx::From_ltrb(0, 0, 40, 40), 4),
+        Make_rectangle(11, RectPx::From_ltrb(10, 10, 30, 30), 2),
+        Make_obfuscate(12, RectPx::From_ltrb(20, 0, 60, 40), 4),
+        Make_obfuscate(13, RectPx::From_ltrb(50, 35, 90, 80), 4),
+        Make_obfuscate(14, RectPx::From_ltrb(200, 200, 240, 240), 4),
+    };
+    Annotation const moved = Translate_annotation(annotations[1], {5, 0});
+    std::array<AnnotationEditPreview, 1> const previews = {AnnotationEditPreview{
+        .index = 1, .annotation_before = annotations[1], .annotation_after = moved}};
+    annotations[1] = moved;
+    EXPECT_EQ(Obfuscate_preview_indices(annotations, previews),
+              (std::vector<size_t>{2u, 3u}));
+
+    // An edited obfuscate is always in, and the ones it touches above it join.
+    std::array<AnnotationEditPreview, 1> const obfuscate_edit = {
+        AnnotationEditPreview{.index = 0,
+                              .annotation_before = annotations[0],
+                              .annotation_after = annotations[0]}};
+    EXPECT_EQ(Obfuscate_preview_indices(annotations, obfuscate_edit),
+              (std::vector<size_t>{0u, 2u, 3u}));
+}
+
+TEST(annotation_controller, ObfuscateFailureFlagClearsAtTheNextTextCommit) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+    FakeTextLayoutEngine engine;
+    controller.Set_text_layout_engine(&engine);
+    controller.Set_obfuscate_source_provider(&source_provider);
+    Insert_rect_under_obfuscate(controller, source_provider);
+    ASSERT_TRUE(controller.Set_selected_annotation(1));
+    source_provider.fail_from_request = source_provider.requests.size();
+    ASSERT_FALSE(controller.Delete_selected_annotation(undo_stack));
+    ASSERT_TRUE(controller.Obfuscate_rebuild_failed());
+
+    // A new text commit (the window reads the flag after it) starts clear.
+    TextAnnotation text{};
+    text.runs = {TextRun{L"abc", {}}};
+    text.visual_bounds = RectPx::From_ltrb(100, 100, 130, 120);
+    controller.Commit_text_annotation(undo_stack, std::move(text));
+    EXPECT_FALSE(controller.Obfuscate_rebuild_failed());
 }

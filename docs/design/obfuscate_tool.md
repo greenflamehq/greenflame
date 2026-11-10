@@ -161,7 +161,8 @@ rasterizer.
 
 Current preview flow in `OverlayWindow`:
 
-- `Build_preview_obfuscate_annotation(...)` normalizes the draft bounds
+- `Rebuild_obfuscate_from_source(...)` (core, shared with the commit path)
+  normalizes the draft bounds
 - it requests a composited source image for those bounds
 - it calls `Rasterize_obfuscate(...)`
 - it attaches the resulting bitmap to a temporary preview annotation for paint
@@ -176,10 +177,69 @@ Live preview also supports stacked obfuscates.
 Current behavior:
 
 - while moving or resizing an obfuscate, or editing a lower annotation beneath
-  existing obfuscates, the overlay identifies affected higher obfuscates
+  existing obfuscates, `Obfuscate_preview_indices` picks the affected obfuscates:
+  the edited ones, the ones above an edited annotation whose old or new visual
+  bounds touch them, and, closed upward, any obfuscate above one of those that
+  touches it. Obfuscates below every edit keep their committed raster.
 - the preview path rebuilds those obfuscates in ascending z-order
 - each higher preview therefore sees the current lower preview state rather than
   stale committed pixels
+- `ObfuscatePatchCache` keeps a patch from frame to frame while its key holds:
+  bounds, block size, the capture generation, and the full value of every lower
+  annotation (patches applied) whose visual bounds touch it. The capture renderer
+  skips the others, so they cannot change the source. The commit path is never
+  cached.
+- a GPU upload of an obfuscate raster is reused only for the same raster: same
+  storage, size and content hash (`raster_hash`, set with the pixels)
+- if a preview patch cannot be built mid-edit, the overlay closes (fail closed): it
+  never draws a stale raster or a fill instead
+
+### Obfuscates past the capture
+
+An obfuscate is placed like any other annotation: it can be drawn, moved or resized
+past the capture's edge (the desktop's outer edge, or the edges of a window capture),
+and its bounds are never clamped. It pixelates whatever lies under it:
+
+- `Build_obfuscate_source` returns a bitmap of the obfuscate's size. The part over the
+  capture holds the capture (with the lower annotations composited); the part outside
+  it is transparent (alpha 0). Only a real failure (an invalid capture, GDI or the
+  software renderer failing) returns nothing.
+- `Rasterize_obfuscate` keeps the transparent part transparent, so it draws nothing
+  there, on screen and in Save alike. The rest is pixelated from the pixels that exist
+  only, on the block grid anchored at the obfuscate's top-left as always: a block cut
+  by the capture's edge averages only its part inside. No fill colour is averaged in.
+  With the blur (block size 1), the part inside is blurred on its own.
+- For a window capture, the part over the window (its off-screen part included)
+  pixelates the window capture, and the part past the window pixelates the desktop
+  screenshot the overlay shows there, as other annotations draw over the dimmed
+  desktop around a window selection. Only the part off the desktop and off the
+  window has no source.
+- When the source changes (Ctrl+K, a window selection becoming a region after a
+  selection move or resize, or back by undo), every committed obfuscate is rebuilt
+  through the commit path before anything is shown or saved
+  (`OverlayWindow::Sync_obfuscates_to_source`). Otherwise a window-sourced
+  pixelation would stay over the desktop.
+- Where pixels without a source do not form a rectangle (a window capture reaching
+  off the desktop), the blocks skip them and the blur averages the present pixels
+  only.
+
+### Failures and capture changes
+
+- If an edit's release, a delete, a new obfuscate or a text re-edit cannot build an
+  obfuscate it changes, the document goes back to its state before the change,
+  nothing goes on the undo stack, and the overlay closes.
+- If an obfuscate's bitmap cannot be uploaded (for example, a raster wider than the
+  device allows), the frame is not shown (`D2DFrameStatus::DrawFailed`) and the
+  overlay closes; Save and Copy's software renderer fails the same way.
+- A failed obfuscate draft or edit preview closes the overlay too.
+- Ctrl+K rebuilds the capture with or without the cursor; every committed obfuscate
+  is then rebuilt from the new capture through the commit path, so the overlay and
+  Save match. The same happens on any other source change (see above). If one cannot
+  be rebuilt, the overlay closes. Undo history keeps the rasters it recorded.
+- The failure flag the overlay reads after a commit starts clear in every capture
+  session and at every commit that reports it.
+- After a draw failure the annotation and frozen caches are dropped, so no paint
+  before the close can show the frame without the obfuscate.
 
 This is the behavior reflected in the current manual plan and shared annotation docs.
 
