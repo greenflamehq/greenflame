@@ -245,6 +245,10 @@ class OverlayWindow final {
     void Accept_obfuscate_warning();
     void Reject_obfuscate_warning();
     void Toggle_captured_cursor_visibility();
+    // Rebuilds every committed obfuscate through the commit path when the pixels
+    // obfuscates are cut from changed (Ctrl+K, a window selection becoming a region
+    // or back). False, after posting the fail-close, when one cannot be rebuilt.
+    [[nodiscard]] bool Sync_obfuscates_to_source();
     [[nodiscard]] bool Is_captured_cursor_visible() const noexcept;
     [[nodiscard]] bool Current_capture_has_captured_cursor() const noexcept;
     [[nodiscard]] std::wstring Build_captured_cursor_tooltip() const;
@@ -330,6 +334,8 @@ class OverlayWindow final {
     // The obfuscate preview patches of the active edit, kept while their source holds.
     // Emptied whenever no edit previews obfuscates.
     core::ObfuscatePatchCache obfuscate_patch_cache_ = {};
+    // The provider's Source_generation() the committed obfuscates were built from.
+    uint64_t obfuscate_source_generation_ = 0;
     std::unique_ptr<D2DOverlayResources> d2d_resources_;
     std::unique_ptr<D2DTextLayoutEngine> text_layout_engine_;
     std::unique_ptr<Win32SpellCheckService> spell_check_service_;

@@ -249,6 +249,7 @@ struct Args final {
     bool capture_before = false;    // --capture-before
     std::string off_edge = {};      // --off-edge left|right|top|bottom
     bool expect_draw_failure = false; // --expect-draw-failure
+    bool reselect = false;            // --reselect
     bool reverse = false;             // --reverse: freehand runs right to left
     bool split_monitors = false;      // --split-monitors: one target per monitor
     bool mask_monitors = false;       // --mask-monitors: diff only monitor pixels
@@ -329,6 +330,9 @@ void Print_usage() {
         "  --off-edge left|right|top|bottom|selection-right   move: drag the "
         "annotation until its centre sits on that edge of the desktop (or of the "
         "selection), half of it off the capture\n"
+        "  --reselect                   move, with --lifted: after the release the "
+        "window selection becomes a region over the desktop (a selection move), and "
+        "every obfuscate is rebuilt from the desktop, as the overlay does\n"
         "  --expect-draw-failure        paint an obfuscate whose raster is too wide to "
         "upload; succeed only if the paint reports the failure\n"
         "  --resize                     move: drag the right edge instead of the body; "
@@ -558,6 +562,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.capture_before = true;
         } else if (key == "--expect-draw-failure") {
             args.expect_draw_failure = true;
+        } else if (key == "--reselect") {
+            args.reselect = true;
         } else if (key == "--off-edge") {
             std::optional<std::string_view> const v = next();
             if (!v || (*v != "left" && *v != "right" && *v != "top" && *v != "bottom" &&
@@ -1230,19 +1236,25 @@ constexpr int kLoadCount = 3;
 // It keeps one capture renderer, as the overlay's provider does.
 class BenchObfuscateSource final : public core::IObfuscateSourceProvider {
   public:
-    BenchObfuscateSource(GdiCaptureResult capture, core::RectPx capture_bounds) noexcept
-        : capture_(capture), capture_bounds_(capture_bounds) {}
+    // outer: with --lifted, the desktop screenshot around the window capture.
+    BenchObfuscateSource(GdiCaptureResult capture, core::RectPx capture_bounds,
+                         GdiCaptureResult outer = {}) noexcept
+        : capture_(capture), capture_bounds_(capture_bounds), outer_(outer) {}
     BenchObfuscateSource(BenchObfuscateSource const &) = delete;
     BenchObfuscateSource &operator=(BenchObfuscateSource const &) = delete;
     BenchObfuscateSource(BenchObfuscateSource &&) = delete;
     BenchObfuscateSource &operator=(BenchObfuscateSource &&) = delete;
-    ~BenchObfuscateSource() override { capture_.Free(); }
+    ~BenchObfuscateSource() override {
+        capture_.Free();
+        outer_.Free();
+    }
 
     [[nodiscard]] std::optional<core::BgraBitmap>
     Build_composited_source(core::RectPx bounds,
                             std::span<const core::Annotation> lower) override {
         return Build_obfuscate_source(capture_, capture_bounds_, bounds, lower,
-                                      renderer_);
+                                      renderer_, outer_.Is_valid() ? &outer_ : nullptr,
+                                      {});
     }
 
     [[nodiscard]] GdiCaptureResult const &Capture() const noexcept { return capture_; }
@@ -1251,9 +1263,12 @@ class BenchObfuscateSource final : public core::IObfuscateSourceProvider {
     }
     [[nodiscard]] uint64_t Generation() const noexcept { return generation_; }
     // --recapture: the source capture is rebuilt with other pixels (as Ctrl+K does).
+    // --reselect: the window selection becomes a region over the desktop.
     void Replace_capture(BenchObfuscateSource &from) noexcept {
         capture_.Free();
+        outer_.Free();
         capture_ = std::exchange(from.capture_, GdiCaptureResult{});
+        outer_ = std::exchange(from.outer_, GdiCaptureResult{});
         capture_bounds_ = from.capture_bounds_;
         ++generation_;
     }
@@ -1261,6 +1276,7 @@ class BenchObfuscateSource final : public core::IObfuscateSourceProvider {
   private:
     GdiCaptureResult capture_ = {};
     core::RectPx capture_bounds_ = {};
+    GdiCaptureResult outer_ = {};
     AnnotationCaptureRenderer renderer_ = {};
     uint64_t generation_ = 0;
 };
@@ -1296,7 +1312,18 @@ Make_bench_obfuscate_source(int width, int height, Args const &args, bool alt = 
     if (capture.bitmap == nullptr) {
         return nullptr;
     }
-    return std::make_unique<BenchObfuscateSource>(capture, capture_bounds);
+    GdiCaptureResult outer{};
+    if (args.lifted) {
+        // What the overlay shows around the window: the desktop screenshot.
+        outer.width = width;
+        outer.height = height;
+        outer.bitmap = Make_noise_bitmap(width, height, seed);
+        if (outer.bitmap == nullptr) {
+            capture.Free();
+            return nullptr;
+        }
+    }
+    return std::make_unique<BenchObfuscateSource>(capture, capture_bounds, outer);
 }
 
 // A raster stand-in for text and bubble annotations: kEditColor cells over transparent.
@@ -1940,6 +1967,7 @@ bool Write_capture_dump(BenchObfuscateSource const &source,
         core::RectPx::From_ltrb(capture_bounds.left, capture_bounds.top,
                                 capture_bounds.left + source.Capture().width,
                                 capture_bounds.top + source.Capture().height);
+    size_t clear_total = 0;
     for (core::Annotation const &annotation : annotations) {
         auto const *const obfuscate =
             std::get_if<core::ObfuscateAnnotation>(&annotation.data);
@@ -1975,6 +2003,11 @@ bool Write_capture_dump(BenchObfuscateSource const &source,
               annotation.id, clear_pixels, shown_pixels,
               contains(selection, bounds) ? "no" : "yes",
               contains(capture_rect, bounds) ? "no" : "yes");
+        clear_total += clear_pixels;
+    }
+    if (clear_total > 0) {
+        Print("capture-dump: obfuscated pixels left clear in the output\n");
+        return false;
     }
     return true;
 }
@@ -2355,6 +2388,25 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Print("dump: release frame of {} written to {}\n", scenario,
                   args.dump_path);
         }
+        if (args.reselect) {
+            // As a selection move turns a window selection into a region: the source
+            // becomes the desktop screenshot and every obfuscate is rebuilt from it
+            // (OverlayWindow::Sync_obfuscates_to_source).
+            Args desktop_args = args;
+            desktop_args.lifted = false;
+            std::unique_ptr<BenchObfuscateSource> desktop =
+                Make_bench_obfuscate_source(ctx.width, ctx.height, desktop_args);
+            if (desktop == nullptr) {
+                return std::nullopt;
+            }
+            edit->source->Replace_capture(*desktop);
+            for (size_t i = 0; i < edit->doc.size(); ++i) {
+                if (!Commit_obfuscate(edit->doc, i, *edit->source)) {
+                    Print("reselect: could not rebuild an obfuscate\n");
+                    return std::nullopt;
+                }
+            }
+        }
         if (!args.capture_dump.empty() && !args.capture_before) {
             core::RectPx const selection =
                 args.capture_whole
@@ -2584,9 +2636,24 @@ int Run_draw_failure_check(D2DOverlayResources &res, int width, int height) {
     Rebuild_frozen_bitmap(res, input.final_selection, width, height);
     D2DFrameStatus const status =
         Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs);
-    bool const reported = status == D2DFrameStatus::DrawFailed;
-    Print("draw-failure: paint {}\n",
-          reported ? "reported DrawFailed" : "did not report the failure");
+    // The caches drawn without the obfuscate must be dropped, and a paint before the
+    // close is processed (rebuilding them first, as On_paint does) must fail again.
+    bool const caches_dropped = !res.annotations_valid && !res.frozen_valid;
+    if (!res.annotations_valid) {
+        Rebuild_annotations_bitmap(res, annotations);
+    }
+    if (!res.frozen_valid) {
+        Rebuild_frozen_bitmap(res, input.final_selection, width, height);
+    }
+    D2DFrameStatus const again =
+        Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs);
+    bool const reported = status == D2DFrameStatus::DrawFailed && caches_dropped &&
+                          again == D2DFrameStatus::DrawFailed;
+    Print("draw-failure: paint {}; caches {}; the next paint {}\n",
+          status == D2DFrameStatus::DrawFailed ? "reported DrawFailed"
+                                               : "did not report the failure",
+          caches_dropped ? "dropped" : "STILL VALID",
+          again == D2DFrameStatus::DrawFailed ? "reported DrawFailed too" : "did not");
 
     GdiCaptureResult capture{};
     capture.width = too_wide_px;
@@ -2644,8 +2711,10 @@ int Run_render_bench(Args const &args) {
               "need --scenario move (--recapture and --alt-source: or commit)\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
-    if (!args.capture_dump.empty() && args.lifted && args.capture_whole) {
-        Print("--capture-whole cuts the screenshot: it does not take --lifted\n");
+    if (!args.capture_dump.empty() && args.lifted && args.capture_whole &&
+        !args.reselect) {
+        Print(
+            "--capture-whole cuts the screenshot: with --lifted it needs --reselect\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
 

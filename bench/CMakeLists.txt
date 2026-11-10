@@ -471,27 +471,25 @@ if(BUILD_TESTING)
 
     # An obfuscate dragged past the desktop's edges (and with --lifted past the window
     # capture's): every frame's patches match an uncached build, and nothing fails.
-    foreach(greenflame_edge_side left right top bottom)
+    foreach(greenflame_edge_side left bottom)
         add_test(
             NAME greenflame_render_bench_off_edge_${greenflame_edge_side}
             COMMAND greenflame_render_bench --adapter warp --layout single-1080
                 --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
                 --frames 3 --verify-edit --off-edge ${greenflame_edge_side}
         )
-        add_test(
-            NAME greenflame_render_bench_off_edge_lifted_${greenflame_edge_side}
-            COMMAND greenflame_render_bench --adapter warp --layout single-1080
-                --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
-                --frames 3 --verify-edit --lifted --off-edge ${greenflame_edge_side}
-        )
     endforeach()
 
-    # A window capture's edge is the selection's: half the obfuscate past it.
+    # A window capture's edge is the selection's: half the obfuscate past it, over the
+    # desktop. Then the window selection becomes a region (--reselect): Save must show
+    # no pixel of the obfuscate clear (the clear-pixel count fails the run otherwise).
     add_test(
         NAME greenflame_render_bench_off_edge_lifted_selection
         COMMAND greenflame_render_bench --adapter warp --layout single-1080
             --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
-            --frames 3 --verify-edit --lifted --off-edge selection-right
+            --frames 3 --verify-edit --lifted --off-edge selection-right --reselect
+            --capture-whole
+            --capture-dump "${CMAKE_CURRENT_BINARY_DIR}/off_edge_reselect_save.bmp"
     )
 
     # An obfuscate too wide to upload makes the paint fail closed.

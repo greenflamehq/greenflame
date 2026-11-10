@@ -3783,9 +3783,11 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
 
     FramePlan plan{};
     Prepare_frame(res, input, vd_width, vd_height, plan);
-    // A cache drawn without one of its obfuscates must not reach the screen.
+    // A cache drawn without one of its obfuscates must not reach the screen, now or
+    // in a paint before the close is processed: drop the caches too.
     if (res.obfuscate_draw_failed) {
         res.obfuscate_draw_failed = false;
+        res.Invalidate_annotations();
         return D2DFrameStatus::DrawFailed;
     }
 
@@ -3844,6 +3846,7 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
         if (res.obfuscate_draw_failed) {
             // A draft obfuscate this target drew failed: do not present it.
             res.obfuscate_draw_failed = false;
+            res.Invalidate_annotations();
             return D2DFrameStatus::DrawFailed;
         }
         if (target.swap_chain) {

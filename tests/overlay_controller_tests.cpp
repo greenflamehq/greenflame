@@ -2795,3 +2795,23 @@ TEST(overlay_controller, DeleteWhoseObfuscateRebuildFailsClosesTheOverlay) {
     EXPECT_EQ(c.On_delete_selected_annotation(), OverlayAction::FailClose);
     EXPECT_TRUE(std::ranges::equal(c.Annotations(), before));
 }
+
+// A failure ends a capture; it must not close the next one. The flag the window reads
+// after a text commit starts clear in every session and at every text commit.
+TEST(overlay_controller, ObfuscateFailureFlagDoesNotOutliveItsCapture) {
+    auto c = Make_controller();
+    FakeObfuscateSourceProvider source_provider;
+    c.Set_obfuscate_source_provider(&source_provider);
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    ASSERT_EQ(Press(c, {210, 210}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {250, 250}), OverlayAction::Repaint);
+    source_provider.fail = true;
+    ASSERT_EQ(Release(c, {250, 250}), OverlayAction::FailClose);
+    ASSERT_TRUE(c.Obfuscate_rebuild_failed());
+
+    c.Reset_for_session(Single_monitor());
+    EXPECT_FALSE(c.Obfuscate_rebuild_failed());
+}

@@ -209,10 +209,19 @@ and its bounds are never clamped. It pixelates whatever lies under it:
   only, on the block grid anchored at the obfuscate's top-left as always: a block cut
   by the capture's edge averages only its part inside. No fill colour is averaged in.
   With the blur (block size 1), the part inside is blurred on its own.
-- For a window capture, the capture is the window: the overlay shows the desktop
-  around it, but Save writes only the window, so an obfuscate's part over the
-  desktop has no source and draws nothing, exactly like any annotation off the
-  capture. The window's own off-screen part is in the capture and is pixelated.
+- For a window capture, the part over the window (its off-screen part included)
+  pixelates the window capture, and the part past the window pixelates the desktop
+  screenshot the overlay shows there, as other annotations draw over the dimmed
+  desktop around a window selection. Only the part off the desktop and off the
+  window has no source.
+- When the source changes (Ctrl+K, a window selection becoming a region after a
+  selection move or resize, or back by undo), every committed obfuscate is rebuilt
+  through the commit path before anything is shown or saved
+  (`OverlayWindow::Sync_obfuscates_to_source`). Otherwise a window-sourced
+  pixelation would stay over the desktop.
+- Where pixels without a source do not form a rectangle (a window capture reaching
+  off the desktop), the blocks skip them and the blur averages the present pixels
+  only.
 
 ### Failures and capture changes
 
@@ -225,8 +234,12 @@ and its bounds are never clamped. It pixelates whatever lies under it:
 - A failed obfuscate draft or edit preview closes the overlay too.
 - Ctrl+K rebuilds the capture with or without the cursor; every committed obfuscate
   is then rebuilt from the new capture through the commit path, so the overlay and
-  Save match. If one cannot be rebuilt, the overlay closes. Undo history keeps the
-  rasters it recorded.
+  Save match. The same happens on any other source change (see above). If one cannot
+  be rebuilt, the overlay closes. Undo history keeps the rasters it recorded.
+- The failure flag the overlay reads after a commit starts clear in every capture
+  session and at every commit that reports it.
+- After a draw failure the annotation and frozen caches are dropped, so no paint
+  before the close can show the frame without the obfuscate.
 
 This is the behavior reflected in the current manual plan and shared annotation docs.
 

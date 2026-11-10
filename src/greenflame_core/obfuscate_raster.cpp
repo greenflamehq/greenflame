@@ -225,9 +225,14 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
             uint64_t sum_a = 0;
             uint64_t sample_count = 0;
 
+            // A pixel with alpha 0 has no source under it: it is left out of the
+            // average and stays transparent. An opaque source has none.
             for (int32_t y = cell_top; y < cell_bottom; ++y) {
                 for (int32_t x = cell_left; x < cell_right; ++x) {
                     size_t const offset = Pixel_offset(x, y, source.row_bytes);
+                    if (source.premultiplied_bgra[offset + kAlphaChannelOffset] == 0) {
+                        continue;
+                    }
                     sum_b += source.premultiplied_bgra[offset];
                     sum_g += source.premultiplied_bgra[offset + 1u];
                     sum_r += source.premultiplied_bgra[offset + 2u];
@@ -247,6 +252,10 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
 
             for (int32_t y = cell_top; y < cell_bottom; ++y) {
                 for (int32_t x = cell_left; x < cell_right; ++x) {
+                    if (source.premultiplied_bgra[Pixel_offset(x, y, source.row_bytes) +
+                                                  kAlphaChannelOffset] == 0) {
+                        continue;
+                    }
                     size_t const offset = Pixel_offset(x, y, result.row_bytes);
                     result.premultiplied_bgra[offset] = avg_b;
                     result.premultiplied_bgra[offset + 1u] = avg_g;
@@ -260,19 +269,27 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
     return result;
 }
 
-// The pixels of source with any source under them (alpha not 0): a rectangle, since
-// only the part of an obfuscate outside the capture has none. nullopt when none has.
-[[nodiscard]] std::optional<RectPx> Present_pixel_bounds(BgraBitmap const &source) {
+// Where source has pixels with a source under them (alpha not 0): their bounding
+// rect, and whether every pixel in it has one. Usually a rect: an obfuscate cut by
+// one capture edge. A window capture reaching off the desktop can leave a corner out.
+struct PresentPixels final {
+    RectPx bounds = {};
+    bool solid = false;
+};
+
+[[nodiscard]] std::optional<PresentPixels> Present_pixels(BgraBitmap const &source) {
     int32_t left = source.width_px;
     int32_t top = source.height_px;
     int32_t right = 0;
     int32_t bottom = 0;
+    size_t count = 0;
     for (int32_t y = 0; y < source.height_px; ++y) {
         for (int32_t x = 0; x < source.width_px; ++x) {
             if (source.premultiplied_bgra[Pixel_offset(x, y, source.row_bytes) +
                                           kAlphaChannelOffset] == 0) {
                 continue;
             }
+            ++count;
             left = std::min(left, x);
             top = std::min(top, y);
             right = std::max(right, x + 1);
@@ -282,7 +299,45 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
     if (right <= left || bottom <= top) {
         return std::nullopt;
     }
-    return RectPx::From_ltrb(left, top, right, bottom);
+    RectPx const bounds = RectPx::From_ltrb(left, top, right, bottom);
+    return PresentPixels{
+        .bounds = bounds,
+        .solid = count == static_cast<size_t>(bounds.Width()) *
+                              static_cast<size_t>(bounds.Height()),
+    };
+}
+
+// Blur with holes (block size 1): each present pixel becomes the average of the
+// present pixels around it (the premultiplied blur divided by its own coverage), and
+// opaque; a pixel with no source stays transparent.
+void Blur_present_pixels(BgraBitmap const &source, BgraBitmap &result) {
+    result.premultiplied_bgra.resize(source.premultiplied_bgra.size());
+    Blur_bitmap(source, kObfuscateBlurRadiusPx, result);
+    constexpr uint32_t opaque = 255;
+    for (int32_t y = 0; y < source.height_px; ++y) {
+        for (int32_t x = 0; x < source.width_px; ++x) {
+            size_t const at = Pixel_offset(x, y, source.row_bytes);
+            size_t const out = Pixel_offset(x, y, result.row_bytes);
+            uint32_t const coverage =
+                result.premultiplied_bgra[out + kAlphaChannelOffset];
+            if (source.premultiplied_bgra[at + kAlphaChannelOffset] == 0 ||
+                coverage == 0) {
+                for (size_t c = 0; c < 4u; ++c) {
+                    result.premultiplied_bgra[out + c] = 0;
+                }
+                continue;
+            }
+            for (size_t c = 0; c < kAlphaChannelOffset; ++c) {
+                uint32_t const value =
+                    (result.premultiplied_bgra[out + c] * opaque + coverage / 2u) /
+                    coverage;
+                result.premultiplied_bgra[out + c] =
+                    static_cast<uint8_t>(std::min(value, opaque));
+            }
+            result.premultiplied_bgra[out + kAlphaChannelOffset] =
+                static_cast<uint8_t>(opaque);
+        }
+    }
 }
 
 // Copies rect of from into to, or of to into from's place: rows of rect.Width() pixels.
@@ -320,11 +375,28 @@ BgraBitmap Rasterize_obfuscate(BgraBitmap const &source, int32_t block_size) {
     if (!source.Is_valid()) {
         return {};
     }
-    std::optional<RectPx> const present = Present_pixel_bounds(source);
+    std::optional<PresentPixels> const present_pixels = Present_pixels(source);
     RectPx const whole = RectPx::From_ltrb(0, 0, source.width_px, source.height_px);
-    if (present == whole) {
+    if (present_pixels.has_value() && present_pixels->solid &&
+        present_pixels->bounds == whole) {
         return Pixelate_bitmap(source, block_size, 0, 0);
     }
+    if (present_pixels.has_value() && !present_pixels->solid) {
+        // Holes in the present part (rare): the blocks, on their usual grid, skip
+        // the missing pixels; the blur averages present pixels only.
+        if (Clamp_obfuscate_block_size(block_size) > 1) {
+            return Pixelate_bitmap(source, block_size, 0, 0);
+        }
+        BgraBitmap result{.width_px = source.width_px,
+                          .height_px = source.height_px,
+                          .row_bytes = source.row_bytes,
+                          .premultiplied_bgra = {}};
+        Blur_present_pixels(source, result);
+        return result;
+    }
+    std::optional<RectPx> const present =
+        present_pixels.has_value() ? std::optional<RectPx>{present_pixels->bounds}
+                                   : std::nullopt;
 
     // Part of the obfuscate has no source under it: that part stays transparent (it
     // draws nothing), and the rest is pixelated from what exists, on the grid

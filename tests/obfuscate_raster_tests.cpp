@@ -328,3 +328,53 @@ TEST(obfuscate_raster, SameObfuscateRaster_RejectsOtherDimensions) {
     EXPECT_FALSE(
         Is_same_obfuscate_raster(uploaded, Obfuscate_raster_identity(annotation)));
 }
+
+// A window capture reaching off the desktop leaves the source with a missing corner:
+// not a rectangle. Missing pixels stay transparent and are never averaged in.
+TEST(obfuscate_raster, PartWithNoSourceThatIsNotARectangle) {
+    BgraBitmap const source = Make_noise(24, 16);
+    RectPx const missing = RectPx::From_ltrb(12, 0, 24, 8); // the top-right corner
+    BgraBitmap holed = source;
+    for (int32_t y = missing.top; y < missing.bottom; ++y) {
+        for (int32_t x = missing.left; x < missing.right; ++x) {
+            for (int32_t c = 0; c < 4; ++c) {
+                holed.premultiplied_bgra[static_cast<size_t>(y * holed.row_bytes +
+                                                             x * 4 + c)] = 0;
+            }
+        }
+    }
+    constexpr int32_t block = 8;
+    BgraBitmap const pixelated = Rasterize_obfuscate(holed, block);
+    BgraBitmap const blurred = Rasterize_obfuscate(holed, 1);
+    BgraBitmap const full = Rasterize_obfuscate(source, block);
+    for (int32_t y = 0; y < 16; ++y) {
+        for (int32_t x = 0; x < 24; ++x) {
+            size_t const at = static_cast<size_t>(y * 24 * 4 + x * 4);
+            if (missing.Contains({x, y})) {
+                for (size_t c = 0; c < 4u; ++c) {
+                    ASSERT_EQ(pixelated.premultiplied_bgra[at + c], 0);
+                    ASSERT_EQ(blurred.premultiplied_bgra[at + c], 0);
+                }
+                continue;
+            }
+            ASSERT_EQ(pixelated.premultiplied_bgra[at + 3u], 255);
+            ASSERT_EQ(blurred.premultiplied_bgra[at + 3u], 255);
+            // Blocks the hole does not reach are as with the whole source; the block
+            // it cuts (x 8-15, y 0-7) averages its present half only.
+            if (x < 8 || y >= 8) {
+                ASSERT_EQ(pixelated.premultiplied_bgra[at],
+                          full.premultiplied_bgra[at]);
+            } else {
+                uint64_t sum = 0;
+                for (int32_t sy = 0; sy < 8; ++sy) {
+                    for (int32_t sx = 8; sx < 12; ++sx) {
+                        sum += source.premultiplied_bgra[static_cast<size_t>(
+                            sy * source.row_bytes + sx * 4)];
+                    }
+                }
+                ASSERT_EQ(pixelated.premultiplied_bgra[at],
+                          static_cast<uint8_t>(sum / 32u));
+            }
+        }
+    }
+}

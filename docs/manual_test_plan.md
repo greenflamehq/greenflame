@@ -1046,7 +1046,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
      holding the button, press Ctrl+Shift+Alt+F10.
   6. Reopen with a whole-desktop selection; draw an obfuscate over text near the
      desktop's edge and drag it half off the screen, on every edge; release; save.
-     Repeat over a Ctrl-click window selection, dragging it half out of the window.
+     Repeat over a Ctrl-click window selection, dragging it half out of the window;
+     then move the selection, and resize it; save after each.
 - Expected:
   - After Ctrl+K the obfuscate's pixelation changes where the cursor was, on screen
     and in the saved and copied output alike.
@@ -1056,7 +1057,10 @@ unless a real end-to-end bug escapes into the Win32 shell:
     filled with a flat colour; nothing is saved or copied.
   - In step 6 nothing closes: the obfuscate moves freely, keeps pixelating what is
     under it inside the capture, shows no flat-colour band, and the saved image
-    matches the screen inside the capture.
+    matches the screen inside the capture. Over a window selection the part outside
+    the window pixelates the desktop; after the selection move or resize the whole
+    obfuscate pixelates the desktop, on screen and in the saved image, with no
+    clear pixel.
 
 ### GF-MAN-ANN-005 - Overlap And Topmost Selection
 

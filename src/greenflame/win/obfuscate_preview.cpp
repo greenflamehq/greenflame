@@ -9,15 +9,17 @@ std::optional<core::BgraBitmap>
 Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bounds,
                        core::RectPx bounds,
                        std::span<const core::Annotation> lower_annotations,
-                       AnnotationCaptureRenderer &renderer) {
+                       AnnotationCaptureRenderer &renderer,
+                       GdiCaptureResult const *outer, core::RectPx outer_bounds) {
     core::RectPx const normalized_bounds = bounds.Normalized();
     if (normalized_bounds.Is_empty() || !capture.Is_valid()) {
         return std::nullopt;
     }
 
-    // An obfuscate can sit anywhere, like any annotation: only the part over the
-    // capture has a source. The rest of the bitmap stays transparent (alpha 0), which
-    // Rasterize_obfuscate keeps transparent and averages nothing from.
+    // An obfuscate can sit anywhere, like any annotation. The part over the capture
+    // pixelates the capture, the part past it what outer shows there, and the rest
+    // (off the desktop) stays transparent (alpha 0), which Rasterize_obfuscate keeps
+    // transparent and averages nothing from.
     core::RectPx const capture_rect = core::RectPx::From_ltrb(
         capture_bounds.left, capture_bounds.top, capture_bounds.left + capture.width,
         capture_bounds.top + capture.height);
@@ -34,6 +36,14 @@ Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bou
                     static_cast<size_t>(normalized_bounds.Height()),
                 0),
         };
+        if (outer != nullptr && outer->Is_valid()) {
+            std::optional<core::BgraBitmap> around = Build_obfuscate_source(
+                *outer, outer_bounds, normalized_bounds, lower_annotations, renderer);
+            if (!around.has_value()) {
+                return std::nullopt;
+            }
+            bitmap = std::move(*around);
+        }
         if (!inside.has_value()) {
             return bitmap;
         }

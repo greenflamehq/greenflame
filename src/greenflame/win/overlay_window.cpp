@@ -778,7 +778,7 @@ struct OverlayWindow::ObfuscateSourceProvider final
             return std::nullopt;
         }
         return Build_obfuscate_source(*source.capture, source.bounds, normalized_bounds,
-                                      lower_annotations, renderer_);
+                                      lower_annotations, renderer_, source.outer, {});
     }
 
     // Changes whenever the pixels sources are cut from may have: a capture rebuilt
@@ -803,6 +803,9 @@ struct OverlayWindow::ObfuscateSourceProvider final
     struct Source final {
         GdiCaptureResult const *capture = nullptr;
         core::RectPx bounds = {}; // where the capture's top-left sits, client pixels
+        // With a window capture: the desktop screenshot (at the client origin), what
+        // the overlay shows around the window, for an obfuscate reaching past it.
+        GdiCaptureResult const *outer = nullptr;
     };
 
     [[nodiscard]] Source Current_source() const {
@@ -816,7 +819,8 @@ struct OverlayWindow::ObfuscateSourceProvider final
             core::PointPx const origin = owner_->Desktop_origin_px();
             return {&owner_->resources_->window_capture.display_capture,
                     core::Screen_rect_to_client_rect(
-                        state.selection_capture_rect_screen, origin.x, origin.y)};
+                        state.selection_capture_rect_screen, origin.x, origin.y),
+                    &owner_->resources_->display_capture};
         }
         if (owner_->resources_->display_capture.Is_valid()) {
             return {&owner_->resources_->display_capture, {}};
@@ -1188,6 +1192,9 @@ void OverlayWindow::Refresh_pointer_visual_overlays(core::PointPx cursor_client)
 
 void OverlayWindow::Restore_selection_state(core::OverlaySelectionState const &state) {
     controller_.Restore_selection_state(state);
+    if (!Sync_obfuscates_to_source()) {
+        return;
+    }
     if (d2d_resources_ != nullptr) {
         if (state.selection_uses_full_window_capture && resources_ != nullptr &&
             resources_->window_capture.display_capture.Is_valid()) {
@@ -1221,8 +1228,7 @@ void OverlayWindow::Toggle_captured_cursor_visibility() {
     (void)Save_app_config(*config_);
     // Committed obfuscates were pixelated from the old capture: rebuild them through
     // the commit path, so the overlay and Save show the new one.
-    if (!controller_.Recompute_obfuscates()) {
-        Post_fail_close(L"an obfuscation could not be rebuilt.");
+    if (!Sync_obfuscates_to_source()) {
         return;
     }
     Rebuild_toolbar_buttons();
@@ -3099,8 +3105,41 @@ LRESULT CALLBACK OverlayWindow::Static_wnd_proc(HWND hwnd, UINT msg, WPARAM wpar
     return result;
 }
 
+bool OverlayWindow::Sync_obfuscates_to_source() {
+    if (obfuscate_source_provider_ == nullptr) {
+        return true;
+    }
+    uint64_t const generation = obfuscate_source_provider_->Source_generation();
+    if (generation == obfuscate_source_generation_) {
+        return true;
+    }
+    obfuscate_source_generation_ = generation;
+    obfuscate_patch_cache_.Clear();
+    // Without obfuscates there is nothing to rebuild (a Ctrl-hover preview switching
+    // windows changes the generation with no selection and no annotations).
+    if (std::ranges::none_of(controller_.Annotations(), [](core::Annotation const &a) {
+            return std::holds_alternative<core::ObfuscateAnnotation>(a.data);
+        })) {
+        return true;
+    }
+    if (!controller_.Recompute_obfuscates()) {
+        Post_fail_close(L"an obfuscation could not be rebuilt.");
+        return false;
+    }
+    if (d2d_resources_ != nullptr) {
+        d2d_resources_->Invalidate_annotations();
+    }
+    return true;
+}
+
 void OverlayWindow::Apply_action(core::OverlayAction action) {
     GREENFLAME_PROFILE_FUNCTION();
+
+    // A selection change may have switched the obfuscates' source (a window
+    // selection becoming a region): rebuild them before anything shows or saves.
+    if (action != core::OverlayAction::FailClose && !Sync_obfuscates_to_source()) {
+        return;
+    }
 
     if (action != core::OverlayAction::None) {
         Rebuild_toolbar_buttons();
@@ -4667,6 +4706,11 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
             }
         }
         d2d_resources_->Set_lifted_view(lifted_view);
+        // Every path that changes the source also syncs; this catches any other.
+        if (!Sync_obfuscates_to_source()) {
+            EndPaint(hwnd, &paint);
+            return 0;
+        }
         if (!d2d_resources_->annotations_valid) {
             GREENFLAME_PROFILE_SCOPE(
                 "OverlayWindow::On_paint::Rebuild_annotations_cache");

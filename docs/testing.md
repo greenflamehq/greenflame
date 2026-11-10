@@ -299,8 +299,13 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
 - `--off-edge left|right|top|bottom|selection-right` (move): the drag ends with the
   moved annotation's centre on that edge of the desktop (or of the selection), half
   of it past the capture. `ctest` runs it with `--verify-edit` for a moved
-  obfuscate at each desktop edge, and with `--lifted` at each edge and the
-  selection's (the window capture's) edge.
+  obfuscate at the desktop's left and bottom edges, and with `--lifted` at the
+  selection's (the window capture's) edge followed by `--reselect` and
+  `--capture-dump`.
+- `--reselect` (move, with `--lifted`): after the release the window selection
+  becomes a region over the desktop and every obfuscate is rebuilt from the desktop,
+  as the overlay does. `--capture-dump` fails the run when any pixel of an
+  obfuscate in the output equals the clear capture under it.
 - `--expect-draw-failure`: paints an obfuscate one pixel wider than the device's
   largest bitmap and succeeds only if the paint reports `DrawFailed` and the
   software renderer (Save and Copy) fails or draws it. `ctest` runs it on WARP.

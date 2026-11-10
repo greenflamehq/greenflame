@@ -2370,3 +2370,24 @@ TEST(annotation_controller, ObfuscatePreviewIndices_FollowZOrderAndCloseUpward) 
     EXPECT_EQ(Obfuscate_preview_indices(annotations, obfuscate_edit),
               (std::vector<size_t>{0u, 2u, 3u}));
 }
+
+TEST(annotation_controller, ObfuscateFailureFlagClearsAtTheNextTextCommit) {
+    AnnotationController controller;
+    RecordingObfuscateSourceProvider source_provider;
+    UndoStack undo_stack;
+    FakeTextLayoutEngine engine;
+    controller.Set_text_layout_engine(&engine);
+    controller.Set_obfuscate_source_provider(&source_provider);
+    Insert_rect_under_obfuscate(controller, source_provider);
+    ASSERT_TRUE(controller.Set_selected_annotation(1));
+    source_provider.fail_from_request = source_provider.requests.size();
+    ASSERT_FALSE(controller.Delete_selected_annotation(undo_stack));
+    ASSERT_TRUE(controller.Obfuscate_rebuild_failed());
+
+    // A new text commit (the window reads the flag after it) starts clear.
+    TextAnnotation text{};
+    text.runs = {TextRun{L"abc", {}}};
+    text.visual_bounds = RectPx::From_ltrb(100, 100, 130, 120);
+    controller.Commit_text_annotation(undo_stack, std::move(text));
+    EXPECT_FALSE(controller.Obfuscate_rebuild_failed());
+}

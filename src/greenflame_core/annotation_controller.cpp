@@ -71,6 +71,7 @@ void AnnotationController::Reset_for_session() {
     active_edit_interaction_.reset();
     text_layout_engine_ = nullptr;
     obfuscate_source_provider_ = nullptr;
+    obfuscate_rebuild_failed_ = false;
     text_edit_ctrl_.reset();
     editing_annotation_id_.reset();
     text_current_font_ = TextFontChoice::Sans;
@@ -524,6 +525,7 @@ void AnnotationController::Begin_text_draft(PointPx origin) {
 
 void AnnotationController::Commit_text_annotation(UndoStack &undo_stack,
                                                   TextAnnotation annotation) {
+    obfuscate_rebuild_failed_ = false;
     text_edit_ctrl_.reset();
     if (!Text_annotation_has_text(annotation) || text_layout_engine_ == nullptr) {
         return;
