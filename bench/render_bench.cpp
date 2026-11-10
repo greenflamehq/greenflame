@@ -1901,7 +1901,9 @@ bool Write_capture_dump(BenchObfuscateSource const &source,
     size_t const row_bytes = static_cast<size_t>(Row_bytes32(cropped.width));
     size_t const rows = static_cast<size_t>(cropped.height);
     std::vector<uint8_t> pixels(row_bytes * rows);
-    bool const ok = Render_annotations_into_capture(cropped, annotations, selection) &&
+    std::vector<uint8_t> clear(row_bytes * rows); // the capture before annotations
+    bool const ok = Read_capture_pixels(cropped, clear) &&
+                    Render_annotations_into_capture(cropped, annotations, selection) &&
                     Read_capture_pixels(cropped, pixels);
     int const width = cropped.width;
     int const height = cropped.height;
@@ -1932,6 +1934,48 @@ bool Write_capture_dump(BenchObfuscateSource const &source,
     Print("capture-dump: {}x{} written to {}; {} of {} annotations straddle a monitor "
           "edge\n",
           width, height, path, straddling, annotations.size());
+    // Privacy: inside the output, an obfuscate's pixels must not be the clear
+    // capture's (on noise, a block average matches a pixel about once in 16M).
+    core::RectPx const capture_rect =
+        core::RectPx::From_ltrb(capture_bounds.left, capture_bounds.top,
+                                capture_bounds.left + source.Capture().width,
+                                capture_bounds.top + source.Capture().height);
+    for (core::Annotation const &annotation : annotations) {
+        auto const *const obfuscate =
+            std::get_if<core::ObfuscateAnnotation>(&annotation.data);
+        if (obfuscate == nullptr) {
+            continue;
+        }
+        core::RectPx const bounds = obfuscate->bounds.Normalized();
+        std::optional<core::RectPx> const shown =
+            core::RectPx::Intersect(bounds, selection);
+        size_t clear_pixels = 0;
+        size_t shown_pixels = 0;
+        if (shown.has_value()) {
+            for (int32_t y = shown->top; y < shown->bottom; ++y) {
+                for (int32_t x = shown->left; x < shown->right; ++x) {
+                    size_t const at =
+                        static_cast<size_t>(y - selection.top) * row_bytes +
+                        static_cast<size_t>(x - selection.left) * kBytesPerPixel;
+                    ++shown_pixels;
+                    clear_pixels +=
+                        std::equal(pixels.begin() + static_cast<std::ptrdiff_t>(at),
+                                   pixels.begin() + static_cast<std::ptrdiff_t>(at + 3),
+                                   clear.begin() + static_cast<std::ptrdiff_t>(at))
+                            ? 1
+                            : 0;
+                }
+            }
+        }
+        auto const contains = [](core::RectPx outer, core::RectPx inner) {
+            return core::RectPx::Intersect(outer, inner) == inner;
+        };
+        Print("capture-dump: obfuscate {}: {} of {} px in the output equal the clear "
+              "capture; past the selection's edge: {}; past the capture's edge: {}\n",
+              annotation.id, clear_pixels, shown_pixels,
+              contains(selection, bounds) ? "no" : "yes",
+              contains(capture_rect, bounds) ? "no" : "yes");
+    }
     return true;
 }
 
