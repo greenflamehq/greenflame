@@ -572,6 +572,7 @@ bool AnnotationController::Begin_text_edit_on_annotation(uint64_t annotation_id,
 
 void AnnotationController::Commit_text_edit_annotation(UndoStack &undo_stack,
                                                        TextAnnotation annotation) {
+    obfuscate_rebuild_failed_ = false;
     if (!editing_annotation_id_.has_value()) {
         return;
     }
@@ -595,11 +596,22 @@ void AnnotationController::Commit_text_edit_annotation(UndoStack &undo_stack,
     Annotation annotation_after = document_.annotations[*index];
     annotation_after.data = std::move(annotation);
 
+    // Obfuscates above the text pixelate it: rebuild them from the new text.
+    std::vector<Annotation> after_annotations = document_.annotations;
+    after_annotations[*index] = annotation_after;
     AnnotationSelection const selection = {editing_id};
+    std::optional<std::vector<std::unique_ptr<ICommand>>> reactive_commands =
+        Build_reactive_obfuscate_update_commands(
+            document_.annotations, std::move(after_annotations), selection, selection);
+    if (!reactive_commands.has_value()) {
+        // The text stays as it was and the overlay closes.
+        obfuscate_rebuild_failed_ = true;
+        return;
+    }
     auto cmd = std::make_unique<UpdateAnnotationCommand>(
         this, *index, std::move(annotation_before), std::move(annotation_after),
         selection, selection, "Edit text annotation");
-    Push_annotation_command(undo_stack, std::move(cmd), {});
+    Push_annotation_command(undo_stack, std::move(cmd), std::move(*reactive_commands));
 }
 
 int32_t AnnotationController::Text_point_size() const noexcept {
@@ -985,8 +997,14 @@ AnnotationController::Build_obfuscate_annotation(RectPx bounds) const {
         .bounds = bounds.Normalized(),
         .block_size = Current_obfuscate_block_size(),
     };
-    return Rebuild_obfuscate_annotation(
+    std::optional<Annotation> built = Rebuild_obfuscate_annotation(
         document_.annotations, document_.annotations.size(), std::move(annotation));
+    if (!built.has_value()) {
+        // The new obfuscate's raster cannot be built: nothing is committed, and the
+        // overlay closes rather than leave what the user meant to hide in the clear.
+        obfuscate_rebuild_failed_ = true;
+    }
+    return built;
 }
 
 void AnnotationController::Commit_new_annotation(UndoStack &undo_stack,

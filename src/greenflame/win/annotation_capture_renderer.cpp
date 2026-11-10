@@ -256,8 +256,10 @@ bool AnnotationCaptureRenderer::Render(GdiCaptureResult &capture,
         if (!annotation_resources.Initialize(d2d_factory, scratch_rt.Get())) {
             return false;
         }
-        D2DAnnotationDrawContext const annotation_context =
+        bool obfuscate_draw_failed = false;
+        D2DAnnotationDrawContext annotation_context =
             annotation_resources.Build_context(d2d_factory);
+        annotation_context.obfuscate_draw_failed = &obfuscate_draw_failed;
 
         std::vector<uint8_t> layer_pixels(buffer_size);
         WICRect const copy_rect = {0, 0, capture.width, capture.height};
@@ -305,7 +307,8 @@ bool AnnotationCaptureRenderer::Render(GdiCaptureResult &capture,
             Draw_d2d_annotation(scratch_rt.Get(), annotation_context, annotation);
             scratch_rt->SetTransform(identity_transform);
             hr = scratch_rt->EndDraw();
-            if (FAILED(hr)) {
+            if (FAILED(hr) || obfuscate_draw_failed) {
+                // An obfuscate missing from the output would leave its pixels clear.
                 return false;
             }
 

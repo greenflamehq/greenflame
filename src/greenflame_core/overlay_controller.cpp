@@ -327,6 +327,10 @@ void OverlayController::Set_obfuscate_source_provider(
     annotation_controller_.Set_obfuscate_source_provider(provider);
 }
 
+bool OverlayController::Obfuscate_rebuild_failed() const noexcept {
+    return annotation_controller_.Obfuscate_rebuild_failed();
+}
+
 bool OverlayController::Recompute_obfuscates() {
     return annotation_controller_.Recompute_obfuscates();
 }
@@ -794,6 +798,9 @@ OverlayAction OverlayController::On_primary_press(
                 bool const has_text = view.annotation != nullptr &&
                                       Text_annotation_has_text(*view.annotation);
                 Commit_active_text_edit();
+                if (annotation_controller_.Obfuscate_rebuild_failed()) {
+                    return OverlayAction::FailClose;
+                }
                 return has_text ? OverlayAction::InvalidateFrozenCache
                                 : OverlayAction::Repaint;
             }

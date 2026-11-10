@@ -2748,3 +2748,50 @@ TEST(overlay_controller, FailedObfuscateRebuildClosesTheOverlay) {
     source_provider.fail = false;
     EXPECT_TRUE(c.Recompute_obfuscates());
 }
+
+TEST(overlay_controller, NewObfuscateWhoseRasterCannotBeBuiltClosesTheOverlay) {
+    auto c = Make_controller();
+    FakeObfuscateSourceProvider source_provider;
+    c.Set_obfuscate_source_provider(&source_provider);
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    ASSERT_EQ(Press(c, {210, 210}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {250, 250}), OverlayAction::Repaint);
+    source_provider.fail = true;
+    EXPECT_EQ(Release(c, {250, 250}), OverlayAction::FailClose);
+    EXPECT_TRUE(c.Annotations().empty());
+}
+
+TEST(overlay_controller, DeleteWhoseObfuscateRebuildFailsClosesTheOverlay) {
+    auto c = Make_controller();
+    FakeObfuscateSourceProvider source_provider;
+    c.Set_obfuscate_source_provider(&source_provider);
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    // A line under an obfuscate: deleting the line rebuilds the obfuscate.
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Line),
+              OverlayAction::Repaint);
+    ASSERT_EQ(Press(c, {140, 140}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {220, 180}), OverlayAction::Repaint);
+    ASSERT_EQ(Release(c, {220, 180}), OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    ASSERT_EQ(Press(c, {130, 130}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {180, 160}), OverlayAction::Repaint);
+    ASSERT_EQ(Release(c, {180, 160}), OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    ASSERT_EQ(c.Annotations().size(), 2u);
+    std::vector<Annotation> const before(c.Annotations().begin(),
+                                         c.Annotations().end());
+
+    // Select the line alone (outside the obfuscate's bounds), then delete it.
+    ASSERT_EQ(Press(c, {210, 175}), OverlayAction::Repaint);
+    (void)Release(c, {210, 175});
+    ASSERT_EQ(c.Selected_annotation_count(), 1u);
+    source_provider.fail = true;
+    EXPECT_EQ(c.On_delete_selected_annotation(), OverlayAction::FailClose);
+    EXPECT_TRUE(std::ranges::equal(c.Annotations(), before));
+}

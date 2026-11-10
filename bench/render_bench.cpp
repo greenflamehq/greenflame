@@ -247,9 +247,11 @@ struct Args final {
     std::string capture_dump = {};  // --capture-dump FILE.bmp
     bool capture_whole = false;     // --capture-whole
     bool capture_before = false;    // --capture-before
-    bool reverse = false;           // --reverse: freehand runs right to left
-    bool split_monitors = false;    // --split-monitors: one target per monitor
-    bool mask_monitors = false;     // --mask-monitors: diff only monitor pixels
+    std::string off_edge = {};      // --off-edge left|right|top|bottom
+    bool expect_draw_failure = false; // --expect-draw-failure
+    bool reverse = false;             // --reverse: freehand runs right to left
+    bool split_monitors = false;      // --split-monitors: one target per monitor
+    bool mask_monitors = false;       // --mask-monitors: diff only monitor pixels
 };
 
 void Print_usage() {
@@ -324,6 +326,11 @@ void Print_usage() {
         "selection\n"
         "  --capture-before             with --capture-dump: write it before the drag "
         "instead of after the release\n"
+        "  --off-edge left|right|top|bottom|selection-right   move: drag the "
+        "annotation until its centre sits on that edge of the desktop (or of the "
+        "selection), half of it off the capture\n"
+        "  --expect-draw-failure        paint an obfuscate whose raster is too wide to "
+        "upload; succeed only if the paint reports the failure\n"
         "  --resize                     move: drag the right edge instead of the body; "
         "select: resize a committed selection, inset "
         "by an eighth of the desktop, by a handle\n"
@@ -549,6 +556,15 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.capture_whole = true;
         } else if (key == "--capture-before") {
             args.capture_before = true;
+        } else if (key == "--expect-draw-failure") {
+            args.expect_draw_failure = true;
+        } else if (key == "--off-edge") {
+            std::optional<std::string_view> const v = next();
+            if (!v || (*v != "left" && *v != "right" && *v != "top" && *v != "bottom" &&
+                       *v != "selection-right")) {
+                return std::nullopt;
+            }
+            args.off_edge = std::string(*v);
         } else if (key == "--capture-dump") {
             std::optional<std::string_view> const v = next();
             if (!v) return std::nullopt;
@@ -1402,6 +1418,7 @@ struct EditScene final {
     std::vector<size_t> preview_indices = {};
     std::unique_ptr<BenchObfuscateSource> source = nullptr;
     int32_t travel_px = 0;
+    int32_t travel_y_px = 0;                            // --off-edge top|bottom
     std::vector<core::MonitorWithBounds> monitors = {}; // commit: the layout's monitors
     core::PointPx origin = {};                          // commit: desktop origin
 };
@@ -1469,6 +1486,22 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
             moved.push_back(*Make_edit_annotation("ellipse", below, next_id++));
         }
         scene.travel_px = sel.Width() - 2 * kEditMarginPx - kEditBoxWidthPx;
+        // --off-edge: the drag ends with the box's centre on the desktop's edge.
+        core::PointPx const centre = {(box.left + box.right) / 2,
+                                      (box.top + box.bottom) / 2};
+        if (args.off_edge == "left") {
+            scene.travel_px = -centre.x;
+        } else if (args.off_edge == "right") {
+            scene.travel_px = width - centre.x;
+        } else if (args.off_edge == "top") {
+            scene.travel_px = 0;
+            scene.travel_y_px = -centre.y;
+        } else if (args.off_edge == "bottom") {
+            scene.travel_px = 0;
+            scene.travel_y_px = height - centre.y;
+        } else if (args.off_edge == "selection-right") {
+            scene.travel_px = sel.right - centre.x;
+        }
     }
 
     auto const append = [&](std::vector<core::Annotation> &from, bool is_moved) {
@@ -1550,9 +1583,9 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
 // --resize: the moved annotation's right edge follows the drag instead of the whole
 // annotation. Kinds without a box move instead.
 core::Annotation Edited_annotation(core::Annotation const &start, int32_t dx,
-                                   bool resize) {
+                                   int32_t dy, bool resize) {
     if (!resize) {
-        return core::Translate_annotation(start, {dx, 0});
+        return core::Translate_annotation(start, {dx, dy});
     }
     core::Annotation edited = start;
     std::visit(core::Overloaded{
@@ -1574,10 +1607,12 @@ void Fill_move_frame(EditScene &scene, int frame, int frames, Args const &args,
     int const last = std::max(1, frames - 1);
     int32_t const dx =
         static_cast<int32_t>(static_cast<int64_t>(scene.travel_px) * i / last);
+    int32_t const dy =
+        static_cast<int32_t>(static_cast<int64_t>(scene.travel_y_px) * i / last);
     scene.previews.clear();
     for (size_t m = 0; m < scene.moved.size(); ++m) {
         core::Annotation const edited =
-            Edited_annotation(scene.start[m], dx, args.resize);
+            Edited_annotation(scene.start[m], dx, dy, args.resize);
         scene.previews.push_back(
             core::AnnotationEditPreview{.index = scene.moved[m],
                                         .annotation_before = scene.start[m],
@@ -2477,6 +2512,58 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     return frame_summary.p95_ms;
 }
 
+// --expect-draw-failure: an obfuscate whose raster is wider than the device can
+// upload must make the paint report D2DFrameStatus::DrawFailed (the overlay then
+// fails closed) instead of showing what it covers. Save and Copy's software renderer
+// must fail on it too, or draw it.
+int Run_draw_failure_check(D2DOverlayResources &res, int width, int height) {
+    // One pixel wider than the device context can hold in a bitmap.
+    int32_t const too_wide_px =
+        static_cast<int32_t>(res.hwnd_rt->GetMaximumBitmapSize()) + 1;
+    Print("draw-failure: an obfuscate raster {} px wide\n", too_wide_px);
+    core::ObfuscateAnnotation obfuscate{
+        .bounds = core::RectPx::From_ltrb(0, 0, too_wide_px, 1),
+        .block_size = kEditObfuscateBlockPx,
+        .bitmap_width_px = too_wide_px,
+        .bitmap_height_px = 1,
+        .bitmap_row_bytes = too_wide_px * kBytesPerPixel,
+        .premultiplied_bgra = std::vector<uint8_t>(
+            static_cast<size_t>(too_wide_px) * kBytesPerPixel, 255),
+    };
+    obfuscate.raster_hash = core::Hash_raster_pixels(obfuscate.premultiplied_bgra);
+    std::vector<core::Annotation> const annotations = {
+        core::Annotation{.id = 1, .data = obfuscate}};
+    D2DPaintInput input{};
+    input.annotations = annotations;
+    input.final_selection = core::RectPx::From_ltrb(0, 0, width, height);
+    Rebuild_annotations_bitmap(res, annotations);
+    Rebuild_frozen_bitmap(res, input.final_selection, width, height);
+    D2DFrameStatus const status =
+        Paint_d2d_frame(res, input, width, height, nullptr, kFrameWaitTimeoutMs);
+    bool const reported = status == D2DFrameStatus::DrawFailed;
+    Print("draw-failure: paint {}\n",
+          reported ? "reported DrawFailed" : "did not report the failure");
+
+    GdiCaptureResult capture{};
+    capture.width = too_wide_px;
+    capture.height = 1;
+    capture.bitmap = Make_noise_bitmap(too_wide_px, 1, kNoiseSeed);
+    bool const rendered =
+        capture.bitmap != nullptr &&
+        Render_annotations_into_capture(capture, annotations, obfuscate.bounds);
+    std::vector<uint8_t> pixels(static_cast<size_t>(too_wide_px) * kBytesPerPixel);
+    bool const read = rendered && Read_capture_pixels(capture, pixels);
+    // Drawn means every pixel took the raster's white.
+    bool const drawn =
+        read && std::ranges::all_of(pixels, [](uint8_t value) { return value == 255; });
+    capture.Free();
+    Print("draw-failure: software renderer {}\n",
+          !rendered ? "failed (Save and Copy fail)"
+                    : (drawn ? "drew it" : "succeeded WITHOUT drawing it"));
+    return reported && (!rendered || drawn) ? static_cast<int>(BenchExit::Ok)
+                                            : static_cast<int>(BenchExit::PaintFailed);
+}
+
 int Run_render_bench(Args const &args) {
     std::optional<Layout> const layout = Find_layout(args.layout);
     if (!layout) {
@@ -2513,8 +2600,8 @@ int Run_render_bench(Args const &args) {
               "need --scenario move (--recapture and --alt-source: or commit)\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
-    if (!args.capture_dump.empty() && args.lifted) {
-        Print("--capture-dump cuts the screenshot: it does not take --lifted\n");
+    if (!args.capture_dump.empty() && args.lifted && args.capture_whole) {
+        Print("--capture-whole cuts the screenshot: it does not take --lifted\n");
         return static_cast<int>(BenchExit::BadArgs);
     }
 
@@ -2557,6 +2644,9 @@ int Run_render_bench(Args const &args) {
         return static_cast<int>(BenchExit::DeviceFailed);
     }
     std::wstring const adapter_name = Adapter_name(res.d3d_device.Get());
+    if (args.expect_draw_failure) {
+        return Run_draw_failure_check(res, vd.Width(), vd.Height());
+    }
 
     std::ofstream csv;
     if (!args.csv_path.empty()) {

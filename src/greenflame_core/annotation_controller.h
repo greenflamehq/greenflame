@@ -161,9 +161,9 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] bool On_primary_press(PointPx cursor);
     [[nodiscard]] bool On_pointer_move(PointPx cursor, bool primary_down = false);
     [[nodiscard]] bool On_primary_release(UndoStack &undo_stack);
-    // True when the last edit release or delete could not rebuild an obfuscate it
-    // changes. The document is back as it was before the edit (a delete changes
-    // nothing) and nothing went on the undo stack; the overlay must close.
+    // True when the last edit release, new obfuscate, delete or text re-edit commit
+    // could not build an obfuscate it changes. The document is as it was before the
+    // change and nothing went on the undo stack; the overlay must close.
     [[nodiscard]] bool Obfuscate_rebuild_failed() const noexcept {
         return obfuscate_rebuild_failed_;
     }
@@ -273,7 +273,8 @@ class AnnotationController final : public IAnnotationToolHost,
     ITextLayoutEngine *text_layout_engine_ = nullptr;
     ISpellCheckService *spell_check_service_ = nullptr;
     IObfuscateSourceProvider *obfuscate_source_provider_ = nullptr;
-    bool obfuscate_rebuild_failed_ = false;
+    // mutable: Build_obfuscate_annotation (const, a tool-host query) sets it too.
+    mutable bool obfuscate_rebuild_failed_ = false;
     std::optional<TextEditController> text_edit_ctrl_ = std::nullopt;
     std::optional<uint64_t> editing_annotation_id_ = std::nullopt;
     TextFontChoice text_current_font_ = TextFontChoice::Sans;

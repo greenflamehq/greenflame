@@ -14,6 +14,8 @@ class AnnotationCaptureRenderer;
 // The capture cut to bounds, with lower_annotations composited over it in z-order:
 // what an obfuscate at bounds pixelates. capture_bounds is where the capture's
 // top-left pixel sits in overlay client pixels (zero for the desktop screenshot).
+// Bounds may reach past the capture: the bitmap is then bounds-sized with the part
+// outside the capture transparent (alpha 0), and only a real failure gives nullopt.
 [[nodiscard]] std::optional<core::BgraBitmap>
 Build_obfuscate_source(GdiCaptureResult const &capture, core::RectPx capture_bounds,
                        core::RectPx bounds,

@@ -122,6 +122,9 @@ enum class D2DFrameStatus : uint8_t {
     DeviceLost,
     // The frame-latency wait timed out; nothing was drawn or presented.
     WaitTimedOut,
+    // An obfuscate could not be drawn (its bitmap upload failed), here or in a cache
+    // rebuild since the last frame. The frame was not presented: fail closed.
+    DrawFailed,
 };
 
 // Draws one complete frame into every target of res. The work shared by all targets

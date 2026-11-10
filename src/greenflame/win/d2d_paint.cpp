@@ -213,6 +213,7 @@ Build_annotation_draw_context(D2DOverlayResources &res) noexcept {
         .text_bitmaps = &res.text_bitmaps,
         .bubble_bitmaps = &res.bubble_bitmaps,
         .obfuscate_uploads = &res.obfuscate_uploads,
+        .obfuscate_draw_failed = &res.obfuscate_draw_failed,
     };
 }
 
@@ -3782,6 +3783,11 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
 
     FramePlan plan{};
     Prepare_frame(res, input, vd_width, vd_height, plan);
+    // A cache drawn without one of its obfuscates must not reach the screen.
+    if (res.obfuscate_draw_failed) {
+        res.obfuscate_draw_failed = false;
+        return D2DFrameStatus::DrawFailed;
+    }
 
     // Frame-latency throttle: with FRAME_LATENCY_WAITABLE_OBJECT and max latency 1,
     // this blocks until DWM has consumed every target's prior frame, so the paint
@@ -3834,6 +3840,11 @@ D2DFrameStatus Paint_d2d_frame(D2DOverlayResources &res, D2DPaintInput const &in
         }
         if (hr == D2DERR_RECREATE_TARGET) {
             return D2DFrameStatus::DeviceLost;
+        }
+        if (res.obfuscate_draw_failed) {
+            // A draft obfuscate this target drew failed: do not present it.
+            res.obfuscate_draw_failed = false;
+            return D2DFrameStatus::DrawFailed;
         }
         if (target.swap_chain) {
             GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Present");

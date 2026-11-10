@@ -181,6 +181,9 @@ struct D2DOverlayResources final {
     D2DObfuscateBitmapMap obfuscate_bitmaps;
     // Obfuscate uploads since the bench last reset it.
     D2DUploadStats obfuscate_uploads = {};
+    // An obfuscate could not be drawn since the last frame: Paint_d2d_frame reports
+    // D2DFrameStatus::DrawFailed (and clears it) instead of showing the frame.
+    bool obfuscate_draw_failed = false;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> text_bitmaps;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> bubble_bitmaps;
 

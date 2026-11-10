@@ -3269,6 +3269,10 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
                 text_edit->On_text_input(L"\n");
                 repaint_text_draft();
             } else if (controller_.Commit_active_text_edit()) {
+                if (controller_.Obfuscate_rebuild_failed()) {
+                    Post_fail_close(L"an obfuscation could not be rebuilt.");
+                    return 0;
+                }
                 if (d2d_resources_) {
                     d2d_resources_->Invalidate_annotations();
                 }
@@ -3654,6 +3658,10 @@ LRESULT OverlayWindow::On_l_button_down() {
                                           Text_annotation_has_text(*view.annotation);
                     if (has_text) {
                         (void)controller_.Commit_active_text_edit();
+                        if (controller_.Obfuscate_rebuild_failed()) {
+                            Post_fail_close(L"an obfuscation could not be rebuilt.");
+                            return 0;
+                        }
                         if (d2d_resources_) {
                             d2d_resources_->Invalidate_annotations();
                         }
@@ -4728,9 +4736,20 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
                     draft_obfuscate_preview = core::Rebuild_obfuscate_from_source(
                         *paint_draft_annotation, controller_.Annotations(),
                         *obfuscate_source_provider_);
-                    if (draft_obfuscate_preview.has_value()) {
-                        paint_draft_annotation = &*draft_obfuscate_preview;
+#if defined(DEBUG) || defined(GREENFLAME_LOG)
+                    if (debug_force_patch_failure_) {
+                        debug_force_patch_failure_ = false;
+                        draft_obfuscate_preview.reset();
                     }
+#endif
+                    if (!draft_obfuscate_preview.has_value()) {
+                        // Fail closed, as for an edit's patches: the draft would
+                        // otherwise show what it covers in the clear.
+                        EndPaint(hwnd, &paint);
+                        Post_fail_close(L"an obfuscation preview could not be built.");
+                        return 0;
+                    }
+                    paint_draft_annotation = &*draft_obfuscate_preview;
                 }
             }
         }
@@ -4970,6 +4989,9 @@ LRESULT OverlayWindow::On_paint(HWND hwnd) {
             break;
         case D2DFrameStatus::DeviceLost:
             Post_fail_close(L"the graphics device was lost.");
+            break;
+        case D2DFrameStatus::DrawFailed:
+            Post_fail_close(L"an obfuscation could not be drawn.");
             break;
         case D2DFrameStatus::WaitTimedOut:
             // Nothing was drawn. Ask again; the GPU may still be busy. A streak means

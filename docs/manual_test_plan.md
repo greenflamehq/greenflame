@@ -1042,13 +1042,21 @@ unless a real end-to-end bug escapes into the Win32 shell:
      rectangle under the obfuscate and, still holding the button, press
      Ctrl+Shift+Alt+F10.
   4. Reopen; draw an obfuscate and start dragging it; press Ctrl+Shift+Alt+F10.
+  5. Reopen; with the Obfuscate tool, start drawing a new obfuscate and, still
+     holding the button, press Ctrl+Shift+Alt+F10.
+  6. Reopen with a whole-desktop selection; draw an obfuscate over text near the
+     desktop's edge and drag it half off the screen, on every edge; release; save.
+     Repeat over a Ctrl-click window selection, dragging it half out of the window.
 - Expected:
   - After Ctrl+K the obfuscate's pixelation changes where the cursor was, on screen
     and in the saved and copied output alike.
   - In step 2 both obfuscates follow the drag; neither keeps a stale pixelation.
-  - In steps 3 and 4 the overlay closes with a "Capture cancelled" balloon. Until it
-    closes no frame shows the clear pixels under an obfuscate or an obfuscate filled
-    with a flat colour; nothing is saved or copied.
+  - In steps 3, 4 and 5 the overlay closes with a "Capture cancelled" balloon. Until
+    it closes no frame shows the clear pixels under an obfuscate or an obfuscate
+    filled with a flat colour; nothing is saved or copied.
+  - In step 6 nothing closes: the obfuscate moves freely, keeps pixelating what is
+    under it inside the capture, shows no flat-colour band, and the saved image
+    matches the screen inside the capture.
 
 ### GF-MAN-ANN-005 - Overlap And Topmost Selection
 

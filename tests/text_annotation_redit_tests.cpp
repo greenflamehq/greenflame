@@ -1,6 +1,7 @@
 #include "fake_text_layout_engine.h"
 #include "greenflame_core/annotation_commands.h"
 #include "greenflame_core/annotation_controller.h"
+#include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/text_edit_controller.h"
 #include "greenflame_core/undo_stack.h"
 
@@ -395,3 +396,102 @@ TEST(AnnotationControllerRedit, ClearAnnotations_ClearsEditingAnnotationId) {
 }
 
 } // namespace
+
+namespace {
+
+// A source that depends on the lower annotations' visual bounds, so an obfuscate
+// above a text follows the text's size.
+struct BoundsSource final : public IObfuscateSourceProvider {
+    [[nodiscard]] std::optional<BgraBitmap>
+    Build_composited_source(RectPx bounds,
+                            std::span<const Annotation> lower_annotations) override {
+        if (fail) {
+            return std::nullopt;
+        }
+        uint32_t hash = 0;
+        for (Annotation const &annotation : lower_annotations) {
+            RectPx const visual = Annotation_visual_bounds(annotation);
+            hash = hash * 31u + static_cast<uint32_t>(visual.right);
+            hash = hash * 31u + static_cast<uint32_t>(visual.bottom);
+        }
+        BgraBitmap bitmap{.width_px = bounds.Width(),
+                          .height_px = bounds.Height(),
+                          .row_bytes = bounds.Width() * 4,
+                          .premultiplied_bgra = std::vector<uint8_t>(
+                              static_cast<size_t>(bounds.Width()) * 4u *
+                              static_cast<size_t>(bounds.Height()))};
+        for (size_t at = 0; at < bitmap.premultiplied_bgra.size(); at += 4u) {
+            bitmap.premultiplied_bgra[at] = static_cast<uint8_t>(hash);
+            bitmap.premultiplied_bgra[at + 1u] = static_cast<uint8_t>(hash >> 8u);
+            bitmap.premultiplied_bgra[at + 3u] = 255u;
+        }
+        return bitmap;
+    }
+
+    bool fail = false;
+};
+
+constexpr uint64_t kObfuscateId = 43;
+
+// The fixture's text with an obfuscate above it, built from the text as it is.
+void Add_obfuscate_above(TextReditFixture &f, BoundsSource &source) {
+    f.ctrl.Set_obfuscate_source_provider(&source);
+    std::optional<Annotation> const obfuscate = Rebuild_obfuscate_from_source(
+        Annotation{.id = kObfuscateId,
+                   .data =
+                       ObfuscateAnnotation{.bounds = RectPx::From_ltrb(0, 0, 200, 40),
+                                           .block_size = 4}},
+        f.ctrl.Annotations(), source);
+    ASSERT_TRUE(obfuscate.has_value());
+    f.ctrl.Insert_annotation_at(1, *obfuscate, std::nullopt);
+}
+
+} // namespace
+
+TEST(AnnotationControllerRedit, CommitTextEditAnnotation_RebuildsObfuscatesAbove) {
+    TextReditFixture f;
+    BoundsSource source;
+    Add_obfuscate_above(f, source);
+    Annotation const obfuscate_before = f.ctrl.Annotations()[1];
+
+    ASSERT_TRUE(
+        f.ctrl.Begin_text_edit_on_annotation(TextReditFixture::kAnnotationId, {50, 0}));
+    TextEditController *const edit = f.ctrl.Active_text_edit();
+    ASSERT_NE(edit, nullptr);
+    edit->On_text_input(L" world");
+    f.ctrl.Commit_text_edit_annotation(f.undo_stack, edit->Commit());
+    EXPECT_FALSE(f.ctrl.Obfuscate_rebuild_failed());
+
+    // The obfuscate now pixelates the longer text, as a fresh commit would build it.
+    std::optional<Annotation> const expected = Rebuild_obfuscate_from_source(
+        obfuscate_before, f.ctrl.Annotations().first(1), source);
+    ASSERT_TRUE(expected.has_value());
+    EXPECT_EQ(f.ctrl.Annotations()[1], *expected);
+    EXPECT_NE(f.ctrl.Annotations()[1], obfuscate_before);
+
+    // One undo puts back the text and the obfuscate built from it.
+    f.undo_stack.Undo();
+    EXPECT_EQ(Flatten_text(f.Current_text_annotation()->runs), L"hello");
+    EXPECT_EQ(f.ctrl.Annotations()[1], obfuscate_before);
+}
+
+TEST(AnnotationControllerRedit,
+     CommitTextEditAnnotation_FailedObfuscateRebuildFailsClosed) {
+    TextReditFixture f;
+    BoundsSource source;
+    Add_obfuscate_above(f, source);
+    std::vector<Annotation> const before(f.ctrl.Annotations().begin(),
+                                         f.ctrl.Annotations().end());
+
+    ASSERT_TRUE(
+        f.ctrl.Begin_text_edit_on_annotation(TextReditFixture::kAnnotationId, {50, 0}));
+    TextEditController *const edit = f.ctrl.Active_text_edit();
+    ASSERT_NE(edit, nullptr);
+    edit->On_text_input(L" world");
+    source.fail = true;
+    f.ctrl.Commit_text_edit_annotation(f.undo_stack, edit->Commit());
+
+    EXPECT_TRUE(f.ctrl.Obfuscate_rebuild_failed());
+    EXPECT_TRUE(std::ranges::equal(f.ctrl.Annotations(), before));
+    EXPECT_FALSE(f.undo_stack.Can_undo());
+}

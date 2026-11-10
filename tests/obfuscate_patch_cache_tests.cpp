@@ -2,6 +2,7 @@
 #include "greenflame_core/annotation_hit_test.h"
 #include "greenflame_core/obfuscate_patch_cache.h"
 #include "greenflame_core/obfuscate_raster.h"
+#include "greenflame_core/undo_stack.h"
 
 using namespace greenflame::core;
 
@@ -263,4 +264,116 @@ TEST(obfuscate_patch_cache, SkipsIndicesItCannotPatch) {
     ASSERT_TRUE(cache.Update(scene.doc, indices, scene.source, 1));
     ASSERT_EQ(cache.Patches().size(), 1u);
     EXPECT_EQ(cache.Patches()[0].index, 2u);
+}
+
+namespace {
+
+// A capture of kCaptureWidth x kCaptureHeight at the origin, with the contract of the
+// overlay's Build_obfuscate_source: a bounds-sized bitmap whose part outside the
+// capture is transparent.
+constexpr int32_t kCaptureWidth = 64;
+constexpr int32_t kCaptureHeight = 48;
+
+struct CaptureSource final : public IObfuscateSourceProvider {
+    [[nodiscard]] std::optional<BgraBitmap>
+    Build_composited_source(RectPx bounds, std::span<const Annotation>) override {
+        int32_t const width = bounds.Width();
+        int32_t const height = bounds.Height();
+        BgraBitmap bitmap{.width_px = width,
+                          .height_px = height,
+                          .row_bytes = width * 4,
+                          .premultiplied_bgra =
+                              std::vector<uint8_t>(static_cast<size_t>(width) * 4u *
+                                                   static_cast<size_t>(height))};
+        for (int32_t y = 0; y < height; ++y) {
+            for (int32_t x = 0; x < width; ++x) {
+                PointPx const at = {bounds.left + x, bounds.top + y};
+                if (at.x < 0 || at.y < 0 || at.x >= kCaptureWidth ||
+                    at.y >= kCaptureHeight) {
+                    continue;
+                }
+                size_t const offset = static_cast<size_t>(y * bitmap.row_bytes + x * 4);
+                bitmap.premultiplied_bgra[offset] = static_cast<uint8_t>(at.x * 3);
+                bitmap.premultiplied_bgra[offset + 1u] = static_cast<uint8_t>(at.y * 5);
+                bitmap.premultiplied_bgra[offset + 2u] =
+                    static_cast<uint8_t>(at.x * at.y);
+                bitmap.premultiplied_bgra[offset + 3u] = 255u;
+            }
+        }
+        return bitmap;
+    }
+};
+
+} // namespace
+
+// An obfuscate moved past the capture's edge (the desktop's or a window capture's)
+// is placed like any other annotation: its preview and its commit never fail, and
+// inside the capture it pixelates what is there; the part outside draws nothing.
+TEST(obfuscate_patch_cache, ObfuscateMovedPastTheCaptureEdgeNeverFails) {
+    CaptureSource source;
+    AnnotationController controller;
+    controller.Set_obfuscate_source_provider(&source);
+    std::optional<Annotation> const committed = Rebuild_obfuscate_from_source(
+        Annotation{.id = 1,
+                   .data =
+                       ObfuscateAnnotation{.bounds = RectPx::From_ltrb(8, 8, 40, 32),
+                                           .block_size = kBlockSize}},
+        {}, source);
+    ASSERT_TRUE(committed.has_value());
+    controller.Insert_annotation_at(0, *committed, std::nullopt);
+
+    // Drag it so it hangs off the capture's left and top edges.
+    ASSERT_TRUE(controller.Begin_annotation_edit(
+        AnnotationEditTarget{1, AnnotationEditTargetKind::Body}, {20, 20}));
+    EXPECT_TRUE(controller.On_pointer_move({4, 8}));
+    RectPx const moved =
+        std::get<ObfuscateAnnotation>(controller.Annotations()[0].data).bounds;
+    ASSERT_LT(moved.left, 0);
+    ASSERT_LT(moved.top, 0);
+
+    ObfuscatePatchCache cache;
+    ASSERT_TRUE(cache.Update(controller.Annotations(),
+                             controller.Active_obfuscate_preview_indices(), source, 1));
+    ASSERT_EQ(cache.Patches().size(), 1u);
+
+    UndoStack undo_stack;
+    EXPECT_TRUE(controller.On_primary_release(undo_stack));
+    EXPECT_FALSE(controller.Obfuscate_rebuild_failed());
+    ObfuscateAnnotation const &result =
+        std::get<ObfuscateAnnotation>(controller.Annotations()[0].data);
+    EXPECT_EQ(result.bounds, moved);
+    EXPECT_EQ(result.premultiplied_bgra,
+              std::get<ObfuscateAnnotation>(cache.Patches()[0].annotation.data)
+                  .premultiplied_bgra);
+
+    // Inside the capture: a build over the clipped area alone (the clip starts on
+    // the block grid here). Outside: transparent.
+    RectPx const inside = *RectPx::Intersect(
+        moved, RectPx::From_ltrb(0, 0, kCaptureWidth, kCaptureHeight));
+    ASSERT_EQ((inside.left - moved.left) % kBlockSize, 0);
+    ASSERT_EQ((inside.top - moved.top) % kBlockSize, 0);
+    std::optional<Annotation> const clipped = Rebuild_obfuscate_from_source(
+        Annotation{.id = 2,
+                   .data =
+                       ObfuscateAnnotation{.bounds = inside, .block_size = kBlockSize}},
+        {}, source);
+    ASSERT_TRUE(clipped.has_value());
+    ObfuscateAnnotation const &expected = std::get<ObfuscateAnnotation>(clipped->data);
+    for (int32_t y = 0; y < moved.Height(); ++y) {
+        for (int32_t x = 0; x < moved.Width(); ++x) {
+            size_t const at = static_cast<size_t>(y * result.bitmap_row_bytes + x * 4);
+            PointPx const point = {moved.left + x, moved.top + y};
+            if (!inside.Contains(point)) {
+                ASSERT_EQ(result.premultiplied_bgra[at + 3u], 0);
+                continue;
+            }
+            size_t const expected_at =
+                static_cast<size_t>((point.y - inside.top) * expected.bitmap_row_bytes +
+                                    (point.x - inside.left) * 4);
+            for (size_t c = 0; c < 4u; ++c) {
+                ASSERT_EQ(result.premultiplied_bgra[at + c],
+                          expected.premultiplied_bgra[expected_at + c]);
+            }
+        }
+    }
 }

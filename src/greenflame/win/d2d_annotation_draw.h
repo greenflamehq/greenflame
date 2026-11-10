@@ -31,6 +31,9 @@ struct D2DAnnotationDrawContext final {
     D2DAnnotationBitmapMap *text_bitmaps = nullptr;
     D2DAnnotationBitmapMap *bubble_bitmaps = nullptr;
     D2DUploadStats *obfuscate_uploads = nullptr; // optional
+    // Set when an obfuscate could not be drawn (its upload failed): the target then
+    // shows what is under it in the clear, so the caller must fail closed.
+    bool *obfuscate_draw_failed = nullptr;
 };
 
 struct D2DAnnotationRenderResources final {

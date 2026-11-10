@@ -215,6 +215,9 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
             static_cast<UINT32>(annotation.bitmap_row_bytes), props,
             bitmap.GetAddressOf());
         if (FAILED(hr) || !bitmap) {
+            if (context.obfuscate_draw_failed != nullptr) {
+                *context.obfuscate_draw_failed = true;
+            }
             return;
         }
         if (context.obfuscate_uploads != nullptr) {

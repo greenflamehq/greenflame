@@ -186,7 +186,10 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
     Box_blur_vertical(scratch.horizontal, radius, output);
 }
 
-[[nodiscard]] BgraBitmap Pixelate_bitmap(BgraBitmap const &source, int32_t block_size) {
+// Pixelates source in blocks of block_size whose grid starts phase_x and phase_y
+// pixels before the bitmap's top-left (0 for a grid anchored at it).
+[[nodiscard]] BgraBitmap Pixelate_bitmap(BgraBitmap const &source, int32_t block_size,
+                                         int32_t phase_x, int32_t phase_y) {
     BgraBitmap result{};
     result.width_px = source.width_px;
     result.height_px = source.height_px;
@@ -205,14 +208,16 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
 
     result.premultiplied_bgra.resize(source.premultiplied_bgra.size());
 
-    for (int32_t cell_top = 0; cell_top < source.height_px;
-         cell_top += clamped_block_size) {
+    for (int32_t cell_y = -phase_y; cell_y < source.height_px;
+         cell_y += clamped_block_size) {
+        int32_t const cell_top = std::max(cell_y, 0);
         int32_t const cell_bottom =
-            std::min(source.height_px, cell_top + clamped_block_size);
-        for (int32_t cell_left = 0; cell_left < source.width_px;
-             cell_left += clamped_block_size) {
+            std::min(source.height_px, cell_y + clamped_block_size);
+        for (int32_t cell_x = -phase_x; cell_x < source.width_px;
+             cell_x += clamped_block_size) {
+            int32_t const cell_left = std::max(cell_x, 0);
             int32_t const cell_right =
-                std::min(source.width_px, cell_left + clamped_block_size);
+                std::min(source.width_px, cell_x + clamped_block_size);
 
             uint64_t sum_b = 0;
             uint64_t sum_g = 0;
@@ -255,6 +260,47 @@ void Blur_bitmap(BgraBitmap const &source, int32_t radius, BgraBitmap &output) {
     return result;
 }
 
+// The pixels of source with any source under them (alpha not 0): a rectangle, since
+// only the part of an obfuscate outside the capture has none. nullopt when none has.
+[[nodiscard]] std::optional<RectPx> Present_pixel_bounds(BgraBitmap const &source) {
+    int32_t left = source.width_px;
+    int32_t top = source.height_px;
+    int32_t right = 0;
+    int32_t bottom = 0;
+    for (int32_t y = 0; y < source.height_px; ++y) {
+        for (int32_t x = 0; x < source.width_px; ++x) {
+            if (source.premultiplied_bgra[Pixel_offset(x, y, source.row_bytes) +
+                                          kAlphaChannelOffset] == 0) {
+                continue;
+            }
+            left = std::min(left, x);
+            top = std::min(top, y);
+            right = std::max(right, x + 1);
+            bottom = std::max(bottom, y + 1);
+        }
+    }
+    if (right <= left || bottom <= top) {
+        return std::nullopt;
+    }
+    return RectPx::From_ltrb(left, top, right, bottom);
+}
+
+// Copies rect of from into to, or of to into from's place: rows of rect.Width() pixels.
+void Copy_rect(BgraBitmap const &from, RectPx from_rect, BgraBitmap &to,
+               RectPx to_rect) {
+    size_t const row_size = static_cast<size_t>(Bytes_per_row(from_rect.Width()));
+    for (int32_t row = 0; row < from_rect.Height(); ++row) {
+        size_t const from_at =
+            Pixel_offset(from_rect.left, from_rect.top + row, from.row_bytes);
+        size_t const to_at =
+            Pixel_offset(to_rect.left, to_rect.top + row, to.row_bytes);
+        std::copy_n(from.premultiplied_bgra.begin() +
+                        static_cast<std::ptrdiff_t>(from_at),
+                    row_size,
+                    to.premultiplied_bgra.begin() + static_cast<std::ptrdiff_t>(to_at));
+    }
+}
+
 } // namespace
 
 bool BgraBitmap::Is_valid() const noexcept {
@@ -274,7 +320,42 @@ BgraBitmap Rasterize_obfuscate(BgraBitmap const &source, int32_t block_size) {
     if (!source.Is_valid()) {
         return {};
     }
-    return Pixelate_bitmap(source, block_size);
+    std::optional<RectPx> const present = Present_pixel_bounds(source);
+    RectPx const whole = RectPx::From_ltrb(0, 0, source.width_px, source.height_px);
+    if (present == whole) {
+        return Pixelate_bitmap(source, block_size, 0, 0);
+    }
+
+    // Part of the obfuscate has no source under it: that part stays transparent (it
+    // draws nothing), and the rest is pixelated from what exists, on the grid
+    // anchored at the obfuscate's top-left. No fill colour is ever averaged in.
+    BgraBitmap result{
+        .width_px = source.width_px,
+        .height_px = source.height_px,
+        .row_bytes = Bytes_per_row(source.width_px),
+        .premultiplied_bgra =
+            std::vector<uint8_t>(static_cast<size_t>(Bytes_per_row(source.width_px)) *
+                                     static_cast<size_t>(source.height_px),
+                                 0),
+    };
+    if (!present.has_value()) {
+        return result;
+    }
+    RectPx const part = RectPx::From_ltrb(0, 0, present->Width(), present->Height());
+    BgraBitmap inside{
+        .width_px = part.Width(),
+        .height_px = part.Height(),
+        .row_bytes = Bytes_per_row(part.Width()),
+        .premultiplied_bgra =
+            std::vector<uint8_t>(static_cast<size_t>(Bytes_per_row(part.Width())) *
+                                 static_cast<size_t>(part.Height())),
+    };
+    Copy_rect(source, *present, inside, part);
+    int32_t const block = Clamp_obfuscate_block_size(block_size);
+    BgraBitmap const raster = Pixelate_bitmap(inside, block_size, present->left % block,
+                                              present->top % block);
+    Copy_rect(raster, part, result, *present);
+    return result;
 }
 
 uint64_t Hash_raster_pixels(std::span<const uint8_t> pixels) noexcept {
@@ -313,6 +394,8 @@ Obfuscate_raster_identity(ObfuscateAnnotation const &annotation) noexcept {
     return ObfuscateRasterIdentity{
         .data = annotation.premultiplied_bgra.data(),
         .size = annotation.premultiplied_bgra.size(),
+        .width_px = annotation.bitmap_width_px,
+        .height_px = annotation.bitmap_height_px,
         .hash = annotation.raster_hash,
     };
 }

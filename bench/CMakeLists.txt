@@ -469,6 +469,38 @@ if(BUILD_TESTING)
         )
     endforeach()
 
+    # An obfuscate dragged past the desktop's edges (and with --lifted past the window
+    # capture's): every frame's patches match an uncached build, and nothing fails.
+    foreach(greenflame_edge_side left right top bottom)
+        add_test(
+            NAME greenflame_render_bench_off_edge_${greenflame_edge_side}
+            COMMAND greenflame_render_bench --adapter warp --layout single-1080
+                --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
+                --frames 3 --verify-edit --off-edge ${greenflame_edge_side}
+        )
+        add_test(
+            NAME greenflame_render_bench_off_edge_lifted_${greenflame_edge_side}
+            COMMAND greenflame_render_bench --adapter warp --layout single-1080
+                --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
+                --frames 3 --verify-edit --lifted --off-edge ${greenflame_edge_side}
+        )
+    endforeach()
+
+    # A window capture's edge is the selection's: half the obfuscate past it.
+    add_test(
+        NAME greenflame_render_bench_off_edge_lifted_selection
+        COMMAND greenflame_render_bench --adapter warp --layout single-1080
+            --scenario move --annotated --obfuscations 1 --edit-kind obfuscate
+            --frames 3 --verify-edit --lifted --off-edge selection-right
+    )
+
+    # An obfuscate too wide to upload makes the paint fail closed.
+    add_test(
+        NAME greenflame_render_bench_draw_failure
+        COMMAND greenflame_render_bench --adapter warp --layout single-1080
+            --expect-draw-failure
+    )
+
     # An obfuscate draft built every frame from what is under it, as the overlay does.
     add_test(
         NAME greenflame_render_bench_draft_source_smoke

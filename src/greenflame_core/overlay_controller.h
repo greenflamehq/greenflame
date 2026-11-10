@@ -188,7 +188,12 @@ class OverlayController final {
     [[nodiscard]] bool Set_text_current_font(TextFontChoice choice) noexcept;
     [[nodiscard]] TextFontChoice Bubble_current_font() const noexcept;
     [[nodiscard]] bool Set_bubble_current_font(TextFontChoice choice) noexcept;
+    // Commits the text being typed or re-edited. After it, Obfuscate_rebuild_failed()
+    // says whether an obfuscate above a re-edited text could not be rebuilt.
     bool Commit_active_text_edit();
+    // True when the last change (edit release, new obfuscate, delete, text re-edit)
+    // could not build an obfuscate: the overlay must close (OverlayAction::FailClose).
+    [[nodiscard]] bool Obfuscate_rebuild_failed() const noexcept;
     void Cancel_text_draft();
     [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
     [[nodiscard]] bool Has_active_annotation_edit() const noexcept;

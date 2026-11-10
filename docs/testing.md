@@ -134,8 +134,8 @@ Debug builds, and builds with `GREENFLAME_ENABLE_DEBUG_LOG`, have hooks for the
 overlay's close paths (`GF-MAN-PMW-014`, `GF-MAN-PMW-015`, `GF-MAN-ANN-004C`).
 Release builds do not.
 
-- Ctrl+Shift+Alt+F10: the next obfuscate preview build during an annotation edit
-  fails, so the overlay closes.
+- Ctrl+Shift+Alt+F10: the next obfuscate preview build, during an annotation edit or
+  for an obfuscate draft, fails, so the overlay closes.
 - Ctrl+Shift+Alt+F11: the next paint reports a lost graphics device.
 - Ctrl+Shift+Alt+F12: the next paints report frame-wait timeouts, enough to close.
 - `GREENFLAME_FORCE_SPAN_FALLBACK=1` in Greenflame's environment: per-monitor setup
@@ -296,6 +296,14 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     software renderer), and prints how many annotations straddle a monitor edge.
     `--capture-whole` uses the whole desktop as the selection; `--capture-before`
     writes it before the drag instead, before any edit rebuilds an obfuscate.
+- `--off-edge left|right|top|bottom|selection-right` (move): the drag ends with the
+  moved annotation's centre on that edge of the desktop (or of the selection), half
+  of it past the capture. `ctest` runs it with `--verify-edit` for a moved
+  obfuscate at each desktop edge, and with `--lifted` at each edge and the
+  selection's (the window capture's) edge.
+- `--expect-draw-failure`: paints an obfuscate one pixel wider than the device's
+  largest bitmap and succeeds only if the paint reports `DrawFailed` and the
+  software renderer (Save and Copy) fails or draws it. `ctest` runs it on WARP.
 - `--draft-source` (obfuscate): the draft's raster is built every frame from the
   screenshot and the `--annotated` strokes under it, through the overlay's builder.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced
