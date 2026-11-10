@@ -12,7 +12,6 @@ using D2DAnnotationBitmapMap =
 // the annotation's raster has the same identity (address, size and content hash).
 struct D2DObfuscateBitmap final {
     core::ObfuscateRasterIdentity raster = {};
-    float dpi = 0.f;
     Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
 };
 using D2DObfuscateBitmapMap = std::unordered_map<uint64_t, D2DObfuscateBitmap>;

@@ -201,8 +201,7 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
         core::Obfuscate_raster_identity(annotation);
     auto it = context.obfuscate_bitmaps->find(annotation_id);
     if (it == context.obfuscate_bitmaps->end() ||
-        !core::Is_same_obfuscate_raster(it->second.raster, raster) ||
-        it->second.dpi != dpi) {
+        !core::Is_same_obfuscate_raster(it->second.raster, raster)) {
         D2D1_BITMAP_PROPERTIES props{};
         props.pixelFormat = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
                                               D2D1_ALPHA_MODE_PREMULTIPLIED);
@@ -224,7 +223,7 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
         }
         it = context.obfuscate_bitmaps
                  ->insert_or_assign(annotation_id,
-                                    D2DObfuscateBitmap{raster, dpi, std::move(bitmap)})
+                                    D2DObfuscateBitmap{raster, std::move(bitmap)})
                  .first;
     }
 
