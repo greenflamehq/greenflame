@@ -161,7 +161,8 @@ rasterizer.
 
 Current preview flow in `OverlayWindow`:
 
-- `Build_preview_obfuscate_annotation(...)` normalizes the draft bounds
+- `Rebuild_obfuscate_from_source(...)` (core, shared with the commit path)
+  normalizes the draft bounds
 - it requests a composited source image for those bounds
 - it calls `Rasterize_obfuscate(...)`
 - it attaches the resulting bitmap to a temporary preview annotation for paint
@@ -176,10 +177,32 @@ Live preview also supports stacked obfuscates.
 Current behavior:
 
 - while moving or resizing an obfuscate, or editing a lower annotation beneath
-  existing obfuscates, the overlay identifies affected higher obfuscates
+  existing obfuscates, `Obfuscate_preview_indices` picks the affected obfuscates:
+  the edited ones, the ones above an edited annotation whose old or new visual
+  bounds touch them, and, closed upward, any obfuscate above one of those that
+  touches it. Obfuscates below every edit keep their committed raster.
 - the preview path rebuilds those obfuscates in ascending z-order
 - each higher preview therefore sees the current lower preview state rather than
   stale committed pixels
+- `ObfuscatePatchCache` keeps a patch from frame to frame while its key holds:
+  bounds, block size, the capture generation, and the full value of every lower
+  annotation (patches applied) whose visual bounds touch it. The capture renderer
+  skips the others, so they cannot change the source. The commit path is never
+  cached.
+- a GPU upload of an obfuscate raster is reused only for the same raster: same
+  storage, size and content hash (`raster_hash`, set with the pixels)
+- if a preview patch cannot be built mid-edit, the overlay closes (fail closed): it
+  never draws a stale raster or a fill instead
+
+### Failures and capture changes
+
+- If an edit's release, or a delete, cannot rebuild an obfuscate it changes, the
+  document goes back to its state before the change, nothing goes on the undo
+  stack, and the overlay closes.
+- Ctrl+K rebuilds the capture with or without the cursor; every committed obfuscate
+  is then rebuilt from the new capture through the commit path, so the overlay and
+  Save match. If one cannot be rebuilt, the overlay closes. Undo history keeps the
+  rasters it recorded.
 
 This is the behavior reflected in the current manual plan and shared annotation docs.
 

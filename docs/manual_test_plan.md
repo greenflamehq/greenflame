@@ -1029,6 +1029,27 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - When two obfuscates overlap, the stacked preview updates in z-order without leaving stale intermediate content.
   - When two obfuscates overlap, each live preview still includes the current lower annotation state rather than regressing to raw-capture sampling.
 
+### GF-MAN-ANN-004C - Obfuscates Fail Closed And Follow Ctrl+K
+
+- Priority: `P1`
+- Run on: `ENV-A`; steps 3 and 4 on a debug or debug-log build
+- Steps:
+  1. Draw a rectangle, then an obfuscate over part of it with the cursor shown in
+     the capture (Ctrl+K) under the obfuscate. Press Ctrl+K, then save and copy.
+  2. Draw two overlapping obfuscates, the second over the first. Drag the rectangle
+     under the first one only.
+  3. Reopen; draw a rectangle and an obfuscate over it. Start dragging the
+     rectangle under the obfuscate and, still holding the button, press
+     Ctrl+Shift+Alt+F10.
+  4. Reopen; draw an obfuscate and start dragging it; press Ctrl+Shift+Alt+F10.
+- Expected:
+  - After Ctrl+K the obfuscate's pixelation changes where the cursor was, on screen
+    and in the saved and copied output alike.
+  - In step 2 both obfuscates follow the drag; neither keeps a stale pixelation.
+  - In steps 3 and 4 the overlay closes with a "Capture cancelled" balloon. Until it
+    closes no frame shows the clear pixels under an obfuscate or an obfuscate filled
+    with a flat colour; nothing is saved or copied.
+
 ### GF-MAN-ANN-005 - Overlap And Topmost Selection
 
 - Priority: `P1`
