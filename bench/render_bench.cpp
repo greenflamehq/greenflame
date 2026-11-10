@@ -238,6 +238,7 @@ struct Args final {
     bool click_first = false;       // --click-first
     bool click_moved = false;       // --click-moved
     bool raster_load = false;       // --raster-load
+    bool raster_above = false;      // --raster-above
     bool stacked = false;           // --stacked
     bool full_preview = false;      // --full-preview
     bool recapture = false;         // --recapture
@@ -297,6 +298,7 @@ void Print_usage() {
         "the drag\n"
         "  --raster-load                move: 3 obfuscates of 1600x400 and 3 texts of "
         "1600x200 below the moved annotation, off its path (large rasters)\n"
+        "  --raster-above               move: the same, above the moved annotation\n"
         "  --click-moved                with --click-first: the click's painted frame "
         "has the annotation moved (it is back at the release, which does nothing); "
         "fail unless the steady frame after the selection commit matches a fresh "
@@ -527,6 +529,9 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.click_moved = true;
         } else if (key == "--raster-load") {
             args.raster_load = true;
+        } else if (key == "--raster-above") {
+            args.raster_load = true;
+            args.raster_above = true;
         } else if (key == "--stacked") {
             args.stacked = true;
         } else if (key == "--full-preview") {
@@ -1467,8 +1472,8 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
             scene.doc.push_back(std::move(annotation));
         }
     };
+    std::vector<core::Annotation> load;
     if (args.raster_load) {
-        std::vector<core::Annotation> load;
         for (int k = 0; k < kLoadCount; ++k) {
             int32_t const left = sel.left + k * (kLoadWidthPx + kLoadGapPx);
             load.push_back(*Make_edit_annotation(
@@ -1483,7 +1488,9 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
                                         left + kLoadWidthPx, sel.bottom - kLoadGapPx),
                 next_id++));
         }
-        append(load, false);
+        if (!args.raster_above) {
+            append(load, false);
+        }
     }
     if (args.obfuscate_below) {
         append(obfuscates, false);
@@ -1491,6 +1498,9 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
     } else {
         append(moved, true);
         append(obfuscates, false);
+    }
+    if (args.raster_above) {
+        append(load, false);
     }
     for (size_t i = 0; i < scene.doc.size(); ++i) {
         if (!Commit_obfuscate(scene.doc, i, *scene.source)) {

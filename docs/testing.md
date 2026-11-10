@@ -279,7 +279,8 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     annotation moved, and the release (back at the start) does nothing. The steady
     frame after the selection commit must match one with every cache rebuilt.
   - `--raster-load`: 3 obfuscates of 1600x400 and 3 texts of 1600x200 below the
-    moved annotation, off its path, to measure large rasters.
+    moved annotation, off its path, to measure large rasters (`--raster-above`:
+    above it, so they draw every edit frame).
   - `--dump-frame` equal to `--frames` writes the frame after the release.
   - `--stacked` (with `--obfuscations 1`): a second obfuscate above the first,
     overlapping it but off the move's path. Its source holds the first one's new
