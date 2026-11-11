@@ -4,6 +4,13 @@ using namespace greenflame::core;
 
 namespace {
 
+// Byte offset of (row, col_bytes) in a bitmap with the given stride, computed in
+// size_t.
+[[nodiscard]] size_t Byte_offset(int32_t row, int32_t row_bytes, int32_t col_bytes) {
+    return static_cast<size_t>(row) * static_cast<size_t>(row_bytes) +
+           static_cast<size_t>(col_bytes);
+}
+
 [[nodiscard]] BgraBitmap Make_bitmap(int32_t width_px, int32_t height_px,
                                      std::initializer_list<COLORREF> colors) {
     int32_t const row_bytes = width_px * 4;
@@ -190,9 +197,9 @@ namespace {
                                             static_cast<size_t>(rect.Height()))};
     for (int32_t y = 0; y < rect.Height(); ++y) {
         for (int32_t x = 0; x < rect.Width() * 4; ++x) {
-            cut.premultiplied_bgra[static_cast<size_t>(y * cut.row_bytes + x)] =
-                bitmap.premultiplied_bgra[static_cast<size_t>(
-                    (rect.top + y) * bitmap.row_bytes + rect.left * 4 + x)];
+            cut.premultiplied_bgra[Byte_offset(y, cut.row_bytes, x)] =
+                bitmap.premultiplied_bgra[Byte_offset((rect.top + y), bitmap.row_bytes,
+                                                      rect.left * 4 + x)];
         }
     }
     return cut;
@@ -205,8 +212,8 @@ namespace {
         for (int32_t x = 0; x < source.width_px; ++x) {
             if (!present.Contains({x, y})) {
                 for (int32_t c = 0; c < 4; ++c) {
-                    source.premultiplied_bgra[static_cast<size_t>(y * source.row_bytes +
-                                                                  x * 4 + c)] = 0;
+                    source.premultiplied_bgra[Byte_offset(y, source.row_bytes,
+                                                          x * 4 + c)] = 0;
                 }
             }
         }
@@ -221,13 +228,12 @@ void Expect_inside_matches(BgraBitmap const &raster, RectPx present,
     for (int32_t y = 0; y < raster.height_px; ++y) {
         for (int32_t x = 0; x < raster.width_px; ++x) {
             for (int32_t c = 0; c < 4; ++c) {
-                uint8_t const actual = raster.premultiplied_bgra[static_cast<size_t>(
-                    y * raster.row_bytes + x * 4 + c)];
+                uint8_t const actual = raster.premultiplied_bgra[Byte_offset(
+                    y, raster.row_bytes, x * 4 + c)];
                 if (present.Contains({x, y})) {
-                    uint8_t const want =
-                        expected.premultiplied_bgra[static_cast<size_t>(
-                            (y - present.top) * expected.row_bytes +
-                            (x - present.left) * 4 + c)];
+                    uint8_t const want = expected.premultiplied_bgra[Byte_offset(
+                        (y - present.top), expected.row_bytes,
+                        (x - present.left) * 4 + c)];
                     ASSERT_EQ(actual, want) << "x=" << x << " y=" << y << " c=" << c;
                 } else {
                     ASSERT_EQ(actual, 0) << "x=" << x << " y=" << y << " c=" << c;
@@ -272,7 +278,7 @@ TEST(obfuscate_raster, PartWithNoSourceKeepsTheGridAnchoredAtTheObfuscate) {
     BgraBitmap const full = Rasterize_obfuscate(source, block);
     for (int32_t y = 0; y < 16; ++y) {
         for (int32_t x = 0; x < 24; ++x) {
-            size_t const at = static_cast<size_t>(y * raster.row_bytes + x * 4);
+            size_t const at = Byte_offset(y, raster.row_bytes, x * 4);
             if (x < 3) {
                 EXPECT_EQ(raster.premultiplied_bgra[at + 3u], 0);
             } else if (x >= block) {
@@ -286,8 +292,8 @@ TEST(obfuscate_raster, PartWithNoSourceKeepsTheGridAnchoredAtTheObfuscate) {
                 int32_t const cell_top = (y / block) * block;
                 for (int32_t sy = cell_top; sy < cell_top + block; ++sy) {
                     for (int32_t sx = 3; sx < block; ++sx) {
-                        sum += source.premultiplied_bgra[static_cast<size_t>(
-                            sy * source.row_bytes + sx * 4)];
+                        sum += source.premultiplied_bgra[Byte_offset(
+                            sy, source.row_bytes, sx * 4)];
                         ++count;
                     }
                 }
@@ -338,8 +344,8 @@ TEST(obfuscate_raster, PartWithNoSourceThatIsNotARectangle) {
     for (int32_t y = missing.top; y < missing.bottom; ++y) {
         for (int32_t x = missing.left; x < missing.right; ++x) {
             for (int32_t c = 0; c < 4; ++c) {
-                holed.premultiplied_bgra[static_cast<size_t>(y * holed.row_bytes +
-                                                             x * 4 + c)] = 0;
+                holed.premultiplied_bgra[Byte_offset(y, holed.row_bytes, x * 4 + c)] =
+                    0;
             }
         }
     }
@@ -349,7 +355,7 @@ TEST(obfuscate_raster, PartWithNoSourceThatIsNotARectangle) {
     BgraBitmap const full = Rasterize_obfuscate(source, block);
     for (int32_t y = 0; y < 16; ++y) {
         for (int32_t x = 0; x < 24; ++x) {
-            size_t const at = static_cast<size_t>(y * 24 * 4 + x * 4);
+            size_t const at = Byte_offset(y, 24 * 4, x * 4);
             if (missing.Contains({x, y})) {
                 for (size_t c = 0; c < 4u; ++c) {
                     ASSERT_EQ(pixelated.premultiplied_bgra[at + c], 0);
@@ -368,8 +374,8 @@ TEST(obfuscate_raster, PartWithNoSourceThatIsNotARectangle) {
                 uint64_t sum = 0;
                 for (int32_t sy = 0; sy < 8; ++sy) {
                     for (int32_t sx = 8; sx < 12; ++sx) {
-                        sum += source.premultiplied_bgra[static_cast<size_t>(
-                            sy * source.row_bytes + sx * 4)];
+                        sum += source.premultiplied_bgra[Byte_offset(
+                            sy, source.row_bytes, sx * 4)];
                     }
                 }
                 ASSERT_EQ(pixelated.premultiplied_bgra[at],

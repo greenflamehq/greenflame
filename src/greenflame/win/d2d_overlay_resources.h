@@ -77,7 +77,6 @@ struct D2DOverlayResources final {
     // The surfaces each frame is drawn into, all on this device. The caches below are
     // desktop-sized and shared by every target.
     std::vector<D2DSurfaceTarget> targets;
-    float target_dpi = kDefaultTargetDpi;
     // ArithmeticComposite effect (k2=k3=k4=0) for multiply-blend highlighting: input 0
     // is the base, input 1 the highlighter mask, k1 the opacity (1 when the mask
     // carries it). Created by Create_device; null if effect creation failed.
@@ -181,9 +180,6 @@ struct D2DOverlayResources final {
     D2DObfuscateBitmapMap obfuscate_bitmaps;
     // Obfuscate uploads since the bench last reset it.
     D2DUploadStats obfuscate_uploads = {};
-    // An obfuscate could not be drawn since the last frame: Paint_d2d_frame reports
-    // D2DFrameStatus::DrawFailed (and clears it) instead of showing the frame.
-    bool obfuscate_draw_failed = false;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> text_bitmaps;
     std::unordered_map<uint64_t, Microsoft::WRL::ComPtr<ID2D1Bitmap>> bubble_bitmaps;
 
@@ -199,16 +195,11 @@ struct D2DOverlayResources final {
     };
     std::optional<TextCursorPreviewCache> text_cursor_preview_cache;
 
-    bool annotations_valid = false;
     // The annotations annotations_bitmap shows, and the ones frozen_bitmap shows. Null
     // when not known: preview patches, a skipped annotation, or an edit frame that
     // shows something other than the edit's start.
     std::shared_ptr<const std::vector<core::Annotation>> annotations_source = nullptr;
     std::shared_ptr<const std::vector<core::Annotation>> frozen_source = nullptr;
-    // True when an edit frame drew annotations_bitmap last. The first frame after the
-    // edit rebuilds it if it does not show the document: an edit can end with no
-    // action, so nothing else would.
-    bool annotations_from_edit = false;
     // Annotation edits (move, resize). Every edit frame rebuilds annotations_bitmap.
     // The annotations below the lowest one the edit changes stay the same, so they are
     // drawn once into edit_below_bitmap and each frame draws only the rest.
@@ -227,9 +218,6 @@ struct D2DOverlayResources final {
         std::vector<uint64_t> patch_ids = {};
     };
     EditCache edit_cache = {};
-    // False: edit frames take the full rebuild and the dynamic path (render bench
-    // checks against it).
-    bool edit_fast_paths = true;
     // How often the edit fast paths ran: frames drawn as a changed-area recomposite,
     // and frames whose rebuild reused edit_below_bitmap. The render bench checks them.
     struct EditStats final {
@@ -237,16 +225,31 @@ struct D2DOverlayResources final {
         size_t below_cache_hits = 0;
     };
     EditStats edit_stats = {};
-    // True when annotations_bitmap was last built from no annotations, so it is all
-    // transparent and blitting it changes nothing.
-    bool annotations_empty = false;
-    bool frozen_valid = false;
-    core::RectPx frozen_selection = {}; // the selection frozen_bitmap was built with
     // QPC ticks the last Paint_d2d_frame spent in its frame-latency wait (debug log).
     int64_t last_frame_wait_qpc = 0;
     // The lifted window the overlay shows. Committed highlighters multiply onto it
     // inside its dest rect; set it with Set_lifted_view.
     LiftedWindowView lifted_view = {};
+
+    // Member order keeps clang-analyzer-optin.performance.Padding quiet: 8-byte-aligned
+    // members above, then 4-byte-aligned, then 1-byte-aligned.
+    float target_dpi = kDefaultTargetDpi;
+    core::RectPx frozen_selection = {}; // the selection frozen_bitmap was built with
+    // An obfuscate could not be drawn since the last frame: Paint_d2d_frame reports
+    // D2DFrameStatus::DrawFailed (and clears it) instead of showing the frame.
+    bool obfuscate_draw_failed = false;
+    bool annotations_valid = false;
+    // True when an edit frame drew annotations_bitmap last. The first frame after the
+    // edit rebuilds it if it does not show the document: an edit can end with no
+    // action, so nothing else would.
+    bool annotations_from_edit = false;
+    // False: edit frames take the full rebuild and the dynamic path (render bench
+    // checks against it).
+    bool edit_fast_paths = true;
+    // True when annotations_bitmap was last built from no annotations, so it is all
+    // transparent and blitting it changes nothing.
+    bool annotations_empty = false;
+    bool frozen_valid = false;
 
     // Initialize the process-lifetime factories (call once).
     [[nodiscard]] bool Initialize_factory();
