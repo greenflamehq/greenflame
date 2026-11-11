@@ -8,6 +8,13 @@ using namespace greenflame::core;
 
 namespace {
 
+// Byte offset of (row, col_bytes) in a bitmap with the given stride, computed in
+// size_t.
+[[nodiscard]] size_t Byte_offset(int32_t row, int32_t row_bytes, int32_t col_bytes) {
+    return static_cast<size_t>(row) * static_cast<size_t>(row_bytes) +
+           static_cast<size_t>(col_bytes);
+}
+
 constexpr int32_t kBlockSize = 4;
 constexpr uint8_t kSaltStep = 17;
 
@@ -292,7 +299,7 @@ struct CaptureSource final : public IObfuscateSourceProvider {
                     at.y >= kCaptureHeight) {
                     continue;
                 }
-                size_t const offset = static_cast<size_t>(y * bitmap.row_bytes + x * 4);
+                size_t const offset = Byte_offset(y, bitmap.row_bytes, x * 4);
                 bitmap.premultiplied_bgra[offset] = static_cast<uint8_t>(at.x * 3);
                 bitmap.premultiplied_bgra[offset + 1u] = static_cast<uint8_t>(at.y * 5);
                 bitmap.premultiplied_bgra[offset + 2u] =
@@ -358,18 +365,22 @@ TEST(obfuscate_patch_cache, ObfuscateMovedPastTheCaptureEdgeNeverFails) {
                        ObfuscateAnnotation{.bounds = inside, .block_size = kBlockSize}},
         {}, source);
     ASSERT_TRUE(clipped.has_value());
-    ObfuscateAnnotation const &expected = std::get<ObfuscateAnnotation>(clipped->data);
+    if (!clipped.has_value()) {
+        return;
+    }
+    ObfuscateAnnotation const &expected =
+        std::get<ObfuscateAnnotation>(clipped.value().data);
     for (int32_t y = 0; y < moved.Height(); ++y) {
         for (int32_t x = 0; x < moved.Width(); ++x) {
-            size_t const at = static_cast<size_t>(y * result.bitmap_row_bytes + x * 4);
+            size_t const at = Byte_offset(y, result.bitmap_row_bytes, x * 4);
             PointPx const point = {moved.left + x, moved.top + y};
             if (!inside.Contains(point)) {
                 ASSERT_EQ(result.premultiplied_bgra[at + 3u], 0);
                 continue;
             }
             size_t const expected_at =
-                static_cast<size_t>((point.y - inside.top) * expected.bitmap_row_bytes +
-                                    (point.x - inside.left) * 4);
+                Byte_offset((point.y - inside.top), expected.bitmap_row_bytes,
+                            (point.x - inside.left) * 4);
             for (size_t c = 0; c < 4u; ++c) {
                 ASSERT_EQ(result.premultiplied_bgra[at + c],
                           expected.premultiplied_bgra[expected_at + c]);

@@ -193,30 +193,37 @@ struct AdapterChoice final {
 };
 
 struct Args final {
+    // Member order keeps clang-analyzer-optin.performance.Padding quiet: strings, then
+    // the adapter choices, then ints, then bools.
     std::string layout = "jocelyn-desk";
-    AdapterChoice adapter = {};
-    AdapterChoice shared_adapter = {}; // --shared-adapter: the probe's shared device
     std::string scenario = "all";
-    bool smooth = true;
-    int step_px = kDefaultStepPx;
-    int points_per_frame = 1;
-    int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
-    bool opacity_given = false;
-    int straighten_at = -1;
-    bool diagonal = false;     // --diagonal
-    int dab_points = 0;        // --dab N
-    bool dab_no_draft = false; // --dab-no-draft
-    int frames = kDefaultFrames;
-    bool frames_given = false;
-    int repeat = 1;
-    int passes = 1;
     std::string csv_path = {};
-    int dump_frame = -1;
     std::string dump_path = {};
     std::string diff_a = {};
     std::string diff_b = {};
+    std::string edit_kind = "rect"; // --edit-kind
+    std::string capture_dump = {};  // --capture-dump FILE.bmp
+    std::string off_edge = {};      // --off-edge left|right|top|bottom
+    AdapterChoice adapter = {};
+    AdapterChoice shared_adapter = {}; // --shared-adapter: the probe's shared device
+    int step_px = kDefaultStepPx;
+    int points_per_frame = 1;
+    int opacity_percent = core::StrokeStyle::kMaxOpacityPercent;
+    int straighten_at = -1;
+    int dab_points = 0; // --dab N
+    int frames = kDefaultFrames;
+    int repeat = 1;
+    int passes = 1;
+    int dump_frame = -1;
     int tolerance = 0;
-    int max_pixels = 0; // --max-pixels: pixels allowed over the tolerance
+    int max_pixels = 0;     // --max-pixels: pixels allowed over the tolerance
+    int stroke_points = 64; // --stroke-points N: points per --annotated stroke
+    int obfuscations = 0;   // --obfuscations K
+    bool smooth = true;
+    bool opacity_given = false;
+    bool diagonal = false;     // --diagonal
+    bool dab_no_draft = false; // --dab-no-draft
+    bool frames_given = false;
     bool list_adapters = false;
     bool probe_present = false;
     bool annotated = false;
@@ -228,31 +235,26 @@ struct Args final {
     bool select_dynamic = false;       // --select-dynamic
     bool stale_frozen = false;         // --stale-frozen
     bool resize = false;               // --resize
-    int stroke_points = 64;         // --stroke-points N: points per --annotated stroke
-    int obfuscations = 0;           // --obfuscations K
-    bool obfuscate_below = false;   // --obfuscate-below
-    bool multi = false;             // --multi
-    std::string edit_kind = "rect"; // --edit-kind
-    bool edit_dynamic = false;      // --edit-dynamic
-    bool verify_edit = false;       // --verify-edit
-    bool click_first = false;       // --click-first
-    bool click_moved = false;       // --click-moved
-    bool raster_load = false;       // --raster-load
-    bool raster_above = false;      // --raster-above
-    bool stacked = false;           // --stacked
-    bool full_preview = false;      // --full-preview
-    bool recapture = false;         // --recapture
-    bool alt_source = false;        // --alt-source
-    bool draft_source = false;      // --draft-source
-    std::string capture_dump = {};  // --capture-dump FILE.bmp
-    bool capture_whole = false;     // --capture-whole
-    bool capture_before = false;    // --capture-before
-    std::string off_edge = {};      // --off-edge left|right|top|bottom
-    bool expect_draw_failure = false; // --expect-draw-failure
-    bool reselect = false;            // --reselect
-    bool reverse = false;             // --reverse: freehand runs right to left
-    bool split_monitors = false;      // --split-monitors: one target per monitor
-    bool mask_monitors = false;       // --mask-monitors: diff only monitor pixels
+    bool obfuscate_below = false;      // --obfuscate-below
+    bool multi = false;                // --multi
+    bool edit_dynamic = false;         // --edit-dynamic
+    bool verify_edit = false;          // --verify-edit
+    bool click_first = false;          // --click-first
+    bool click_moved = false;          // --click-moved
+    bool raster_load = false;          // --raster-load
+    bool raster_above = false;         // --raster-above
+    bool stacked = false;              // --stacked
+    bool full_preview = false;         // --full-preview
+    bool recapture = false;            // --recapture
+    bool alt_source = false;           // --alt-source
+    bool draft_source = false;         // --draft-source
+    bool capture_whole = false;        // --capture-whole
+    bool capture_before = false;       // --capture-before
+    bool expect_draw_failure = false;  // --expect-draw-failure
+    bool reselect = false;             // --reselect
+    bool reverse = false;              // --reverse: freehand runs right to left
+    bool split_monitors = false;       // --split-monitors: one target per monitor
+    bool mask_monitors = false;        // --mask-monitors: diff only monitor pixels
 };
 
 void Print_usage() {

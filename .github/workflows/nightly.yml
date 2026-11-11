@@ -63,15 +63,22 @@ jobs:
           if errorlevel 1 exit /b 1
           cmake --build --preset x64-debug-clang
           if errorlevel 1 exit /b 1
-          for /r src %%f in (*.cpp) do (
-            clang-tidy -p build/x64-debug-clang "%%f"
-            if errorlevel 1 exit /b 1
+          for /r src %%f in (*.cpp) do call :tidy "%%f"
+          for /r tests %%f in (*.cpp) do call :tidy "%%f"
+          for /r bench %%f in (*.cpp) do call :tidy "%%f"
+          if exist tidy-summary.txt (
+            echo.
+            echo clang-tidy findings per file:
+            type tidy-summary.txt
+            exit /b 1
           )
-          for /r tests %%f in (*.cpp) do (
-            clang-tidy -p build/x64-debug-clang "%%f"
-            if errorlevel 1 exit /b 1
+          exit /b 0
+
+          :tidy
+          clang-tidy -p build/x64-debug-clang %1 > tidy-out.txt 2>&1
+          set TIDY_RC=%errorlevel%
+          type tidy-out.txt
+          if %TIDY_RC% neq 0 (
+            for /f %%n in ('findstr /c:"warnings-as-errors]" tidy-out.txt ^| %SystemRoot%\System32\find.exe /c /v ""') do echo %%n finding^(s^), exit %TIDY_RC%: %~1>>tidy-summary.txt
           )
-          for /r bench %%f in (*.cpp) do (
-            clang-tidy -p build/x64-debug-clang "%%f"
-            if errorlevel 1 exit /b 1
-          )
+          exit /b 0
