@@ -79,6 +79,6 @@ jobs:
           set TIDY_RC=%errorlevel%
           type tidy-out.txt
           if %TIDY_RC% neq 0 (
-            for /f %%n in ('findstr /c:"warnings-as-errors]" tidy-out.txt ^| find /c /v ""') do echo %%n finding^(s^): %~1>>tidy-summary.txt
+            for /f %%n in ('findstr /c:"warnings-as-errors]" tidy-out.txt ^| %SystemRoot%\System32\find.exe /c /v ""') do echo %%n finding^(s^), exit %TIDY_RC%: %~1>>tidy-summary.txt
           )
           exit /b 0
