@@ -153,6 +153,8 @@ class OverlayController final {
 
     void Push_command(std::unique_ptr<ICommand> cmd);
     // Undo and redo do nothing (return false) while a manipulation is in progress.
+    // They rebuild obfuscate rasters when the step changed the annotations; on a
+    // failed rebuild Obfuscate_rebuild_failed() turns true: close the overlay.
     bool Undo();
     bool Redo();
 
@@ -191,8 +193,9 @@ class OverlayController final {
     // Commits the text being typed or re-edited. After it, Obfuscate_rebuild_failed()
     // says whether an obfuscate above a re-edited text could not be rebuilt.
     bool Commit_active_text_edit();
-    // True when the last change (edit release, new obfuscate, delete, text re-edit)
-    // could not build an obfuscate: the overlay must close (OverlayAction::FailClose).
+    // True when a change (edit release, new obfuscate, delete, text re-edit), undo,
+    // redo or Recompute_obfuscates could not build an obfuscate: the overlay must close
+    // (OverlayAction::FailClose). Undo/redo and Recompute_obfuscates do not clear it.
     [[nodiscard]] bool Obfuscate_rebuild_failed() const noexcept;
     void Cancel_text_draft();
     [[nodiscard]] std::optional<uint64_t> Editing_annotation_id() const noexcept;
@@ -228,7 +231,8 @@ class OverlayController final {
     [[nodiscard]] bool Has_annotation_at(PointPx cursor) const noexcept;
     void Set_obfuscate_source_provider(IObfuscateSourceProvider *provider) noexcept;
     // Rebuilds every obfuscate's raster from the current source (after Ctrl+K rebuilt
-    // the capture). False when one cannot be rebuilt: close the overlay.
+    // the capture; Undo and Redo call it too). False, with Obfuscate_rebuild_failed()
+    // set, when one cannot be rebuilt: close the overlay.
     [[nodiscard]] bool Recompute_obfuscates();
 
     // True while the pointer is down on a drawing, an annotation edit, a selection
@@ -239,6 +243,7 @@ class OverlayController final {
     [[nodiscard]] bool Is_manipulating() const noexcept;
 
   private:
+    [[nodiscard]] bool Step_history(bool redo);
     [[nodiscard]] bool Blocks_style_change() const noexcept;
     void Reset_window_selection_metadata(bool reset_source) noexcept;
     [[nodiscard]] bool Restricts_annotation_edits_to_visible_selection() const noexcept;

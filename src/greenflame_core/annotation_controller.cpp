@@ -1083,6 +1083,7 @@ bool AnnotationController::Recompute_obfuscates() {
         std::optional<Annotation> rebuilt = Rebuild_obfuscate_annotation(
             document_.annotations, index, document_.annotations[index]);
         if (!rebuilt.has_value()) {
+            obfuscate_rebuild_failed_ = true;
             return false;
         }
         document_.annotations[index] = std::move(*rebuilt);

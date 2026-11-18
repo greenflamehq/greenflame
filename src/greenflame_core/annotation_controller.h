@@ -161,15 +161,18 @@ class AnnotationController final : public IAnnotationToolHost,
     [[nodiscard]] bool On_primary_press(PointPx cursor);
     [[nodiscard]] bool On_pointer_move(PointPx cursor, bool primary_down = false);
     [[nodiscard]] bool On_primary_release(UndoStack &undo_stack);
-    // True when the last edit release, new obfuscate, delete or text re-edit commit
-    // could not build an obfuscate it changes. The document is as it was before the
-    // change and nothing went on the undo stack; the overlay must close.
+    // True when an edit release, new obfuscate, delete, text re-edit commit or
+    // Recompute_obfuscates (Ctrl+K, window-to-region, undo, redo) could not build an
+    // obfuscate. A commit leaves the document as it was with nothing on the undo
+    // stack; a failed Recompute_obfuscates may leave earlier obfuscates rebuilt, and
+    // after undo/redo the step stays applied. The overlay must close.
     [[nodiscard]] bool Obfuscate_rebuild_failed() const noexcept {
         return obfuscate_rebuild_failed_;
     }
     // Rebuilds every obfuscate's raster from the current source, in z-order, as a
-    // commit does: after the source capture changed (Ctrl+K). False when one cannot be
-    // rebuilt; the overlay must then close.
+    // commit does: after the source capture changed (Ctrl+K) and after undo or redo.
+    // False, with Obfuscate_rebuild_failed() set, when one cannot be rebuilt; the
+    // overlay must then close.
     [[nodiscard]] bool Recompute_obfuscates();
     [[nodiscard]] bool On_cancel();
     [[nodiscard]] bool Delete_selected_annotation(UndoStack &undo_stack);

@@ -228,6 +228,10 @@ and its bounds are never clamped. It pixelates whatever lies under it:
 - If an edit's release, a delete, a new obfuscate or a text re-edit cannot build an
   obfuscate it changes, the document goes back to its state before the change,
   nothing goes on the undo stack, and the overlay closes.
+- If an undo or redo that changed the annotations cannot rebuild an obfuscate, the
+  step stays applied (the document is not restored) and the overlay closes. A failed
+  rebuild after Ctrl+K or a window-to-region switch may also leave the obfuscates
+  before the failing one rebuilt; the overlay closes there too.
 - If an obfuscate's bitmap cannot be uploaded (for example, a raster wider than the
   device allows), the frame is not shown (`D2DFrameStatus::DrawFailed`) and the
   overlay closes; Save and Copy's software renderer fails the same way.
@@ -235,9 +239,13 @@ and its bounds are never clamped. It pixelates whatever lies under it:
 - Ctrl+K rebuilds the capture with or without the cursor; every committed obfuscate
   is then rebuilt from the new capture through the commit path, so the overlay and
   Save match. The same happens on any other source change (see above). If one cannot
-  be rebuilt, the overlay closes. Undo history keeps the rasters it recorded.
-- The failure flag the overlay reads after a commit starts clear in every capture
-  session and at every commit that reports it.
+  be rebuilt, the overlay closes. Undo and redo restore the rasters the commands
+  recorded, so after any step that changed the annotations every obfuscate is rebuilt
+  from the current source (a selection-only step skips it). The cost is one source
+  composite per obfuscate on each such step.
+- The failure flag the overlay reads starts clear in every capture session and at
+  every commit that reports it. Undo/redo and the Ctrl+K / window-to-region rebuild
+  also set it and do not clear it first; the overlay closes whenever it is set.
 - After a draw failure the annotation and frozen caches are dropped, so no paint
   before the close can show the frame without the obfuscate.
 
@@ -277,6 +285,10 @@ Undoing the primary change therefore restores both:
 
 - the triggering annotation mutation
 - every obfuscate stamp recomputed because of that mutation
+
+After the stored stamps are restored, undo and redo rebuild every obfuscate from the
+current source, because a source change (Ctrl+K) rebuilds outside the undo stack and
+the recorded stamps may come from the earlier source.
 
 ## Configuration
 

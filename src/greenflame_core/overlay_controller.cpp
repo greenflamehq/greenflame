@@ -215,19 +215,24 @@ void OverlayController::Push_command(std::unique_ptr<ICommand> cmd) {
     undo_stack_.Push(std::move(cmd));
 }
 
-bool OverlayController::Undo() {
-    if (Is_manipulating()) {
-        return false;
-    }
-    undo_stack_.Undo();
-    return true;
-}
+bool OverlayController::Undo() { return Step_history(false); }
 
-bool OverlayController::Redo() {
+bool OverlayController::Redo() { return Step_history(true); }
+
+// A source change (Ctrl+K, window to region) rebuilds the obfuscates outside the undo
+// stack, so a command restores the rasters it captured from the earlier source. Rebuild
+// them after any step that changed the annotations (a selection-only step skips it).
+// A failure sets Obfuscate_rebuild_failed(); the window then closes the overlay.
+bool OverlayController::Step_history(bool redo) {
     if (Is_manipulating()) {
         return false;
     }
-    undo_stack_.Redo();
+    std::vector<Annotation> const before(annotation_controller_.Annotations().begin(),
+                                         annotation_controller_.Annotations().end());
+    redo ? undo_stack_.Redo() : undo_stack_.Undo();
+    if (!std::ranges::equal(before, annotation_controller_.Annotations())) {
+        (void)annotation_controller_.Recompute_obfuscates();
+    }
     return true;
 }
 
