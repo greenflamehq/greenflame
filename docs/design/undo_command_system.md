@@ -140,6 +140,8 @@ Notable current behavior:
 - grouped edits use `CompoundCommand`
 - reactive obfuscate recomputes are appended to the same undo record as the user
   action that triggered them
+- undo and redo rebuild every obfuscate from the current source after any step that
+  changed the annotations, so stamps recorded before a Ctrl+K are not shown
 
 ## Ownership And Flow
 

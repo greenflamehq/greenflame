@@ -1048,6 +1048,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
      desktop's edge and drag it half off the screen, on every edge; release; save.
      Repeat over a Ctrl-click window selection, dragging it half out of the window;
      then move the selection, and resize it; save after each.
+  7. Reopen; show the captured cursor (Ctrl+K), draw an obfuscate over it, move it
+     once, press Ctrl+K, then Ctrl+Z and Ctrl+Shift+Z; save.
 - Expected:
   - After Ctrl+K the obfuscate's pixelation changes where the cursor was, on screen
     and in the saved and copied output alike.
@@ -1055,6 +1057,8 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - In steps 3, 4 and 5 the overlay closes with a "Capture cancelled" balloon. Until
     it closes no frame shows the clear pixels under an obfuscate or an obfuscate
     filled with a flat colour; nothing is saved or copied.
+  - In step 7 after Ctrl+K, Ctrl+Z and Ctrl+Shift+Z the pixelation matches the current
+    capture (no cursor), on screen and in the saved image.
   - In step 6 nothing closes: the obfuscate moves freely, keeps pixelating what is
     under it inside the capture, shows no flat-colour band, and the saved image
     matches the screen inside the capture. Over a window selection the part outside
