@@ -61,7 +61,7 @@ struct FakeObfuscateSourceProvider final : public IObfuscateSourceProvider {
     }
 
     uint8_t fill = 0xCC; // the source the rasters are built from
-    bool fail = false; // no source can be built
+    bool fail = false;   // no source can be built
 };
 
 class OpaqueTextLayoutEngine final : public ITextLayoutEngine {

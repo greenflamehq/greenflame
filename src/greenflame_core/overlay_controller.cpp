@@ -215,13 +215,9 @@ void OverlayController::Push_command(std::unique_ptr<ICommand> cmd) {
     undo_stack_.Push(std::move(cmd));
 }
 
-bool OverlayController::Undo() {
-    return Step_history(false);
-}
+bool OverlayController::Undo() { return Step_history(false); }
 
-bool OverlayController::Redo() {
-    return Step_history(true);
-}
+bool OverlayController::Redo() { return Step_history(true); }
 
 // A source change (Ctrl+K, window to region) rebuilds the obfuscates outside the undo
 // stack, so a command restores the rasters it captured from the earlier source. Rebuild
