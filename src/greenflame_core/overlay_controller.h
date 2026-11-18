@@ -153,6 +153,8 @@ class OverlayController final {
 
     void Push_command(std::unique_ptr<ICommand> cmd);
     // Undo and redo do nothing (return false) while a manipulation is in progress.
+    // They rebuild obfuscate rasters when the step changed the annotations; on a
+    // failed rebuild Obfuscate_rebuild_failed() turns true: close the overlay.
     bool Undo();
     bool Redo();
 
@@ -239,6 +241,7 @@ class OverlayController final {
     [[nodiscard]] bool Is_manipulating() const noexcept;
 
   private:
+    [[nodiscard]] bool Step_history(bool redo);
     [[nodiscard]] bool Blocks_style_change() const noexcept;
     void Reset_window_selection_metadata(bool reset_source) noexcept;
     [[nodiscard]] bool Restricts_annotation_edits_to_visible_selection() const noexcept;

@@ -3471,6 +3471,10 @@ LRESULT OverlayWindow::On_key_down(HWND hwnd, WPARAM wparam, LPARAM lparam) {
         if (!applied) {
             return 0;
         }
+        if (controller_.Obfuscate_rebuild_failed()) {
+            Post_fail_close(L"an obfuscation could not be rebuilt.");
+            return 0;
+        }
         if (d2d_resources_ &&
             !std::ranges::equal(annotations_before, controller_.Annotations())) {
             d2d_resources_->Invalidate_annotations();

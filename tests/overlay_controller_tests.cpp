@@ -56,10 +56,11 @@ struct FakeObfuscateSourceProvider final : public IObfuscateSourceProvider {
             .height_px = height,
             .row_bytes = row_bytes,
             .premultiplied_bgra = std::vector<uint8_t>(
-                static_cast<size_t>(row_bytes) * static_cast<size_t>(height), 0xCC),
+                static_cast<size_t>(row_bytes) * static_cast<size_t>(height), fill),
         };
     }
 
+    uint8_t fill = 0xCC; // the source the rasters are built from
     bool fail = false; // no source can be built
 };
 
@@ -2747,6 +2748,46 @@ TEST(overlay_controller, FailedObfuscateRebuildClosesTheOverlay) {
     EXPECT_FALSE(c.Recompute_obfuscates());
     source_provider.fail = false;
     EXPECT_TRUE(c.Recompute_obfuscates());
+}
+
+TEST(overlay_controller, UndoAndRedoRebuildObfuscatesFromTheCurrentSource) {
+    auto c = Make_controller();
+    FakeObfuscateSourceProvider source_provider;
+    c.Set_obfuscate_source_provider(&source_provider);
+    Press(c, {100, 100});
+    Release(c, {300, 300});
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    ASSERT_EQ(Press(c, {210, 210}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {250, 250}), OverlayAction::Repaint);
+    ASSERT_EQ(Release(c, {250, 250}), OverlayAction::InvalidateFrozenCache);
+    ASSERT_EQ(c.On_select_annotation_tool(AnnotationToolId::Obfuscate),
+              OverlayAction::Repaint);
+    // Move it once: the move command holds the raster built from the first source.
+    ASSERT_EQ(Press(c, {220, 220}), OverlayAction::Repaint);
+    ASSERT_EQ(Move(c, {240, 240}), OverlayAction::Repaint);
+    ASSERT_EQ(Release(c, {240, 240}), OverlayAction::InvalidateFrozenCache);
+
+    auto const first_pixel = [&c] {
+        return std::get<ObfuscateAnnotation>(c.Annotations()[0].data)
+            .premultiplied_bgra.front();
+    };
+    ASSERT_EQ(first_pixel(), 0xCC);
+
+    // The source changes (Ctrl+K): the rebuild bypasses the undo stack.
+    source_provider.fill = 0x33;
+    ASSERT_TRUE(c.Recompute_obfuscates());
+    ASSERT_EQ(first_pixel(), 0x33);
+
+    ASSERT_TRUE(c.Undo());
+    EXPECT_EQ(first_pixel(), 0x33);
+    ASSERT_TRUE(c.Redo());
+    EXPECT_EQ(first_pixel(), 0x33);
+
+    // A failed rebuild after a step reports it, so the window closes the overlay.
+    source_provider.fail = true;
+    ASSERT_TRUE(c.Undo());
+    EXPECT_TRUE(c.Obfuscate_rebuild_failed());
 }
 
 TEST(overlay_controller, NewObfuscateWhoseRasterCannotBeBuiltClosesTheOverlay) {
