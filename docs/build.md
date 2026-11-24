@@ -107,6 +107,8 @@ cmake --build --preset x64-debug-clang
 
 Output: `build\x64-debug-clang\greenflame.exe`.
 
+The presets call `clang-cl.exe` from `PATH`. The MSVC STL requires a matching Clang (STL 14.52 needs Clang 22), so use the one bundled with Visual Studio (`<VS>\VC\Tools\Llvm\x64\bin`), not a standalone LLVM install. CI does this in `scripts\gha-vs-dev-cmd.cmd`, which puts that directory first on `PATH` after loading the VS dev environment; clang-format and clang-tidy in CI come from the same place.
+
 For release with Clang:
 
 ```bat
