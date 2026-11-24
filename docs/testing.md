@@ -234,11 +234,14 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   (the real monitors).
 - `--adapter default|N|warp`: `default` is what the app uses. `--list-adapters`
   prints the indexes.
-- `--scenario hover|select|brush|highlighter|line|obfuscate|steady|all`: crosshair
-  sweep, live selection drag, growing freehand strokes (`--step`, `--smooth on|off`,
-  `--points-per-frame`), a line tool drag from the selection's top-left to its
-  bottom-right, an obfuscate draft sliding across the desktop's middle row, idle
-  selection, or all of them.
+- `--scenario hover|select|brush|highlighter|line|shape|obfuscate|steady|all`:
+  crosshair sweep, live selection drag, growing freehand strokes (`--step`,
+  `--smooth on|off`, `--points-per-frame`), a line tool drag from the selection's
+  top-left to its bottom-right, a rectangle or ellipse draft (`--edit-kind
+  rect|filled-rect|ellipse|filled-ellipse`, `--opacity`) growing from near the
+  selection's top-left toward its bottom-right for half the run and shrinking back,
+  an obfuscate draft sliding across the desktop's middle row, idle selection, or all
+  of them.
 - `--scenario move|commit` (not in `all`): `move` drags one committed annotation
   across the selection's middle row, as an annotation edit does: each frame fills the
   edit previews and builds the obfuscate preview patches through the same code as the
@@ -347,10 +350,21 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   frame is built from the annotations moved halfway instead, as a frozen rebuild in
   the middle of an edit leaves it; edit frames must not take it for the edit's start.
 - `--arrow` (line): the line has an arrow head. `--flat` (line): it runs left to
-  right along the selection's middle row. `--line-dynamic` (line): the frozen
-  frame reads stale every frame, so the draft takes the dynamic path instead of
-  recompositing around itself; the two runs' frames must match at tolerance 0
-  (`ctest` runs this on WARP with a diagonal and a flat arrow).
+  right along the selection's middle row. `--past-selection` (line, shape): the
+  cursor runs past the selection's bottom-right (a shape's corner past the desktop's
+  too), so with `--annotated` the draft crosses the dim.
+- `--obfuscations K` (line, shape, obfuscate): K committed obfuscates across the
+  selection's middle row, under the draft.
+- `--draft-dynamic` (line, shape, obfuscate): the frozen frame reads stale during
+  each paint, so the draft takes the dynamic path instead of drawing over the frozen
+  frame. Use it for before-and-after numbers in one build.
+- `--verify-draft` (line, shape, obfuscate): every frame must take the frozen-frame
+  path, and is drawn again through the dynamic path; the run fails unless the two
+  match at tolerance 0. `ctest` runs it on WARP with `--annotated --obfuscations 1`
+  on `single-1080` for a diagonal arrow, a flat arrow past the selection, each shape
+  kind past the selection (two at `--opacity 50`) and an obfuscate draft with
+  `--draft-source`; and split per monitor on `jocelyn-desk` for a rectangle and the
+  obfuscate.
 - `--lifted` (needs `--annotated`): a lifted window capture with its own pixels shown
   over the selection, as a Ctrl-click window selection does. With
   `--lifted-as-screenshot` instead, there is no lifted window and the screenshot

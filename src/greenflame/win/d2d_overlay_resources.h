@@ -218,11 +218,13 @@ struct D2DOverlayResources final {
         std::vector<uint64_t> patch_ids = {};
     };
     EditCache edit_cache = {};
-    // How often the edit fast paths ran: frames drawn as a changed-area recomposite,
-    // and frames whose rebuild reused edit_below_bitmap. The render bench checks them.
+    // How often the fast paths ran: frames drawn as an edit's changed-area recomposite,
+    // frames whose rebuild reused edit_below_bitmap, and frames that drew a line, shape
+    // or obfuscate draft over the frozen frame. The render bench checks them.
     struct EditStats final {
         size_t region_frames = 0;
         size_t below_cache_hits = 0;
+        size_t draft_frames = 0;
     };
     EditStats edit_stats = {};
     // QPC ticks the last Paint_d2d_frame spent in its frame-latency wait (debug log).
