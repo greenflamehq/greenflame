@@ -22,4 +22,17 @@ if not exist "%GREENFLAME_VS_INSTALL%\Common7\Tools\VsDevCmd.bat" (
 )
 
 call "%GREENFLAME_VS_INSTALL%\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
-exit /b %ERRORLEVEL%
+if errorlevel 1 exit /b 1
+
+rem Pass "llvm" to put the VS-bundled LLVM (clang-cl, clang-format, clang-tidy)
+rem ahead of the runner's standalone LLVM, which is older than the Clang the MSVC
+rem STL requires. Not done by default: with LLVM first on PATH, CMake picks clang++
+rem for presets that name no compiler (the MSVC ones).
+if /i not "%~1"=="llvm" exit /b 0
+set "GREENFLAME_VS_LLVM=%GREENFLAME_VS_INSTALL%\VC\Tools\Llvm\x64\bin"
+if not exist "%GREENFLAME_VS_LLVM%\clang-cl.exe" (
+    echo Could not find the VS-bundled clang-cl under "%GREENFLAME_VS_LLVM%".
+    exit /b 1
+)
+set "PATH=%GREENFLAME_VS_LLVM%;%PATH%"
+exit /b 0
