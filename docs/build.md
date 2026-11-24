@@ -5,7 +5,7 @@ audience: contributors
 status: authoritative
 owners:
   - core-team
-last_updated: 2026-10-06
+last_updated: 2026-11-24
 tags:
   - build
   - cmake
