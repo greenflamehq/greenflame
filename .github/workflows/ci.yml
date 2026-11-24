@@ -60,4 +60,6 @@ jobs:
         run: |
           call scripts\gha-vs-dev-cmd.cmd llvm
           if errorlevel 1 exit /b 1
-          "C:\Program Files\Git\bin\bash.exe" -c "find src tests bench \( -name '*.cpp' -o -name '*.h' \) -print0 | xargs -0 clang-format --dry-run --Werror"
+          clang-format --version
+          if errorlevel 1 exit /b 1
+          "C:\Program Files\Git\bin\bash.exe" --noprofile --norc -eo pipefail -c "find src tests bench \( -name '*.cpp' -o -name '*.h' \) -print0 | xargs -0 clang-format --dry-run --Werror"
