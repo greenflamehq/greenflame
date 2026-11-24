@@ -130,43 +130,39 @@ if(BUILD_TESTING)
         )
     endforeach()
 
-    # A line or arrow draft over the frozen frame recomposites only around itself. The
-    # frame must match the same frame drawn through the dynamic path. The flat arrow
-    # gets one tight rect, so its head shows any reach that falls short.
-    foreach(greenflame_line_shape diagonal flat)
-        set(greenflame_line_args
-            --adapter warp --layout single-1080 --scenario line --annotated --arrow
-            --frames 10)
-        if(greenflame_line_shape STREQUAL "flat")
-            list(APPEND greenflame_line_args --flat)
-        endif()
-        list(APPEND greenflame_line_args --dump-frame 9)
-        set(greenflame_line_bmp
-            "${CMAKE_CURRENT_BINARY_DIR}/line_${greenflame_line_shape}_fast.bmp")
-        set(greenflame_line_dynamic_bmp
-            "${CMAKE_CURRENT_BINARY_DIR}/line_${greenflame_line_shape}_dynamic.bmp")
+    # Line, shape and obfuscate drafts draw over the frozen frame, and recomposite
+    # where they lie under the dim. Every frame must take that path and match the same
+    # frame drawn through the dynamic path. Shapes grow past the selection's and the
+    # desktop's edges and shrink back, over the --annotated strokes and a committed
+    # obfuscate. The flat arrow's head ends past the selection's edge, so a reach
+    # that falls short shows. The obfuscate draft slides across the selection's edges
+    # and over the committed one, its raster built from what is under it.
+    set(greenflame_draft_args_line --scenario line --arrow)
+    set(greenflame_draft_args_flat --scenario line --arrow --flat --past-selection)
+    set(greenflame_draft_args_rect --scenario shape --edit-kind rect --past-selection)
+    set(greenflame_draft_args_filled_rect
+        --scenario shape --edit-kind filled-rect --opacity 50 --past-selection)
+    set(greenflame_draft_args_ellipse
+        --scenario shape --edit-kind ellipse --opacity 50 --past-selection)
+    set(greenflame_draft_args_filled_ellipse
+        --scenario shape --edit-kind filled-ellipse --past-selection)
+    set(greenflame_draft_args_obfuscate --scenario obfuscate --draft-source)
+    foreach(greenflame_draft_case line flat rect filled_rect ellipse filled_ellipse
+            obfuscate)
         add_test(
-            NAME greenflame_render_bench_line_${greenflame_line_shape}_fast
-            COMMAND greenflame_render_bench ${greenflame_line_args}
-                "${greenflame_line_bmp}"
+            NAME greenflame_render_bench_draft_${greenflame_draft_case}
+            COMMAND greenflame_render_bench --adapter warp --layout single-1080
+                --annotated --obfuscations 1 --frames 7 --verify-draft
+                ${greenflame_draft_args_${greenflame_draft_case}}
         )
+    endforeach()
+    # One target per monitor: each target draws only its part of the draft.
+    foreach(greenflame_draft_case rect obfuscate)
         add_test(
-            NAME greenflame_render_bench_line_${greenflame_line_shape}_dynamic
-            COMMAND greenflame_render_bench ${greenflame_line_args}
-                "${greenflame_line_dynamic_bmp}" --line-dynamic
-        )
-        set_tests_properties(
-            greenflame_render_bench_line_${greenflame_line_shape}_fast
-            greenflame_render_bench_line_${greenflame_line_shape}_dynamic
-            PROPERTIES FIXTURES_SETUP greenflame_bench_line_${greenflame_line_shape}
-        )
-        add_test(
-            NAME greenflame_render_bench_line_${greenflame_line_shape}_diff
-            COMMAND greenflame_render_bench
-                --diff "${greenflame_line_bmp}" "${greenflame_line_dynamic_bmp}"
-        )
-        set_tests_properties(greenflame_render_bench_line_${greenflame_line_shape}_diff
-            PROPERTIES FIXTURES_REQUIRED greenflame_bench_line_${greenflame_line_shape}
+            NAME greenflame_render_bench_draft_${greenflame_draft_case}_split
+            COMMAND greenflame_render_bench --adapter warp --layout jocelyn-desk
+                --split-monitors --annotated --obfuscations 1 --frames 7 --verify-draft
+                ${greenflame_draft_args_${greenflame_draft_case}}
         )
     endforeach()
 

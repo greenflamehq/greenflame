@@ -793,7 +793,7 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - Record observed responsiveness and any input-to-display timings separately from
     the CPU-only benchmark; do not interpret its result as a frame-rate measurement.
 
-### GF-MAN-ANN-002F - Straight Lines Keep Up And Long Highlighters Undo Quickly
+### GF-MAN-ANN-002F - Straight Lines And Shape Drafts Keep Up, Long Highlighters Undo Quickly
 
 - Priority: `P1`
 - Run on: `ENV-B`, on the widest multi-monitor desk available.
@@ -802,14 +802,22 @@ unless a real end-to-end bug escapes into the Win32 shell:
      to the far opposite corner, pause until it straightens, then move the mouse
      fast and in wide circles for several seconds.
   2. With Line, then with Arrow, drag from one corner of the desktop to the far
-     opposite corner and keep moving the mouse fast for several seconds.
+     opposite corner and keep moving the mouse fast for several seconds. Then select
+     a region inset from every monitor edge, and drag Rectangle and Ellipse drafts,
+     outlined and filled (one of them at an opacity below 100), and an Obfuscate
+     draft, from inside the selection across its edge and back, growing and shrinking
+     them fast, over existing annotations and an existing obfuscation.
   3. Set `tools.highlighter.smoothing_mode` to `off`. Draw one Highlighter stroke for
      at least 10 seconds, release, then press Ctrl+Z and Ctrl+Shift+Z several times.
   4. Repeat steps 1 and 2 after a Ctrl-click window selection on a window that
      another window partly covers, drawing across the covered part.
 - Expected:
-  - In steps 1 and 2 the bar, line or arrow stays on the cursor with no visible lag
-    beyond the brush's, on every monitor. Its look matches the committed result.
+  - In steps 1 and 2 the bar, line, arrow, shape or obfuscate draft stays on the
+    cursor with no visible lag beyond the brush's, on every monitor. Its look
+    matches the committed result. The part of a draft outside the selection stays
+    under the dim, and a shrinking draft leaves nothing behind.
+  - The Obfuscate draft never shows the pixels it covers in the clear, inside or
+    outside the selection, on any frame.
   - In step 3 each undo and redo shows no visible pause, and the restored stroke
     looks the same as while it was drawn.
   - In step 4 the highlighter tints the lifted window's own pixels, never the

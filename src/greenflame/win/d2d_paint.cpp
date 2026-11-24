@@ -2338,11 +2338,10 @@ constexpr int32_t kFreehandDraftAntialiasMarginPx = 2;
     return core::RectPx::From_ltrb(0, 0, vd_width, vd_height);
 }
 
-// Pixels a stroke piece may touch, clipped to the desktop. Empty when none.
-[[nodiscard]] core::RectPx
-Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width_px,
-                            int vd_width, int vd_height) noexcept {
-    core::RectPx const bounds = core::Freehand_points_bounds(points, width_px);
+// bounds grown for antialiasing and clipped to the desktop. Empty when bounds is, or
+// when nothing is left on the desktop.
+[[nodiscard]] core::RectPx Antialiased_desktop_bounds(core::RectPx bounds, int vd_width,
+                                                      int vd_height) noexcept {
     if (bounds.Is_empty()) {
         return {};
     }
@@ -2353,6 +2352,14 @@ Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width
                                 bounds.bottom + kFreehandDraftAntialiasMarginPx);
     return core::RectPx::Clip(grown, Desktop_rect(vd_width, vd_height))
         .value_or(core::RectPx{});
+}
+
+// Pixels a stroke piece may touch, clipped to the desktop. Empty when none.
+[[nodiscard]] core::RectPx
+Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width_px,
+                            int vd_width, int vd_height) noexcept {
+    return Antialiased_desktop_bounds(core::Freehand_points_bounds(points, width_px),
+                                      vd_width, vd_height);
 }
 
 [[nodiscard]] core::RectPx Union_non_empty(core::RectPx a, core::RectPx b) noexcept {
@@ -2853,13 +2860,17 @@ void Draw_live_annotation_draft(ID2D1RenderTarget *rt, D2DOverlayResources &res,
     // Freehand drafts draw on their own path (Composite_freehand_draft_region).
 }
 
-// A line or arrow draft over an up-to-date frozen frame, or null. Such a frame is the
-// frozen bitmap plus a recomposite around the line, instead of a whole dynamic frame:
-// outside the selection the frozen bitmap is screenshot, annotations, dim; inside it,
-// screenshot and annotations, the same passes the dynamic path makes there.
-[[nodiscard]] core::LineAnnotation const *
-Line_draft_over_frozen(D2DOverlayResources const &res,
-                       D2DPaintInput const &input) noexcept {
+// A line, arrow, rectangle, ellipse or obfuscate draft over an up-to-date frozen
+// frame, or null. Such a frame is the frozen bitmap plus the draft, instead of a whole
+// dynamic frame: outside the selection the frozen bitmap is screenshot, annotations,
+// dim; inside it, screenshot and annotations, the same passes the dynamic path makes
+// there. These drafts draw source-over and read nothing but the pixels under them: no
+// effect samples another bitmap, as the highlighter's multiply does, and an obfuscate
+// draws its raster, built from the screenshot and annotations before the paint. Over
+// the same base they match the dynamic path (on WARP, to the pixel; on hardware a
+// translucent stroked ellipse can differ by a few levels on antialiased edges).
+[[nodiscard]] core::Annotation const *
+Draft_over_frozen(D2DOverlayResources const &res, D2DPaintInput const &input) noexcept {
     core::RectPx const restore_rect = Restore_rect(input);
     if (input.draft_annotation == nullptr || input.draft_text_annotation != nullptr ||
         !res.frozen_valid || !res.frozen_bitmap ||
@@ -2868,7 +2879,12 @@ Line_draft_over_frozen(D2DOverlayResources const &res,
         input.modifier_preview || input.lifted_window_bitmap != nullptr) {
         return nullptr;
     }
-    return std::get_if<core::LineAnnotation>(&input.draft_annotation->data);
+    core::AnnotationData const &data = input.draft_annotation->data;
+    bool const supported = std::holds_alternative<core::LineAnnotation>(data) ||
+                           std::holds_alternative<core::RectangleAnnotation>(data) ||
+                           std::holds_alternative<core::EllipseAnnotation>(data) ||
+                           std::holds_alternative<core::ObfuscateAnnotation>(data);
+    return supported ? input.draft_annotation : nullptr;
 }
 
 // Pixels the line may touch on either side of its axis, as a Segment_cover_rects
@@ -2882,6 +2898,25 @@ Line_draft_over_frozen(D2DOverlayResources const &res,
     }
     return static_cast<int32_t>(std::ceil(half_extent)) +
            kFreehandDraftAntialiasMarginPx;
+}
+
+// Rects covering every pixel a Draft_over_frozen draft may touch, clipped to the
+// desktop: a line's Segment_cover_rects, else the draft's visual bounds grown for
+// antialiasing.
+[[nodiscard]] std::vector<core::RectPx> Draft_cover_rects(core::Annotation const &draft,
+                                                          int vd_width, int vd_height) {
+    if (core::LineAnnotation const *const line =
+            std::get_if<core::LineAnnotation>(&draft.data);
+        line != nullptr) {
+        return Segment_cover_rects(line->start, line->end, Line_draft_reach_px(*line),
+                                   vd_width, vd_height);
+    }
+    core::RectPx const cover = Antialiased_desktop_bounds(
+        core::Annotation_visual_bounds(draft).Normalized(), vd_width, vd_height);
+    if (cover.Is_empty()) {
+        return {};
+    }
+    return {cover};
 }
 
 void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
@@ -3287,7 +3322,9 @@ struct FramePlan final {
     // edit_clips, the pixels the edit changed.
     bool edit_region = false;
     std::vector<core::RectPx> edit_clips = {};
-    core::LineAnnotation const *line_draft = nullptr;
+    // A draft drawn over the frozen frame (Draft_over_frozen), and its cover rects.
+    core::Annotation const *frozen_draft = nullptr;
+    std::vector<core::RectPx> frozen_draft_clips = {};
 };
 
 // A selection drag, resize or move with nothing else going on: no draft, edit,
@@ -3308,8 +3345,8 @@ struct FramePlan final {
 }
 
 // False when the live annotation draft cannot touch target_rect, so that target skips
-// drawing it: an obfuscate draft uploads a new bitmap on every draw. Text drafts, and
-// drafts with no known bounds, always draw.
+// its draw calls. An obfuscate draft's upload is shared by every target. Text drafts,
+// and drafts with no known bounds, always draw.
 [[nodiscard]] bool Live_annotation_draft_touches(D2DPaintInput const &input,
                                                  core::RectPx target_rect) noexcept {
     if (input.draft_text_annotation != nullptr || input.draft_annotation == nullptr) {
@@ -3594,9 +3631,10 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
     }
 
     // Any live annotation draft must be drawn before the dim so the dim sits on top
-    // outside the selection: it never takes the steady path. Freehand drafts and line
-    // drafts over a valid frozen frame recomposite around themselves; any other draft
-    // takes the dynamic path.
+    // outside the selection: it never takes the steady path. Freehand drafts
+    // recomposite around themselves; line, shape and obfuscate drafts over a valid
+    // frozen frame draw over it (Draft_over_frozen); any other draft takes the dynamic
+    // path.
     plan.selection_gesture = selection_gesture && frozen_ready;
     // An annotation edit with nothing else going on, over the frozen frame of the
     // edit's start, recomposites only what the edit changed. A lifted window is not in
@@ -3617,8 +3655,12 @@ void Prepare_frame(D2DOverlayResources &res, D2DPaintInput const &input, int vd_
                            !input.move_dragging && !input.annotation_editing &&
                            !input.modifier_preview && !plan.has_live_annotation_draft &&
                            input.lifted_window_bitmap == nullptr;
-    plan.line_draft =
-        plan.freehand_draft ? nullptr : Line_draft_over_frozen(res, input);
+    plan.frozen_draft = plan.freehand_draft ? nullptr : Draft_over_frozen(res, input);
+    if (plan.frozen_draft != nullptr) {
+        plan.frozen_draft_clips =
+            Draft_cover_rects(*plan.frozen_draft, vd_width, vd_height);
+        ++res.edit_stats.draft_frames;
+    }
 }
 
 // Draws the frame's content into rt, which is inside BeginDraw with the world
@@ -3649,21 +3691,37 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                                             Desktop_rect(vd_width, vd_height),
                                             &plan.freehand_live, vd_width, vd_height);
         }
-    } else if (plan.line_draft != nullptr) {
-        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Line_draft");
+    } else if (plan.frozen_draft != nullptr) {
+        GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Frozen_draft");
+        // Every pixel starts from the frozen frame, so a draft that shrank leaves no
+        // stale pixels behind.
         Draw_bitmap_pixels_1to1(rt, res.frozen_bitmap.Get(),
                                 Desktop_rect(vd_width, vd_height), vd_width, vd_height);
-        for (core::RectPx const &clip : Segment_cover_rects(
-                 plan.line_draft->start, plan.line_draft->end,
-                 Line_draft_reach_px(*plan.line_draft), vd_width, vd_height)) {
-            if (!Touches(clip, target_rect)) {
-                continue;
+        core::Annotation const &draft = *plan.frozen_draft;
+        core::RectPx const restore_rect = Restore_rect(input);
+        // Inside the selection the dynamic path ends with screenshot, annotations and
+        // the draft, clipped to the selection: the frozen frame is the first two.
+        if (draft_here && !restore_rect.Is_empty()) {
+            rt->PushAxisAlignedClip(Rect(restore_rect), D2D1_ANTIALIAS_MODE_ALIASED);
+            Draw_annotation(rt, res, draft);
+            rt->PopAxisAlignedClip();
+        }
+        // Outside it the draft lies under the dim: recomposite the parts of its cover
+        // rects there.
+        for (core::RectPx const &clip : plan.frozen_draft_clips) {
+            for (core::RectPx const &band :
+                 Dim_bands(restore_rect, vd_width, vd_height)) {
+                std::optional<core::RectPx> const piece =
+                    core::RectPx::Intersect(clip, band);
+                if (!piece.has_value() || piece->Is_empty() ||
+                    !Touches(*piece, target_rect)) {
+                    continue;
+                }
+                Composite_draft_region(rt, res, input, *piece, vd_width, vd_height,
+                                       [&](ID2D1RenderTarget *target, bool) {
+                                           Draw_annotation(target, res, draft);
+                                       });
             }
-            Composite_draft_region(rt, res, input, clip, vd_width, vd_height,
-                                   [&](ID2D1RenderTarget *target, bool) {
-                                       Draw_annotation(target, res,
-                                                       *input.draft_annotation);
-                                   });
         }
     } else if (plan.selection_gesture) {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Selection_gesture");
@@ -3756,8 +3814,9 @@ void Draw_frame(ID2D1RenderTarget *rt, D2DOverlayResources &res,
         }
     }
 
-    // Draft visuals were already composited above (freehand, line or dynamic path);
-    // skip them here so Draw_live_layer does not draw them again on top of the dim.
+    // Draft visuals were already composited above (freehand, frozen draft or dynamic
+    // path); skip them here so Draw_live_layer does not draw them again on top of the
+    // dim.
     {
         GREENFLAME_PROFILE_SCOPE("D2DPaint::Paint_d2d_frame::Live_layer");
         Draw_live_layer(rt, res, input, vd_width, vd_height,

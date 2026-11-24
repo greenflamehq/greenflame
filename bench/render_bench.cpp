@@ -61,6 +61,9 @@ constexpr int32_t kBrushWidthPx = 11;
 constexpr int32_t kHighlighterWidthPx = 20;
 constexpr int32_t kLineWidthPx = 4;
 constexpr COLORREF kLineColor = RGB(0, 128, 255);
+// shape: the rectangle or ellipse draft's stroke.
+constexpr int32_t kShapeWidthPx = 6;
+constexpr COLORREF kShapeColor = RGB(255, 64, 0);
 constexpr COLORREF kBrushColor = RGB(255, 0, 0);
 constexpr COLORREF kHighlighterColor = RGB(255, 255, 0);
 constexpr uint32_t kNoiseSeed = 0x12345678u;
@@ -231,7 +234,7 @@ struct Args final {
     bool lifted_as_screenshot = false; // --lifted-as-screenshot
     bool arrow = false;                // --arrow
     bool flat = false;                 // --flat
-    bool line_dynamic = false;         // --line-dynamic
+    bool draft_dynamic = false;        // --draft-dynamic
     bool select_dynamic = false;       // --select-dynamic
     bool stale_frozen = false;         // --stale-frozen
     bool resize = false;               // --resize
@@ -239,6 +242,8 @@ struct Args final {
     bool multi = false;                // --multi
     bool edit_dynamic = false;         // --edit-dynamic
     bool verify_edit = false;          // --verify-edit
+    bool verify_draft = false;         // --verify-draft
+    bool past_selection = false;       // --past-selection
     bool click_first = false;          // --click-first
     bool click_moved = false;          // --click-moved
     bool raster_load = false;          // --raster-load
@@ -263,13 +268,13 @@ void Print_usage() {
         "  --layout jocelyn-desk|4k-desk|single-1080|current   (default jocelyn-desk)\n"
         "  --adapter default|N|warp     D3D adapter (default: what the app uses)\n"
         "  --list-adapters              print DXGI adapters and exit\n"
-        "  --scenario hover|select|brush|highlighter|line|obfuscate|steady|all   "
+        "  --scenario hover|select|brush|highlighter|line|shape|obfuscate|steady|all   "
         "(default all), or move|commit (not in all)\n"
         "  --smooth on|off              freehand smoothing (default on)\n"
         "  --step PX                    px between freehand points (default 8)\n"
         "  --points-per-frame N         freehand points added per frame (default 1)\n"
         "  --opacity N                  stroke opacity percent, 0-100 (default 100 "
-        "brush, 33 highlighter)\n"
+        "brush and shape, 33 highlighter)\n"
         "  --straighten-at K            highlighter: from frame K the stroke is its "
         "first and newest point\n"
         "  --diagonal                   freehand: points run from the selection's "
@@ -284,12 +289,14 @@ void Print_usage() {
         "highlighter strokes\n"
         "  --edit-kind K                move: the moved annotation, rect (default), "
         "filled-rect, ellipse, filled-ellipse, line, arrow, brush, highlighter, "
-        "obfuscate, text or bubble\n"
+        "obfuscate, text or bubble; shape: the draft, rect (default), filled-rect, "
+        "ellipse or filled-ellipse\n"
         "  --multi                      move: also move an ellipse below it (a "
         "multi-selection body move)\n"
         "  --obfuscations K             move, commit: K obfuscates across the "
         "selection's "
-        "middle row, above the moved annotation\n"
+        "middle row, above the moved annotation; line, shape, obfuscate: K committed "
+        "obfuscates there, under the draft\n"
         "  --obfuscate-below            move: the obfuscates sit below the moved "
         "annotation\n"
         "  --stroke-points N            points per --annotated stroke (default 64)\n"
@@ -343,8 +350,13 @@ void Print_usage() {
         "  --arrow                      line: draw an arrow head\n"
         "  --flat                       line: run left to right along the selection's "
         "middle row\n"
-        "  --line-dynamic               line: skip the frozen-frame path (the frozen "
-        "frame reads stale every frame); frames must match without it\n"
+        "  --draft-dynamic              line, shape, obfuscate: skip the frozen-frame "
+        "path (the frozen frame reads stale during each paint)\n"
+        "  --past-selection             line, shape: the cursor runs past the "
+        "selection's bottom-right edge (shape: past the desktop's too)\n"
+        "  --verify-draft               line, shape, obfuscate: every frame must take "
+        "the frozen-frame path and match the same frame drawn again through the "
+        "dynamic path at tolerance 0\n"
         "  --select-dynamic             select: skip the selection-gesture path (the "
         "frozen frame reads stale every frame); frames must match without it\n"
         "  --stale-frozen               build the frozen frame for no selection before "
@@ -527,8 +539,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.split_monitors = true;
         } else if (key == "--mask-monitors") {
             args.mask_monitors = true;
-        } else if (key == "--line-dynamic") {
-            args.line_dynamic = true;
+        } else if (key == "--draft-dynamic") {
+            args.draft_dynamic = true;
         } else if (key == "--select-dynamic") {
             args.select_dynamic = true;
         } else if (key == "--stale-frozen") {
@@ -539,6 +551,10 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.edit_dynamic = true;
         } else if (key == "--verify-edit") {
             args.verify_edit = true;
+        } else if (key == "--verify-draft") {
+            args.verify_draft = true;
+        } else if (key == "--past-selection") {
+            args.past_selection = true;
         } else if (key == "--click-first") {
             args.click_first = true;
         } else if (key == "--click-moved") {
@@ -938,8 +954,20 @@ int Run_diff(Args const &args) {
 // B1: scenarios
 // ---------------------------------------------------------------------------
 
-constexpr std::array<std::string_view, 7> kAllScenarios = {
-    {"hover", "select", "brush", "highlighter", "line", "obfuscate", "steady"}};
+constexpr std::array<std::string_view, 8> kAllScenarios = {
+    {"hover", "select", "brush", "highlighter", "line", "shape", "obfuscate",
+     "steady"}};
+
+// line, shape, obfuscate: the scenarios that drag an annotation draft.
+bool Is_draft(std::string_view scenario) {
+    return scenario == "line" || scenario == "shape" || scenario == "obfuscate";
+}
+
+// shape: whether --edit-kind names a rectangle or ellipse.
+bool Is_shape_kind(std::string_view kind) {
+    return kind == "rect" || kind == "filled-rect" || kind == "ellipse" ||
+           kind == "filled-ellipse";
+}
 
 constexpr double kCyclesPerMegacycle = 1'000'000.0;
 
@@ -948,7 +976,8 @@ bool Is_freehand(std::string_view scenario) {
 }
 
 // --opacity, or the tool's default: 100 for the brush, the app default for the
-// highlighter.
+// highlighter. The shape draft reads --opacity directly (default 100), on its style
+// only.
 int Stroke_opacity_percent(std::string_view scenario, Args const &args) {
     return scenario == "highlighter" && !args.opacity_given
                ? core::kDefaultHighlighterOpacityPercent
@@ -959,6 +988,7 @@ struct ScenarioState final {
     std::vector<core::PointPx> points = {};
     std::vector<core::PointPx> straightened = {}; // --straighten-at: first and newest
     core::Annotation line = {};                   // line: the draft annotation
+    core::Annotation shape = {};                  // shape: the draft annotation
     core::Annotation obfuscate = {};              // obfuscate: the draft annotation
     // --draft-source: the draft rebuilt from this source over these annotations.
     core::IObfuscateSourceProvider *draft_source = nullptr;
@@ -1040,10 +1070,19 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         }
     } else if (scenario == "line" && frame >= 0) {
         // Line tool drag: from near the selection's top-left (--flat: left middle) to
-        // the cursor.
+        // the cursor. --past-selection: the cursor ends near the desktop's
+        // bottom-right, past the selection's edge with --annotated.
         core::RectPx const sel = input.final_selection;
         auto const at = [&](int64_t t) {
             core::PointPx p = Diagonal_point(sel, t, frames);
+            if (args.past_selection) {
+                core::PointPx const from = Diagonal_point(sel, 0, frames);
+                int64_t const steps = std::max(1, frames - 1);
+                p = {static_cast<int32_t>(from.x + (width - kSweepMarginPx - from.x) *
+                                                       t / steps),
+                     static_cast<int32_t>(from.y + (height - kSweepMarginPx - from.y) *
+                                                       t / steps)};
+            }
             if (args.flat) {
                 p.y = (sel.top + sel.bottom) / 2;
             }
@@ -1058,6 +1097,42 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
         state.line = core::Annotation{.id = 1, .data = line};
         input.draft_annotation = &state.line;
         input.cursor_client_px = line.end;
+    } else if (scenario == "shape" && frame >= 0) {
+        // A rectangle or ellipse drag from near the selection's top-left. The far
+        // corner runs toward the selection's bottom-right for the first half of the
+        // run, then back: the draft grows, then shrinks to its start.
+        // --past-selection: it runs a quarter of the desktop past the desktop's
+        // bottom-right, so the draft crosses the selection's edge (with --annotated)
+        // and the desktop's, growing and shrinking.
+        core::RectPx const sel = input.final_selection;
+        core::PointPx const anchor = {sel.left + kFreehandEdgeInsetPx,
+                                      sel.top + kFreehandEdgeInsetPx};
+        int64_t const half = std::max(1, last / 2);
+        int64_t const phase = i <= half ? i : std::max<int64_t>(0, last - i);
+        int64_t const far_x =
+            args.past_selection ? width + width / 4 : sel.right - kFreehandEdgeInsetPx;
+        int64_t const far_y = args.past_selection ? height + height / 4
+                                                  : sel.bottom - kFreehandEdgeInsetPx;
+        core::PointPx const corner = {
+            static_cast<int32_t>(anchor.x + (far_x - anchor.x) * phase / half),
+            static_cast<int32_t>(anchor.y + (far_y - anchor.y) * phase / half)};
+        core::RectPx const box = core::RectPx::From_ltrb(
+            anchor.x, anchor.y, std::max(corner.x, anchor.x + 1),
+            std::max(corner.y, anchor.y + 1));
+        core::StrokeStyle const style{.width_px = kShapeWidthPx,
+                                      .color = kShapeColor,
+                                      .opacity_percent = args.opacity_percent};
+        bool const filled = args.edit_kind.starts_with("filled-");
+        if (args.edit_kind.ends_with("ellipse")) {
+            state.shape.data = core::EllipseAnnotation{
+                .outer_bounds = box, .style = style, .filled = filled};
+        } else {
+            state.shape.data = core::RectangleAnnotation{
+                .outer_bounds = box, .style = style, .filled = filled};
+        }
+        state.shape.id = 1;
+        input.draft_annotation = &state.shape;
+        input.cursor_client_px = corner;
     } else if (scenario == "obfuscate" && frame >= 0) {
         // An obfuscate draft sliding left to right across the desktop's middle row,
         // over every monitor boundary. Its raster stays the same; only bounds move.
@@ -1174,8 +1249,8 @@ core::StrokeStyle Freehand_style(std::string_view scenario, Args const &args) {
 
 void Set_scenario_base(std::string_view scenario, int width, int height,
                        Args const &args, D2DPaintInput &input) {
-    if (scenario == "steady" || scenario == "line" || scenario == "obfuscate" ||
-        Is_freehand(scenario) || (scenario == "select" && args.resize)) {
+    if (scenario == "steady" || Is_draft(scenario) || Is_freehand(scenario) ||
+        (scenario == "select" && args.resize)) {
         input.final_selection = args.annotated || args.resize
                                     ? Inset_selection(width, height)
                                     : core::RectPx::From_ltrb(0, 0, width, height);
@@ -1429,6 +1504,25 @@ bool Commit_obfuscate(std::vector<core::Annotation> &doc, size_t index,
     return true;
 }
 
+// --obfuscations K: K obfuscates spread across the --annotated selection's middle
+// row, with no raster yet.
+std::vector<core::Annotation> Middle_row_obfuscates(int width, int height, int count,
+                                                    uint64_t &next_id) {
+    core::RectPx const sel = Inset_selection(width, height);
+    int32_t const mid_y = (sel.top + sel.bottom) / 2;
+    std::vector<core::Annotation> obfuscates;
+    for (int k = 0; k < count; ++k) {
+        int32_t const center_x =
+            sel.left + static_cast<int32_t>(static_cast<int64_t>(sel.Width()) *
+                                            (k + 1) / (count + 1));
+        core::RectPx const box = core::RectPx::From_ltrb(
+            center_x - kEditObfuscateWidthPx / 2, mid_y - kEditObfuscateHeightPx / 2,
+            center_x + kEditObfuscateWidthPx / 2, mid_y + kEditObfuscateHeightPx / 2);
+        obfuscates.push_back(*Make_edit_annotation("obfuscate", box, next_id++));
+    }
+    return obfuscates;
+}
+
 // move and commit: the document, what moves, and the obfuscate source.
 struct EditScene final {
     EditScene() = default;
@@ -1470,16 +1564,8 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
     int32_t const mid_y = (sel.top + sel.bottom) / 2;
     uint64_t next_id = kEditFirstId;
 
-    std::vector<core::Annotation> obfuscates;
-    for (int k = 0; k < args.obfuscations; ++k) {
-        int32_t const center_x =
-            sel.left + static_cast<int32_t>(static_cast<int64_t>(sel.Width()) *
-                                            (k + 1) / (args.obfuscations + 1));
-        core::RectPx const box = core::RectPx::From_ltrb(
-            center_x - kEditObfuscateWidthPx / 2, mid_y - kEditObfuscateHeightPx / 2,
-            center_x + kEditObfuscateWidthPx / 2, mid_y + kEditObfuscateHeightPx / 2);
-        obfuscates.push_back(*Make_edit_annotation("obfuscate", box, next_id++));
-    }
+    std::vector<core::Annotation> obfuscates =
+        Middle_row_obfuscates(width, height, args.obfuscations, next_id);
     if (args.stacked && !obfuscates.empty()) {
         // Above the first obfuscate and overlapping it, but off the move's path (its
         // bottom just above the moved box's top). Its source holds the first one's
@@ -1799,6 +1885,23 @@ core::Annotation Committed_stroke(std::span<const core::PointPx> raw,
     return core::Annotation{.id = id, .data = stroke};
 }
 
+// Pixels that differ between two packed BGRA buffers of the same size.
+size_t Count_differing_pixels(std::span<const uint8_t> a, std::span<const uint8_t> b) {
+    // Whole-buffer compare first: a per-pixel loop over a desktop-sized buffer takes
+    // seconds per frame in debug builds.
+    if (std::ranges::equal(a, b)) {
+        return 0;
+    }
+    size_t differing = 0;
+    for (size_t at = 0; at < a.size(); at += kBytesPerPixel) {
+        if (!std::ranges::equal(a.subspan(at, kBytesPerPixel),
+                                b.subspan(at, kBytesPerPixel))) {
+            ++differing;
+        }
+    }
+    return differing;
+}
+
 // --verify-edit: reads the frame just drawn, draws it again with the edit fast paths
 // off, and returns the number of pixels that differ (nullopt if a step failed). The
 // edit caches stay as they were for the next frame. The redraw first runs with the
@@ -1834,20 +1937,7 @@ std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
             return std::nullopt;
         }
     }
-    // Whole-buffer compare first: a per-pixel loop over a desktop-sized buffer takes
-    // seconds per frame in debug builds.
-    if (std::ranges::equal(fast, full)) {
-        return 0;
-    }
-    size_t differing = 0;
-    for (size_t at = 0; at < fast.size(); at += kBytesPerPixel) {
-        if (!std::equal(fast.begin() + static_cast<std::ptrdiff_t>(at),
-                        fast.begin() + static_cast<std::ptrdiff_t>(at + kBytesPerPixel),
-                        full.begin() + static_cast<std::ptrdiff_t>(at))) {
-            ++differing;
-        }
-    }
-    return differing;
+    return Count_differing_pixels(fast, full);
 }
 
 // --verify-edit, every move frame: the privacy check. Every obfuscate is rebuilt from
@@ -2047,19 +2137,28 @@ std::optional<size_t> Steady_differs_from_rebuild(D2DOverlayResources &res,
         !Read_targets(res, width, height, fresh)) {
         return std::nullopt;
     }
-    if (std::ranges::equal(cached, fresh)) {
-        return 0;
+    return Count_differing_pixels(cached, fresh);
+}
+
+// --verify-draft: reads the frame just drawn, draws it again through the dynamic path
+// (the frozen frame reads stale), and returns the number of pixels that differ
+// (nullopt if a step failed). The frozen frame stays valid for the next frame.
+std::optional<size_t> Verify_draft_frame(D2DOverlayResources &res,
+                                         D2DPaintInput const &input, int width,
+                                         int height) {
+    std::vector<uint8_t> fast;
+    std::vector<uint8_t> dynamic;
+    if (!Read_targets(res, width, height, fast)) {
+        return std::nullopt;
     }
-    size_t differing = 0;
-    for (size_t at = 0; at < cached.size(); at += kBytesPerPixel) {
-        if (!std::equal(cached.begin() + static_cast<std::ptrdiff_t>(at),
-                        cached.begin() +
-                            static_cast<std::ptrdiff_t>(at + kBytesPerPixel),
-                        fresh.begin() + static_cast<std::ptrdiff_t>(at))) {
-            ++differing;
-        }
+    res.frozen_valid = false;
+    bool const ok = Paint_d2d_frame(res, input, width, height, nullptr,
+                                    kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
+    res.frozen_valid = true;
+    if (!ok || !Read_targets(res, width, height, dynamic)) {
+        return std::nullopt;
     }
-    return differing;
+    return Count_differing_pixels(fast, dynamic);
 }
 
 // Runs one scenario once. Returns the frame-time p95, or nullopt on paint failure.
@@ -2075,6 +2174,23 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         args.annotated
             ? Make_bench_annotations(ctx.width, ctx.height, args.stroke_points)
             : std::vector<core::Annotation>{};
+    // line, shape, obfuscate --obfuscations K: committed obfuscates under the draft.
+    if (Is_draft(scenario) && args.obfuscations > 0) {
+        std::unique_ptr<BenchObfuscateSource> const source =
+            Make_bench_obfuscate_source(ctx.width, ctx.height, args);
+        if (source == nullptr) {
+            return std::nullopt;
+        }
+        uint64_t next_id = kEditFirstId;
+        for (core::Annotation &obfuscate :
+             Middle_row_obfuscates(ctx.width, ctx.height, args.obfuscations, next_id)) {
+            annotations.push_back(std::move(obfuscate));
+            if (!Commit_obfuscate(annotations, annotations.size() - 1, *source)) {
+                Print("obfuscations: a committed obfuscate could not be built\n");
+                return std::nullopt;
+            }
+        }
+    }
     input.annotations = annotations;
     Rebuild_annotations_bitmap(*ctx.res, annotations);
     ctx.res->frozen_valid = false;
@@ -2197,6 +2313,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     ctx.res->edit_stats = {};
     size_t verify_differing_frames = 0;
     size_t verify_reuploads = 0;
+    size_t verify_draft_differing_frames = 0;
     ScenarioState state;
     std::unique_ptr<BenchObfuscateSource> draft_source = nullptr;
     if (scenario == "obfuscate" && args.draft_source) {
@@ -2242,16 +2359,23 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
         }
-        if (args.line_dynamic || (args.select_dynamic && scenario == "select")) {
-            // A stale frozen frame sends a line draft or a selection gesture down the
+        if ((args.draft_dynamic && Is_draft(scenario)) ||
+            (args.select_dynamic && scenario == "select")) {
+            // A stale frozen frame sends a draft or a selection gesture down the
             // dynamic path.
             ctx.res->frozen_valid = false;
         }
+        size_t const draft_frames_before = ctx.res->edit_stats.draft_frames;
         bool const ok = Paint_d2d_frame(*ctx.res, input, ctx.width, ctx.height, nullptr,
                                         kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
         LARGE_INTEGER const t1 = Now();
         ULONG64 cycles1 = 0;
         (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
+        if (args.draft_dynamic && Is_draft(scenario)) {
+            // The dynamic path leaves the frozen frame as it was: the next frame needs
+            // no rebuild, so its numbers are the dynamic path's alone.
+            ctx.res->frozen_valid = true;
+        }
         context->End(ctx.queries->stats.Get());
         context->End(ctx.queries->end.Get());
         context->End(ctx.queries->disjoint.Get());
@@ -2310,6 +2434,24 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             }
             verify_reuploads += reuploads;
         }
+        // --verify-draft: the frame took the frozen-frame path, and matches the same
+        // frame drawn through the dynamic path, outside timing.
+        if (args.verify_draft && Is_draft(scenario)) {
+            if (ctx.res->edit_stats.draft_frames != draft_frames_before + 1) {
+                Print("verify-draft: frame {} did not take the frozen-frame path\n", f);
+                return std::nullopt;
+            }
+            std::optional<size_t> const differing =
+                Verify_draft_frame(*ctx.res, input, ctx.width, ctx.height);
+            if (!differing.has_value()) {
+                Print("verify-draft: readback failed\n");
+                return std::nullopt;
+            }
+            if (*differing > 0) {
+                ++verify_draft_differing_frames;
+                Print("verify-draft: frame {} differs in {} pixels\n", f, *differing);
+            }
+        }
         // Readback happens after the frame's numbers are taken, outside timing.
         if (dump_here && f == args.dump_frame) {
             if (!Dump_target(*ctx.res, ctx.width, ctx.height, args.dump_path)) {
@@ -2320,6 +2462,13 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         }
     }
 
+    if (args.verify_draft && Is_draft(scenario)) {
+        Print("verify-draft: {} of {} frames differ\n", verify_draft_differing_frames,
+              args.frames);
+        if (verify_draft_differing_frames > 0) {
+            return std::nullopt;
+        }
+    }
     if (args.verify_edit && edit.has_value()) {
         Print("verify-edit: {} of {} frames differ\n", verify_differing_frames,
               args.frames);
@@ -2692,6 +2841,11 @@ int Run_render_bench(Args const &args) {
         scenarios.push_back(args.scenario);
     } else {
         Print("unknown scenario: {}\n", args.scenario);
+        return static_cast<int>(BenchExit::BadArgs);
+    }
+    if (std::ranges::find(scenarios, std::string_view("shape")) != scenarios.end() &&
+        !Is_shape_kind(args.edit_kind)) {
+        Print("shape: unknown --edit-kind {}\n", args.edit_kind);
         return static_cast<int>(BenchExit::BadArgs);
     }
     // --dump-frame equal to --frames dumps a freehand scenario's release frame.
