@@ -320,9 +320,9 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
 - `--annotated`: steady and freehand scenarios use a selection inset by an eighth of
   the desktop and committed brush and highlighter strokes crossing its edge, so
   frames carry dimmed pixels and annotations.
-- `--opacity N` (default 100 for the brush, 33 for the highlighter): stroke opacity
-  percent, set on the style and as the blit opacity, as the app does. Below 100 shows
-  double compositing that an opaque stroke hides.
+- `--opacity N` (default 100 for the brush and the shape, 33 for the highlighter):
+  stroke opacity percent, set on the style and, for freehand, as the blit opacity, as
+  the app does. Below 100 shows double compositing that an opaque stroke hides.
 - `--straighten-at K`: highlighter only. From frame K the stroke is its first and
   newest point, as after a pause-to-straighten. Dump frame F with `--straighten-at K`
   (K < F) and with `--straighten-at F`: the two must match at tolerance 0.
@@ -360,7 +360,9 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   frame. Use it for before-and-after numbers in one build.
 - `--verify-draft` (line, shape, obfuscate): every frame must take the frozen-frame
   path, and is drawn again through the dynamic path; the run fails unless the two
-  match at tolerance 0. `ctest` runs it on WARP with `--annotated --obfuscations 1`
+  match at tolerance 0. Pixel identity is guaranteed on WARP. On hardware a
+  translucent stroked ellipse can differ by a few levels on antialiased edges (up to
+  7/255 in tens of pixels on NVIDIA); other drafts match there too. `ctest` runs it on WARP with `--annotated --obfuscations 1`
   on `single-1080` for a diagonal arrow, a flat arrow past the selection, each shape
   kind past the selection (two at `--opacity 50`) and an obfuscate draft with
   `--draft-source`; and split per monitor on `jocelyn-desk` for a rectangle and the

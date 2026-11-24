@@ -976,7 +976,8 @@ bool Is_freehand(std::string_view scenario) {
 }
 
 // --opacity, or the tool's default: 100 for the brush, the app default for the
-// highlighter.
+// highlighter. The shape draft reads --opacity directly (default 100), on its style
+// only.
 int Stroke_opacity_percent(std::string_view scenario, Args const &args) {
     return scenario == "highlighter" && !args.opacity_given
                ? core::kDefaultHighlighterOpacityPercent
@@ -2358,7 +2359,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
             Rebuild_frozen_bitmap(*ctx.res, input.final_selection, ctx.width,
                                   ctx.height);
         }
-        if (args.draft_dynamic || (args.select_dynamic && scenario == "select")) {
+        if ((args.draft_dynamic && Is_draft(scenario)) ||
+            (args.select_dynamic && scenario == "select")) {
             // A stale frozen frame sends a draft or a selection gesture down the
             // dynamic path.
             ctx.res->frozen_valid = false;
@@ -2369,7 +2371,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         LARGE_INTEGER const t1 = Now();
         ULONG64 cycles1 = 0;
         (void)QueryThreadCycleTime(GetCurrentThread(), &cycles1);
-        if (args.draft_dynamic) {
+        if (args.draft_dynamic && Is_draft(scenario)) {
             // The dynamic path leaves the frozen frame as it was: the next frame needs
             // no rebuild, so its numbers are the dynamic path's alone.
             ctx.res->frozen_valid = true;

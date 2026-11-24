@@ -2338,11 +2338,10 @@ constexpr int32_t kFreehandDraftAntialiasMarginPx = 2;
     return core::RectPx::From_ltrb(0, 0, vd_width, vd_height);
 }
 
-// Pixels a stroke piece may touch, clipped to the desktop. Empty when none.
-[[nodiscard]] core::RectPx
-Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width_px,
-                            int vd_width, int vd_height) noexcept {
-    core::RectPx const bounds = core::Freehand_points_bounds(points, width_px);
+// bounds grown for antialiasing and clipped to the desktop. Empty when bounds is, or
+// when nothing is left on the desktop.
+[[nodiscard]] core::RectPx Antialiased_desktop_bounds(core::RectPx bounds, int vd_width,
+                                                      int vd_height) noexcept {
     if (bounds.Is_empty()) {
         return {};
     }
@@ -2353,6 +2352,14 @@ Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width
                                 bounds.bottom + kFreehandDraftAntialiasMarginPx);
     return core::RectPx::Clip(grown, Desktop_rect(vd_width, vd_height))
         .value_or(core::RectPx{});
+}
+
+// Pixels a stroke piece may touch, clipped to the desktop. Empty when none.
+[[nodiscard]] core::RectPx
+Freehand_draft_piece_bounds(std::span<const core::PointPx> points, int32_t width_px,
+                            int vd_width, int vd_height) noexcept {
+    return Antialiased_desktop_bounds(core::Freehand_points_bounds(points, width_px),
+                                      vd_width, vd_height);
 }
 
 [[nodiscard]] core::RectPx Union_non_empty(core::RectPx a, core::RectPx b) noexcept {
@@ -2857,8 +2864,11 @@ void Draw_live_annotation_draft(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 // frame, or null. Such a frame is the frozen bitmap plus the draft, instead of a whole
 // dynamic frame: outside the selection the frozen bitmap is screenshot, annotations,
 // dim; inside it, screenshot and annotations, the same passes the dynamic path makes
-// there. Each of these drafts draws the same pixels over any base: an obfuscate draws
-// its raster, built from the screenshot and annotations before the paint.
+// there. These drafts draw source-over and read nothing but the pixels under them: no
+// effect samples another bitmap, as the highlighter's multiply does, and an obfuscate
+// draws its raster, built from the screenshot and annotations before the paint. Over
+// the same base they match the dynamic path (on WARP, to the pixel; on hardware a
+// translucent stroked ellipse can differ by a few levels on antialiased edges).
 [[nodiscard]] core::Annotation const *
 Draft_over_frozen(D2DOverlayResources const &res, D2DPaintInput const &input) noexcept {
     core::RectPx const restore_rect = Restore_rect(input);
@@ -2901,18 +2911,12 @@ Draft_over_frozen(D2DOverlayResources const &res, D2DPaintInput const &input) no
         return Segment_cover_rects(line->start, line->end, Line_draft_reach_px(*line),
                                    vd_width, vd_height);
     }
-    core::RectPx const bounds = core::Annotation_visual_bounds(draft).Normalized();
-    core::RectPx const grown =
-        core::RectPx::From_ltrb(bounds.left - kFreehandDraftAntialiasMarginPx,
-                                bounds.top - kFreehandDraftAntialiasMarginPx,
-                                bounds.right + kFreehandDraftAntialiasMarginPx,
-                                bounds.bottom + kFreehandDraftAntialiasMarginPx);
-    std::optional<core::RectPx> const clipped =
-        core::RectPx::Clip(grown, Desktop_rect(vd_width, vd_height));
-    if (!clipped.has_value() || clipped->Is_empty()) {
+    core::RectPx const cover = Antialiased_desktop_bounds(
+        core::Annotation_visual_bounds(draft).Normalized(), vd_width, vd_height);
+    if (cover.Is_empty()) {
         return {};
     }
-    return {*clipped};
+    return {cover};
 }
 
 void Draw_live_layer(ID2D1RenderTarget *rt, D2DOverlayResources &res,
@@ -3341,8 +3345,8 @@ struct FramePlan final {
 }
 
 // False when the live annotation draft cannot touch target_rect, so that target skips
-// drawing it: an obfuscate draft uploads a new bitmap on every draw. Text drafts, and
-// drafts with no known bounds, always draw.
+// drawing it: an obfuscate draft whose raster changed uploads it on that target's
+// first draw. Text drafts, and drafts with no known bounds, always draw.
 [[nodiscard]] bool Live_annotation_draft_touches(D2DPaintInput const &input,
                                                  core::RectPx target_rect) noexcept {
     if (input.draft_text_annotation != nullptr || input.draft_annotation == nullptr) {
