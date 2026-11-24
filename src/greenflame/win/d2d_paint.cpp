@@ -3345,8 +3345,8 @@ struct FramePlan final {
 }
 
 // False when the live annotation draft cannot touch target_rect, so that target skips
-// drawing it: an obfuscate draft whose raster changed uploads it on that target's
-// first draw. Text drafts, and drafts with no known bounds, always draw.
+// its draw calls. An obfuscate draft's upload is shared by every target. Text drafts,
+// and drafts with no known bounds, always draw.
 [[nodiscard]] bool Live_annotation_draft_touches(D2DPaintInput const &input,
                                                  core::RectPx target_rect) noexcept {
     if (input.draft_text_annotation != nullptr || input.draft_annotation == nullptr) {
