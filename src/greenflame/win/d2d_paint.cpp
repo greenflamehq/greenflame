@@ -227,7 +227,8 @@ bool Draw_freehand_points(ID2D1RenderTarget *rt, D2DOverlayResources &res,
 
 void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                      core::Annotation const &ann) {
-    Draw_d2d_annotation(rt, Build_annotation_draw_context(res), ann);
+    // On-screen drops are accepted by design: only Save and Copy fail on a false.
+    (void)Draw_d2d_annotation(rt, Build_annotation_draw_context(res), ann);
 }
 
 // ---------------------------------------------------------------------------

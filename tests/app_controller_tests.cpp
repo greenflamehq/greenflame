@@ -322,7 +322,7 @@ TEST(app_controller, copy_last_region_returns_warning_when_clipboard_copy_fails)
     ClipboardCopyResult const result =
         fixture.controller.On_copy_last_region_to_clipboard_requested();
     EXPECT_FALSE(result.success);
-    EXPECT_THAT(result.balloon_message, HasSubstr(L"No previously captured region"));
+    EXPECT_THAT(result.balloon_message, HasSubstr(L"Failed to copy"));
 }
 
 TEST(app_controller, copy_last_window_reports_minimized) {
@@ -430,6 +430,7 @@ TEST(app_controller, copy_monitor_returns_empty_when_cursor_is_outside_all_monit
     ClipboardCopyResult const result =
         fixture.controller.On_copy_monitor_to_clipboard_requested();
     EXPECT_FALSE(result.success);
+    EXPECT_THAT(result.balloon_message, HasSubstr(L"Failed to copy"));
 }
 
 TEST(app_controller, copy_desktop_uses_virtual_desktop_bounds) {
@@ -444,6 +445,21 @@ TEST(app_controller, copy_desktop_uses_virtual_desktop_bounds) {
     ClipboardCopyResult const result =
         fixture.controller.On_copy_desktop_to_clipboard_requested();
     EXPECT_TRUE(result.success);
+}
+
+TEST(app_controller, copy_desktop_reports_an_error_when_clipboard_copy_fails) {
+    ControllerFixture fixture;
+    RectPx const desktop = RectPx::From_ltrb(0, 0, 100, 100);
+
+    EXPECT_CALL(fixture.display, Get_virtual_desktop_bounds_px())
+        .WillOnce(Return(desktop));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(desktop, false))
+        .WillOnce(Return(false));
+
+    ClipboardCopyResult const result =
+        fixture.controller.On_copy_desktop_to_clipboard_requested();
+    EXPECT_FALSE(result.success);
+    EXPECT_THAT(result.balloon_message, HasSubstr(L"Failed to copy"));
 }
 
 TEST(app_controller, copy_desktop_uses_persisted_cursor_setting) {
