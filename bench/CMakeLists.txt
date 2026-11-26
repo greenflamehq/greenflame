@@ -403,10 +403,10 @@ if(BUILD_TESTING)
         --obfuscations 1 --edit-kind highlighter --stroke-points 256)
     set(greenflame_edit_args_strokes_above
         --obfuscations 1 --strokes-above --stroke-points 256)
-    # Four highlighters above whose masks need more than the desktop's area: the ones
-    # that fit must still hit, every frame, not evict each other.
+    # Four highlighters above whose masks need more than the desktop's area: the two
+    # that fit on single-1080 must both hit on every frame, not evict each other.
     set(greenflame_edit_args_highlighters_above
-        --strokes-above --all-highlighters --stroke-points 256)
+        --strokes-above --all-highlighters --stroke-points 256 --mask-hits-per-frame 2)
     # A moved mask is reused only when no part of it is off the desktop: dragged
     # off the left edge, and starting there and dragged fully back on.
     set(greenflame_edit_args_highlighter_off_edge

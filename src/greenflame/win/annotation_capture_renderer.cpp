@@ -304,11 +304,14 @@ bool AnnotationCaptureRenderer::Render(GdiCaptureResult &capture,
             scratch_rt->SetTransform(identity_transform);
             scratch_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
             scratch_rt->SetTransform(annotation_transform);
-            Draw_d2d_annotation(scratch_rt.Get(), annotation_context, annotation);
+            bool const drawn =
+                Draw_d2d_annotation(scratch_rt.Get(), annotation_context, annotation);
             scratch_rt->SetTransform(identity_transform);
             hr = scratch_rt->EndDraw();
-            if (FAILED(hr) || obfuscate_draw_failed) {
-                // An obfuscate missing from the output would leave its pixels clear.
+            if (FAILED(hr) || obfuscate_draw_failed || !drawn) {
+                // An obfuscate missing from the output would leave its pixels clear,
+                // and a stroke that could not be built must not vanish from Save and
+                // Copy without an error.
                 return false;
             }
 

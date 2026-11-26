@@ -445,16 +445,17 @@ bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
     return true;
 }
 
-void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
+bool Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                          D2DAnnotationDrawContext context,
                          core::Annotation const &annotation) {
     GREENFLAME_PROFILE_FUNCTION();
 
+    bool drawn = true;
     std::visit(core::Overloaded{
                    [&](core::FreehandStrokeAnnotation const &freehand) {
-                       Draw_d2d_freehand_points(render_target, context, freehand.points,
-                                                freehand.style,
-                                                freehand.freehand_tip_shape);
+                       drawn = Draw_d2d_freehand_points(render_target, context,
+                                                        freehand.points, freehand.style,
+                                                        freehand.freehand_tip_shape);
                    },
                    [&](core::LineAnnotation const &line) {
                        Draw_line(render_target, context, line);
@@ -476,6 +477,7 @@ void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                    },
                },
                annotation.data);
+    return drawn;
 }
 
 } // namespace greenflame

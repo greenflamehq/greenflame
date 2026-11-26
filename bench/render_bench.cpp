@@ -224,6 +224,9 @@ struct Args final {
     // highlighter.
     int stroke_points = 64;
     int obfuscations = 0; // --obfuscations K
+    // --mask-hits-per-frame N: with --verify-edit and --strokes-above, the cached
+    // highlighter masks each edit frame after the first must reuse.
+    int mask_hits_per_frame = 1;
     bool smooth = true;
     bool opacity_given = false;
     bool diagonal = false;     // --diagonal
@@ -311,6 +314,8 @@ void Print_usage() {
         "  --all-highlighters           every --annotated stroke is a highlighter\n"
         "  --reverse-drag               move: the drag runs from its end back to its "
         "start (with --off-edge, it starts partly off the desktop)\n"
+        "  --mask-hits-per-frame N      move --verify-edit --strokes-above: cached "
+        "highlighter masks each edit frame after the first must reuse (default 1)\n"
         "  --edit-dynamic               move: edit frames take the full annotation "
         "rebuild and the dynamic path\n"
         "  --verify-edit                move: draw every frame again with "
@@ -614,6 +619,10 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.all_highlighters = true;
         } else if (key == "--reverse-drag") {
             args.reverse_drag = true;
+        } else if (key == "--mask-hits-per-frame") {
+            std::optional<int> const v = next_int(0);
+            if (!v) return std::nullopt;
+            args.mask_hits_per_frame = *v;
         } else if (key == "--obfuscations") {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
@@ -2522,13 +2531,17 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
               stats.region_frames, stats.below_cache_hits, patch_builds, patch_hits,
               verify_reuploads, stats.highlighter_mask_hits,
               stats.highlighter_mask_moved_hits);
-        // A long highlighter drawn above the edit must reuse its mask, and a moved
-        // one its mask moved.
+        // Long highlighters drawn above the edit must reuse their masks on every edit
+        // frame after the first (--mask-hits-per-frame each), and a moved one its mask
+        // moved. Fewer hits mean masks evicted each other.
         bool const long_strokes = static_cast<size_t>(args.stroke_points) >=
                                   D2DOverlayResources::kHighlighterMaskMinPoints;
         bool const mask_expected = long_strokes && args.annotated && args.strokes_above;
         bool const moved_mask_expected =
             long_strokes && args.edit_kind == "highlighter";
+        size_t const mask_hits_needed =
+            static_cast<size_t>(args.mask_hits_per_frame) *
+            static_cast<size_t>(kWarmupFrames + args.frames - 1);
         // Every frame with patches builds them again (as a repaint with no input):
         // that must keep them, and the redraw must upload nothing.
         if (scenario == "move" &&
@@ -2536,7 +2549,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
              (!region_expected && stats.region_frames > 0) ||
              (args.annotated && !args.strokes_above && stats.below_cache_hits == 0) ||
              (patch_builds > 0 && patch_hits == 0) || verify_reuploads > 0 ||
-             (mask_expected && stats.highlighter_mask_hits == 0) ||
+             (mask_expected && stats.highlighter_mask_hits < mask_hits_needed) ||
              (moved_mask_expected && stats.highlighter_mask_moved_hits == 0))) {
             Print("verify-edit: the edit fast paths did not run as expected\n");
             return std::nullopt;

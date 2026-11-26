@@ -59,7 +59,8 @@ bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               core::StrokeStyle style,
                               core::FreehandTipShape tip_shape);
 
-void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
+// False when a freehand stroke could not be drawn whole (Draw_d2d_freehand_points).
+bool Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                          D2DAnnotationDrawContext context,
                          core::Annotation const &annotation);
 

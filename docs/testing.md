@@ -267,8 +267,9 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     tolerance 0. It also fails unless the edit fast paths ran: the changed-area path
     on some frame (on none with `--lifted` or `--stale-frozen`) and, with
     `--annotated`, the below-edit cache (not with `--strokes-above`). With at least
-    256 `--stroke-points`, a highlighter must have been copied from its cached mask
-    with `--strokes-above`, and a moved highlighter from its mask moved. Each move
+    256 `--stroke-points`, with `--strokes-above` every edit frame after the first
+    must copy `--mask-hits-per-frame N` (default 1) highlighters from their cached
+    masks, and a moved highlighter must be copied from its mask moved. Each move
     frame also gets the privacy check: every obfuscate is rebuilt from scratch with
     no cache, and each preview patch, and each obfuscate with no patch, must equal
     its rebuild. Then the patch cache runs again on the unchanged frame and must
