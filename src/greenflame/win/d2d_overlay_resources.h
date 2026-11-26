@@ -251,10 +251,14 @@ struct D2DOverlayResources final {
         // mask can be reused moved.
         bool whole = false;
         Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        uint64_t pass = 0; // the highlighter_mask_pass that last drew it
     };
     static constexpr size_t kHighlighterMaskMinPoints = 256;
     // Oldest first. Their rects add up to at most the desktop's area.
     std::vector<HighlighterMask> highlighter_masks = {};
+    // Counts annotations_bitmap builds (a rebuild, an edit frame's draw). A mask drawn
+    // in the current one is never evicted for another.
+    uint64_t highlighter_mask_pass = 0;
     // QPC ticks the last Paint_d2d_frame spent in its frame-latency wait (debug log).
     int64_t last_frame_wait_qpc = 0;
     // The lifted window the overlay shows. Committed highlighters multiply onto it

@@ -403,6 +403,16 @@ if(BUILD_TESTING)
         --obfuscations 1 --edit-kind highlighter --stroke-points 256)
     set(greenflame_edit_args_strokes_above
         --obfuscations 1 --strokes-above --stroke-points 256)
+    # Four highlighters above whose masks need more than the desktop's area: the ones
+    # that fit must still hit, every frame, not evict each other.
+    set(greenflame_edit_args_highlighters_above
+        --strokes-above --all-highlighters --stroke-points 256)
+    # A moved mask is reused only when no part of it is off the desktop: dragged
+    # off the left edge, and starting there and dragged fully back on.
+    set(greenflame_edit_args_highlighter_off_edge
+        --edit-kind highlighter --stroke-points 256 --off-edge left)
+    set(greenflame_edit_args_highlighter_from_off_edge
+        --edit-kind highlighter --stroke-points 256 --off-edge left --reverse-drag)
     set(greenflame_edit_args_lifted --obfuscations 1 --lifted)
     set(greenflame_edit_args_stale --stale-frozen)
     set(greenflame_edit_args_click --obfuscations 1 --click-first)
@@ -422,7 +432,8 @@ if(BUILD_TESTING)
     # the click replay; the other cases do not depend on the targets.
     set(greenflame_edit_split_cases rect obfuscate click)
     foreach(greenflame_edit_case rect below multi resize obfuscate highlighter
-            highlighter_long strokes_above lifted stale click click_moved
+            highlighter_long strokes_above highlighters_above highlighter_off_edge
+            highlighter_from_off_edge lifted stale click click_moved
             click_moved_plain click_moved_obfuscate stacked)
         set(greenflame_edit_targets_list span)
         if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)

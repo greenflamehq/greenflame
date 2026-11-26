@@ -219,9 +219,11 @@ struct Args final {
     int passes = 1;
     int dump_frame = -1;
     int tolerance = 0;
-    int max_pixels = 0;     // --max-pixels: pixels allowed over the tolerance
-    int stroke_points = 64; // --stroke-points N: points per --annotated stroke
-    int obfuscations = 0;   // --obfuscations K
+    int max_pixels = 0; // --max-pixels: pixels allowed over the tolerance
+    // --stroke-points N: points per --annotated stroke and per moved brush or
+    // highlighter.
+    int stroke_points = 64;
+    int obfuscations = 0; // --obfuscations K
     bool smooth = true;
     bool opacity_given = false;
     bool diagonal = false;     // --diagonal
@@ -240,6 +242,8 @@ struct Args final {
     bool resize = false;               // --resize
     bool obfuscate_below = false;      // --obfuscate-below
     bool strokes_above = false;        // --strokes-above
+    bool all_highlighters = false;     // --all-highlighters
+    bool reverse_drag = false;         // --reverse-drag
     bool multi = false;                // --multi
     bool edit_dynamic = false;         // --edit-dynamic
     bool verify_edit = false;          // --verify-edit
@@ -304,6 +308,9 @@ void Print_usage() {
         "brush or highlighter (default 64)\n"
         "  --strokes-above              move: the --annotated strokes sit above the "
         "moved annotation\n"
+        "  --all-highlighters           every --annotated stroke is a highlighter\n"
+        "  --reverse-drag               move: the drag runs from its end back to its "
+        "start (with --off-edge, it starts partly off the desktop)\n"
         "  --edit-dynamic               move: edit frames take the full annotation "
         "rebuild and the dynamic path\n"
         "  --verify-edit                move: draw every frame again with "
@@ -603,6 +610,10 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.obfuscate_below = true;
         } else if (key == "--strokes-above") {
             args.strokes_above = true;
+        } else if (key == "--all-highlighters") {
+            args.all_highlighters = true;
+        } else if (key == "--reverse-drag") {
+            args.reverse_drag = true;
         } else if (key == "--obfuscations") {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
@@ -1213,15 +1224,17 @@ void Fill_frame_input(std::string_view scenario, int frame, int frames, int widt
 
 // --annotated: committed strokes crossing the selection edge on every monitor, so
 // frames carry annotations both inside the selection and under the dim.
+// --all-highlighters: every stroke is a highlighter, not only the last.
 std::vector<core::Annotation> Make_bench_annotations(int width, int height,
-                                                     int points_per_stroke) {
+                                                     int points_per_stroke,
+                                                     bool all_highlighters) {
     constexpr int stroke_count = 4;
     constexpr double waves_per_stroke = 6.0;
     constexpr int32_t brush_width_px = 7;
     std::vector<core::Annotation> annotations;
     for (int k = 0; k < stroke_count; ++k) {
         core::FreehandStrokeAnnotation stroke{};
-        bool const highlighter = k == stroke_count - 1;
+        bool const highlighter = all_highlighters || k == stroke_count - 1;
         stroke.style.width_px = highlighter ? kHighlighterWidthPx : brush_width_px;
         stroke.style.color = highlighter ? kHighlighterColor : RGB(0, 0, 255);
         stroke.freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
@@ -1566,7 +1579,8 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
     }
     std::vector<core::Annotation> strokes;
     if (args.annotated) {
-        strokes = Make_bench_annotations(width, height, args.stroke_points);
+        strokes = Make_bench_annotations(width, height, args.stroke_points,
+                                         args.all_highlighters);
         if (!args.strokes_above) {
             scene.doc = std::move(strokes);
             strokes.clear();
@@ -1731,8 +1745,9 @@ core::Annotation Edited_annotation(core::Annotation const &start, int32_t dx,
 // obfuscate patches built through the shared preview builder.
 void Fill_move_frame(EditScene &scene, int frame, int frames, Args const &args,
                      D2DPaintInput &input) {
-    int const i = std::max(frame, 0);
     int const last = std::max(1, frames - 1);
+    // --reverse-drag: from the end of the path back to its start.
+    int const i = args.reverse_drag ? last - std::max(frame, 0) : std::max(frame, 0);
     int32_t const dx =
         static_cast<int32_t>(static_cast<int64_t>(scene.travel_px) * i / last);
     int32_t const dy =
@@ -2188,7 +2203,8 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     input.lifted_window_source_rect = ctx.res->lifted_view.source_rect;
     std::vector<core::Annotation> annotations =
         args.annotated
-            ? Make_bench_annotations(ctx.width, ctx.height, args.stroke_points)
+            ? Make_bench_annotations(ctx.width, ctx.height, args.stroke_points,
+                                     args.all_highlighters)
             : std::vector<core::Annotation>{};
     // line, shape, obfuscate --obfuscations K: committed obfuscates under the draft.
     if (Is_draft(scenario) && args.obfuscations > 0) {

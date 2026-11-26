@@ -51,7 +51,9 @@ struct D2DAnnotationRenderResources final {
     void Clear_cached_bitmaps() noexcept;
 };
 
-void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
+// False when the stroke could not be drawn whole (missing resources, a geometry that
+// could not be built). Nothing tells the caller which part was drawn.
+bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               D2DAnnotationDrawContext context,
                               std::span<const core::PointPx> points,
                               core::StrokeStyle style,

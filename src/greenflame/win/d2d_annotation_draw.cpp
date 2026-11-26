@@ -339,7 +339,7 @@ void D2DAnnotationRenderResources::Clear_cached_bitmaps() noexcept {
     bubble_bitmaps.clear();
 }
 
-void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
+bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               D2DAnnotationDrawContext context,
                               std::span<const core::PointPx> points,
                               core::StrokeStyle style,
@@ -347,9 +347,11 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
     GREENFLAME_PROFILE_FUNCTION();
 
     if (render_target == nullptr || context.factory == nullptr ||
-        context.solid_brush == nullptr || context.round_cap_style == nullptr ||
-        points.empty()) {
-        return;
+        context.solid_brush == nullptr || context.round_cap_style == nullptr) {
+        return false;
+    }
+    if (points.empty()) {
+        return true;
     }
 
     context.solid_brush->SetColor(Colorref_to_d2d(
@@ -370,17 +372,17 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                 D2D1::Ellipse(D2D1::Point2F(cx, cy), half_extent, half_extent),
                 context.solid_brush);
         }
-        return;
+        return true;
     }
 
     if (tip_shape == core::FreehandTipShape::Square) {
         Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
         if (FAILED(context.factory->CreatePathGeometry(path.GetAddressOf()))) {
-            return;
+            return false;
         }
         Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
         if (FAILED(path->Open(sink.GetAddressOf()))) {
-            return;
+            return false;
         }
         sink->SetFillMode(D2D1_FILL_MODE_WINDING);
 
@@ -413,29 +415,34 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
             }
             sink->EndFigure(D2D1_FIGURE_END_CLOSED);
         }
-        sink->Close();
+        if (FAILED(sink->Close())) {
+            return false;
+        }
         render_target->FillGeometry(path.Get(), context.solid_brush);
-        return;
+        return true;
     }
 
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
     if (FAILED(context.factory->CreatePathGeometry(path.GetAddressOf()))) {
-        return;
+        return false;
     }
     Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
     if (FAILED(path->Open(sink.GetAddressOf()))) {
-        return;
+        return false;
     }
     sink->BeginFigure(Pt(points[0]), D2D1_FIGURE_BEGIN_HOLLOW);
     for (size_t index = 1; index < points.size(); ++index) {
         sink->AddLine(Pt(points[index]));
     }
     sink->EndFigure(D2D1_FIGURE_END_OPEN);
-    sink->Close();
+    if (FAILED(sink->Close())) {
+        return false;
+    }
 
     render_target->DrawGeometry(path.Get(), context.solid_brush,
                                 static_cast<float>(style.width_px),
                                 context.round_cap_style);
+    return true;
 }
 
 void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
