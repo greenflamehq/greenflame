@@ -258,11 +258,8 @@ bool Save_capture_to_bmp(GdiCaptureResult const &capture, wchar_t const *path) {
         pixels, capture.width, capture.height, row_bytes);
     if (bmp_bytes.empty()) return false;
 
-    // Written beside the target and moved over it only once complete, so a failure
-    // never truncates or removes an existing file.
-    std::wstring const temp_path = std::wstring(path) + L".greenflame-tmp";
-    HANDLE const f = CreateFileW(temp_path.c_str(), GENERIC_WRITE, 0, nullptr,
-                                 CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    HANDLE const f = CreateFileW(path, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                 FILE_ATTRIBUTE_NORMAL, nullptr);
     if (f == INVALID_HANDLE_VALUE) return false;
 
     DWORD written = 0;
@@ -270,11 +267,6 @@ bool Save_capture_to_bmp(GdiCaptureResult const &capture, wchar_t const *path) {
                         &written, nullptr) &&
               written == static_cast<DWORD>(bmp_bytes.size());
     CloseHandle(f);
-    ok = ok && MoveFileExW(temp_path.c_str(), path,
-                           MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
-    if (!ok) {
-        (void)DeleteFileW(temp_path.c_str());
-    }
     return ok;
 }
 

@@ -36,8 +36,8 @@ struct CoInitGuard {
     CoInitGuard &operator=(const CoInitGuard &) = delete;
 };
 
-bool Encode_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
-                            REFGUID container_format) {
+bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
+                          REFGUID container_format) {
     if (!capture.Is_valid() || !path) return false;
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -107,21 +107,6 @@ bool Encode_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path
     return SUCCEEDED(hr);
 }
 
-// Encodes to a temporary file beside the target and moves it over the target only when
-// the whole encode succeeded, so a failure never truncates or removes an existing file.
-bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
-                          REFGUID container_format) {
-    if (!capture.Is_valid() || !path) return false;
-    std::wstring const temp_path = std::wstring(path) + L".greenflame-tmp";
-    if (!Encode_capture_via_wic(capture, temp_path.c_str(), container_format) ||
-        !MoveFileExW(temp_path.c_str(), path,
-                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        (void)DeleteFileW(temp_path.c_str());
-        return false;
-    }
-    return true;
-}
-
 [[nodiscard]] std::wstring Build_suffixed_path(std::wstring_view path,
                                                uint32_t suffix) {
     size_t const last_separator = path.find_last_of(L"\\/");
@@ -167,13 +152,43 @@ bool Save_capture_to_png(GdiCaptureResult const &capture, wchar_t const *path) {
 
 bool Save_capture_to_file(GdiCaptureResult const &capture, wchar_t const *path,
                           core::ImageSaveFormat format) {
-    if (format == core::ImageSaveFormat::Jpeg) {
-        return Save_capture_to_jpeg(capture, path);
+    if (!capture.Is_valid() || !path) return false;
+    auto const write = [&](wchar_t const *target) {
+        if (format == core::ImageSaveFormat::Jpeg) {
+            return Save_capture_to_jpeg(capture, target);
+        }
+        if (format == core::ImageSaveFormat::Bmp) {
+            return Save_capture_to_bmp(capture, target);
+        }
+        return Save_capture_to_png(capture, target);
+    };
+
+    // Written to a temporary file beside the target and moved over it only once
+    // complete, so a failure never truncates or removes an existing file.
+    std::wstring_view const target(path);
+    size_t const last_separator = target.find_last_of(L"\\/");
+    std::wstring const directory =
+        last_separator == std::wstring_view::npos
+            ? std::wstring(L".")
+            : std::wstring(target.substr(0, last_separator + 1));
+    // GetTempFileNameW needs the directory within MAX_PATH - 14 (the exe is not long
+    // path aware). ponytail: a target in a longer directory is written directly, as
+    // before; long-path support would lift this.
+    constexpr size_t kMaxTempDirectoryChars = MAX_PATH - 14;
+    if (directory.size() > kMaxTempDirectoryChars) {
+        return write(path);
     }
-    if (format == core::ImageSaveFormat::Bmp) {
-        return Save_capture_to_bmp(capture, path);
+    std::array<wchar_t, MAX_PATH> temp_path{};
+    if (GetTempFileNameW(directory.c_str(), L"gf", 0, temp_path.data()) == 0) {
+        return false;
     }
-    return Save_capture_to_png(capture, path);
+    if (!write(temp_path.data()) ||
+        !MoveFileExW(temp_path.data(), path,
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        (void)DeleteFileW(temp_path.data());
+        return false;
+    }
+    return true;
 }
 
 bool Save_capture_to_jpeg(GdiCaptureResult const &capture, wchar_t const *path) {

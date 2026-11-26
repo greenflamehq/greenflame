@@ -1799,8 +1799,11 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - `Ctrl + S` closes the overlay after the box; `Ctrl + Shift + S` leaves the
     overlay open so another place can be chosen.
   - No "Saved" balloon appears and no zero-byte or partial file is left behind.
-  - Saving over an existing file (Save As, choose it and confirm the overwrite) in a
-    folder that rejects the write leaves the old file intact.
+  - The overwrite check below needs a write that fails partway, which a read-only
+    folder does not give: put a large image on a small, nearly full volume (a small
+    VHD, or a USB stick topped up with a filler file), then Save As over that image
+    with a capture too big for the free space. The old file must be intact and no
+    `gfXXXX.tmp` file may be left in the folder.
 
 ### GF-MAN-OUT-009 - Path Copy Failure After A Successful Save
 
