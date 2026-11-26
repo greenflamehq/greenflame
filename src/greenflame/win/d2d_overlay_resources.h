@@ -225,8 +225,40 @@ struct D2DOverlayResources final {
         size_t region_frames = 0;
         size_t below_cache_hits = 0;
         size_t draft_frames = 0;
+        // Committed highlighters drawn from highlighter_masks instead of their points,
+        // and those of them drawn moved.
+        size_t highlighter_mask_hits = 0;
+        size_t highlighter_mask_moved_hits = 0;
     };
     EditStats edit_stats = {};
+    // Committed highlighter masks, keyed by annotation id: the opaque mask a
+    // highlighter draws into draft_stroke_rt, cut to its visual bounds on the desktop.
+    // Drawing a mask from points costs O(points) (tens of milliseconds at 10,000), so a
+    // highlighter drawn again with the same points and style (an edit below it, a
+    // commit, undo), or with every point moved by the same whole pixels (moving it),
+    // copies its mask instead: a copy, as a DrawBitmap of it is not exact on WARP. A
+    // moved mask matched the redrawn one at 0 px on NVIDIA, Intel and WARP (render
+    // bench --verify-edit). A mask depends only on the points and the style, so the
+    // cache outlives Invalidate_annotations; it is dropped with the desktop-sized
+    // bitmaps and the screenshot. Shorter highlighters are cheap to draw and are not
+    // cached.
+    struct HighlighterMask final {
+        uint64_t id = 0;
+        std::vector<core::PointPx> points = {};
+        core::StrokeStyle style = {}; // at full opacity, as the mask is drawn
+        core::RectPx rect = {};       // the desktop pixels the bitmap holds
+        // rect is the whole visual bounds (none of it was off the desktop), so the
+        // mask can be reused moved.
+        bool whole = false;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        uint64_t pass = 0; // the highlighter_mask_pass that last drew it
+    };
+    static constexpr size_t kHighlighterMaskMinPoints = 256;
+    // Oldest first. Their rects add up to at most the desktop's area.
+    std::vector<HighlighterMask> highlighter_masks = {};
+    // Counts annotations_bitmap builds (a rebuild, an edit frame's draw). A mask drawn
+    // in the current one is never evicted for another.
+    uint64_t highlighter_mask_pass = 0;
     // QPC ticks the last Paint_d2d_frame spent in its frame-latency wait (debug log).
     int64_t last_frame_wait_qpc = 0;
     // The lifted window the overlay shows. Committed highlighters multiply onto it
@@ -248,6 +280,8 @@ struct D2DOverlayResources final {
     // False: edit frames take the full rebuild and the dynamic path (render bench
     // checks against it).
     bool edit_fast_paths = true;
+    // False: every highlighter mask is drawn from its points (render bench reference).
+    bool highlighter_mask_cache = true;
     // True when annotations_bitmap was last built from no annotations, so it is all
     // transparent and blitting it changes nothing.
     bool annotations_empty = false;

@@ -384,6 +384,7 @@ void D2DOverlayResources::Release_targets() noexcept {
 bool D2DOverlayResources::Upload_screenshot(GdiCaptureResult const &cap) {
     // Highlighters below an edit multiply onto the screenshot.
     edit_cache = {};
+    highlighter_masks.clear();
     return Upload_capture_bitmap(hwnd_rt.Get(), cap, Target_dpi(), screenshot);
 }
 
@@ -718,6 +719,7 @@ bool D2DOverlayResources::Create_cache_targets(int width, int height) {
         }
     }
     edit_cache = {};
+    highlighter_masks.clear();
 
     annotations_valid = false;
     frozen_valid = false;
@@ -781,6 +783,7 @@ void D2DOverlayResources::Release_device_resources() {
     draft_stroke_body_bitmap.Reset();
     base_composite_bitmap.Reset();
     edit_below_bitmap.Reset();
+    highlighter_masks.clear();
     edit_cache = {};
     freehand_draft = {};
     multiply_effect.Reset();

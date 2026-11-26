@@ -77,6 +77,9 @@ constexpr UINT kOverlayFailCloseMessage = WM_APP + 1;
 constexpr int32_t kSelectedAnnotationMarqueePhaseStepPx = 1;
 constexpr wchar_t kPinToDesktopFailedMessage[] =
     L"Failed to pin the selection to the desktop.";
+constexpr wchar_t kSaveFailedMessage[] = L"Failed to save the selection.";
+constexpr wchar_t kCopyToClipboardFailedMessage[] =
+    L"Failed to copy the selection to the clipboard.";
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -112,16 +115,6 @@ constexpr std::array<greenflame::core::TextFontChoice, 4> kTextWheelFontChoices 
         }
     }
     return best;
-}
-
-[[nodiscard]] bool
-Text_annotation_has_text(greenflame::core::TextAnnotation const &annotation) noexcept {
-    for (greenflame::core::TextRun const &run : annotation.runs) {
-        if (!run.text.empty()) {
-            return true;
-        }
-    }
-    return false;
 }
 
 struct ToolbarGlyphResourceSpec final {
@@ -4352,6 +4345,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
 
     GdiCaptureResult cropped{};
     if (!Build_rendered_selection_capture(cropped)) {
+        Show_warning_box(kSaveFailedMessage);
         Destroy();
         return;
     }
@@ -4374,6 +4368,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
     std::wstring const reserved_path = Reserve_unique_file_path(full_path);
     if (reserved_path.empty()) {
         cropped.Free();
+        Show_warning_box(kSaveFailedMessage);
         Destroy();
         return;
     }
@@ -4382,6 +4377,7 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
     if (!saved) {
         (void)DeleteFileW(reserved_path.c_str());
         cropped.Free();
+        Show_warning_box(kSaveFailedMessage);
         Destroy();
         return;
     }
@@ -4390,11 +4386,14 @@ void OverlayWindow::Save_directly_and_close(bool copy_saved_file_to_clipboard) {
         file_copied_to_clipboard =
             Copy_file_path_to_clipboard(reserved_path, primary_hwnd_);
     }
+    bool const file_copy_failed =
+        copy_saved_file_to_clipboard && !file_copied_to_clipboard;
     if (config_) {
         config_->default_save_dir = save_dir;
         config_->Normalize();
     }
-    Notify_save_and_close(cropped, reserved_path, file_copied_to_clipboard);
+    Notify_save_and_close(cropped, reserved_path, file_copied_to_clipboard,
+                          file_copy_failed);
 }
 
 void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
@@ -4408,6 +4407,7 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
 
     GdiCaptureResult cropped{};
     if (!Build_rendered_selection_capture(cropped)) {
+        Show_warning_box(kSaveFailedMessage);
         Destroy();
         return;
     }
@@ -4460,7 +4460,9 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
     bool const saved = Save_capture_to_file(cropped, path_buffer.data(), format);
 
     if (!saved) {
+        // The overlay stays open so another place can be chosen.
         cropped.Free();
+        Show_warning_box(kSaveFailedMessage);
         return;
     }
     bool file_copied_to_clipboard = false;
@@ -4468,6 +4470,8 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
         file_copied_to_clipboard = Copy_file_path_to_clipboard(
             std::wstring_view(path_buffer.data()), primary_hwnd_);
     }
+    bool const file_copy_failed =
+        copy_saved_file_to_clipboard && !file_copied_to_clipboard;
     std::wstring_view const path_view(path_buffer.data());
     size_t const last_slash_pos = path_view.rfind(L'\\');
     if (last_slash_pos != std::wstring_view::npos && config_) {
@@ -4477,18 +4481,20 @@ void OverlayWindow::Save_as_and_close(bool copy_saved_file_to_clipboard) {
             config_->Normalize();
         }
     }
-    Notify_save_and_close(cropped, path_view, file_copied_to_clipboard);
+    Notify_save_and_close(cropped, path_view, file_copied_to_clipboard,
+                          file_copy_failed);
 }
 
 void OverlayWindow::Notify_save_and_close(GdiCaptureResult &cropped,
                                           std::wstring_view saved_path,
-                                          bool file_copied_to_clipboard) {
+                                          bool file_copied_to_clipboard,
+                                          bool file_copy_failed) {
     HBITMAP thumb = Create_thumbnail_from_capture(cropped);
     cropped.Free();
     if (events_) {
-        events_->On_selection_saved_to_file(Selection_screen_rect(),
-                                            controller_.State().selection_window, thumb,
-                                            saved_path, file_copied_to_clipboard);
+        events_->On_selection_saved_to_file(
+            Selection_screen_rect(), controller_.State().selection_window, thumb,
+            saved_path, file_copied_to_clipboard, file_copy_failed);
         thumb = nullptr;
     }
     if (thumb != nullptr) {
@@ -4564,6 +4570,11 @@ bool OverlayWindow::Build_rendered_selection_capture(GdiCaptureResult &out) cons
     return true;
 }
 
+void OverlayWindow::Show_warning_box(wchar_t const *message) {
+    ModalScope const modal(*this);
+    MessageBoxW(primary_hwnd_, message, L"Greenflame", MB_OK | MB_ICONWARNING);
+}
+
 void OverlayWindow::Copy_to_clipboard_and_close() {
     if (resources_ == nullptr || !resources_->base_capture.Is_valid()) {
         return;
@@ -4574,14 +4585,17 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
     }
 
     GdiCaptureResult cropped{};
-    if (!Build_rendered_selection_capture(cropped)) {
+    bool const copied_to_clipboard = Build_rendered_selection_capture(cropped) &&
+                                     Copy_capture_to_clipboard(cropped, primary_hwnd_);
+    cropped.Free();
+    if (!copied_to_clipboard) {
+        // Never close silently with nothing on the clipboard.
+        Show_warning_box(kCopyToClipboardFailedMessage);
         Destroy();
         return;
     }
-    bool const copied_to_clipboard = Copy_capture_to_clipboard(cropped, primary_hwnd_);
-    cropped.Free();
 
-    if (copied_to_clipboard && events_) {
+    if (events_) {
         events_->On_selection_copied_to_clipboard(Selection_screen_rect(),
                                                   controller_.State().selection_window);
     }
@@ -4598,9 +4612,7 @@ void OverlayWindow::Pin_to_desktop_and_close() {
 
     GdiCaptureResult cropped{};
     if (!Build_rendered_selection_capture(cropped)) {
-        ModalScope const modal(*this);
-        MessageBoxW(primary_hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
-                    MB_OK | MB_ICONWARNING);
+        Show_warning_box(kPinToDesktopFailedMessage);
         return;
     }
 
@@ -4612,9 +4624,7 @@ void OverlayWindow::Pin_to_desktop_and_close() {
     }
 
     cropped.Free();
-    ModalScope const modal(*this);
-    MessageBoxW(primary_hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
-                MB_OK | MB_ICONWARNING);
+    Show_warning_box(kPinToDesktopFailedMessage);
 }
 
 LRESULT OverlayWindow::On_paint(HWND hwnd) {

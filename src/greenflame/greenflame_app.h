@@ -44,7 +44,8 @@ class GreenflameApp final : public ITrayEvents, public IOverlayEvents {
     void On_selection_saved_to_file(core::RectPx screen_rect,
                                     std::optional<HWND> window, HBITMAP thumbnail,
                                     std::wstring_view saved_path,
-                                    bool file_copied_to_clipboard) override;
+                                    bool file_copied_to_clipboard,
+                                    bool file_copy_failed) override;
     void On_spell_check_languages_unsupported(std::wstring_view warning) override;
     void On_overlay_failed(std::wstring_view reason) override;
 

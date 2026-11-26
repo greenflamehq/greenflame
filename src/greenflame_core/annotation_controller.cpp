@@ -32,15 +32,6 @@ constexpr int32_t kBubbleDiameterStepOffsetPx = 20;
     };
 }
 
-[[nodiscard]] bool Text_annotation_has_text(TextAnnotation const &annotation) noexcept {
-    for (TextRun const &run : annotation.runs) {
-        if (!run.text.empty()) {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] bool Rects_touch(RectPx a, RectPx b) noexcept {
     return RectPx::Intersect(a, b).has_value();
 }

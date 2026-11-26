@@ -31,8 +31,9 @@ struct D2DAnnotationDrawContext final {
     D2DAnnotationBitmapMap *text_bitmaps = nullptr;
     D2DAnnotationBitmapMap *bubble_bitmaps = nullptr;
     D2DUploadStats *obfuscate_uploads = nullptr; // optional
-    // Set when an obfuscate could not be drawn (its upload failed): the target then
-    // shows what is under it in the clear, so the caller must fail closed.
+    // Set when an obfuscate could not be drawn (its upload failed, or its raster data
+    // is inconsistent): the target then shows what is under it in the clear, so the
+    // caller must fail closed.
     bool *obfuscate_draw_failed = nullptr;
 };
 
@@ -51,14 +52,19 @@ struct D2DAnnotationRenderResources final {
     void Clear_cached_bitmaps() noexcept;
 };
 
-void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
+// False when the stroke could not be drawn whole (missing resources, a geometry that
+// could not be built). Nothing tells the caller which part was drawn.
+bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               D2DAnnotationDrawContext context,
                               std::span<const core::PointPx> points,
                               core::StrokeStyle style,
                               core::FreehandTipShape tip_shape);
 
-void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
-                         D2DAnnotationDrawContext context,
-                         core::Annotation const &annotation);
+// False when the annotation could not be drawn whole: missing resources, a geometry or
+// bitmap that could not be created, inconsistent bitmap data. Save and Copy must fail
+// on it; on-screen paint may ignore it.
+[[nodiscard]] bool Draw_d2d_annotation(ID2D1RenderTarget *render_target,
+                                       D2DAnnotationDrawContext context,
+                                       core::Annotation const &annotation);
 
 } // namespace greenflame

@@ -217,16 +217,18 @@ Build_annotation_draw_context(D2DOverlayResources &res) noexcept {
     };
 }
 
-void Draw_freehand_points(ID2D1RenderTarget *rt, D2DOverlayResources &res,
+// False when the stroke could not be drawn whole (see Draw_d2d_freehand_points).
+bool Draw_freehand_points(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                           std::span<const core::PointPx> points,
                           core::StrokeStyle style, core::FreehandTipShape tip_shape) {
-    Draw_d2d_freehand_points(rt, Build_annotation_draw_context(res), points, style,
-                             tip_shape);
+    return Draw_d2d_freehand_points(rt, Build_annotation_draw_context(res), points,
+                                    style, tip_shape);
 }
 
 void Draw_annotation(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                      core::Annotation const &ann) {
-    Draw_d2d_annotation(rt, Build_annotation_draw_context(res), ann);
+    // On-screen drops are accepted by design: only Save and Copy fail on a false.
+    (void)Draw_d2d_annotation(rt, Build_annotation_draw_context(res), ann);
 }
 
 // ---------------------------------------------------------------------------
@@ -3050,20 +3052,140 @@ constexpr size_t kSquareStrokeMaskPiecePoints = 4;
 
 // Draws a square-tip stroke in pieces of kSquareStrokeMaskPiecePoints points, each
 // starting on the last point of the one before. dc must be drawing with max blending.
-void Draw_square_stroke_mask_pieces(ID2D1DeviceContext *dc, D2DOverlayResources &res,
+// False when a piece could not be drawn: the mask is partial.
+bool Draw_square_stroke_mask_pieces(ID2D1DeviceContext *dc, D2DOverlayResources &res,
                                     std::span<const core::PointPx> points,
                                     core::StrokeStyle style) {
     if (points.size() <= kSquareStrokeMaskPiecePoints) {
-        Draw_freehand_points(dc, res, points, style, core::FreehandTipShape::Square);
-        return;
+        return Draw_freehand_points(dc, res, points, style,
+                                    core::FreehandTipShape::Square);
     }
+    bool whole = true;
     for (size_t begin = 0; begin + 1 < points.size();
          begin += kSquareStrokeMaskPiecePoints - 1) {
         size_t const count =
             std::min(kSquareStrokeMaskPiecePoints, points.size() - begin);
-        Draw_freehand_points(dc, res, points.subspan(begin, count), style,
-                             core::FreehandTipShape::Square);
+        whole = Draw_freehand_points(dc, res, points.subspan(begin, count), style,
+                                     core::FreehandTipShape::Square) &&
+                whole;
     }
+    return whole;
+}
+
+// The cached mask of a committed highlighter with this style and these points, all
+// moved by the same whole pixels (offset) since the mask was drawn, or null. A moved
+// mask needs nothing of it cut off at the desktop's edge, before or after the move.
+[[nodiscard]] D2DOverlayResources::HighlighterMask *
+Find_highlighter_mask(D2DOverlayResources &res, uint64_t id,
+                      core::FreehandStrokeAnnotation const &fh, core::RectPx bounds,
+                      core::PointPx &offset) {
+    if (!res.highlighter_mask_cache || !res.draft_stroke_rt ||
+        fh.points.size() < D2DOverlayResources::kHighlighterMaskMinPoints) {
+        return nullptr;
+    }
+    core::StrokeStyle const style = Opaque_style(fh.style);
+    for (D2DOverlayResources::HighlighterMask &mask : res.highlighter_masks) {
+        if (mask.id != id) {
+            continue;
+        }
+        if (mask.style != style || mask.points.size() != fh.points.size()) {
+            return nullptr;
+        }
+        core::PointPx const d = {fh.points.front().x - mask.points.front().x,
+                                 fh.points.front().y - mask.points.front().y};
+        if (d.x != 0 || d.y != 0) {
+            D2D1_SIZE_U const size = res.draft_stroke_rt->GetPixelSize();
+            core::RectPx const desktop =
+                core::RectPx::From_ltrb(0, 0, static_cast<int32_t>(size.width),
+                                        static_cast<int32_t>(size.height));
+            if (!mask.whole || core::RectPx::Clip(bounds, desktop) != bounds) {
+                return nullptr;
+            }
+        }
+        if (!std::equal(fh.points.begin(), fh.points.end(), mask.points.begin(),
+                        [&](core::PointPx a, core::PointPx b) {
+                            return a.x == b.x + d.x && a.y == b.y + d.y;
+                        })) {
+            return nullptr;
+        }
+        offset = d;
+        return &mask;
+    }
+    return nullptr;
+}
+
+// Keeps the part of mask_source (draft_stroke_rt's bitmap, holding fh's mask) inside
+// bounds, fh's visual bounds, for Find_highlighter_mask. The rects add up to at most
+// the desktop's area: oldest masks go first, but never one drawn in this pass, or a
+// pass drawing more than fits would evict each mask before its next use and never
+// hit. A mask that does not fit is not kept. Failures cache nothing.
+void Store_highlighter_mask(D2DOverlayResources &res, uint64_t id,
+                            core::FreehandStrokeAnnotation const &fh,
+                            core::RectPx bounds, ID2D1Bitmap *mask_source) {
+    if (!res.highlighter_mask_cache || !res.hwnd_rt || mask_source == nullptr ||
+        fh.points.size() < D2DOverlayResources::kHighlighterMaskMinPoints) {
+        return;
+    }
+    D2D1_SIZE_U const size = mask_source->GetPixelSize();
+    std::optional<core::RectPx> const rect = core::RectPx::Clip(
+        bounds, core::RectPx::From_ltrb(0, 0, static_cast<int32_t>(size.width),
+                                        static_cast<int32_t>(size.height)));
+    if (!rect.has_value() || rect->Is_empty()) {
+        return;
+    }
+    std::erase_if(res.highlighter_masks,
+                  [&](D2DOverlayResources::HighlighterMask const &mask) {
+                      return mask.id == id;
+                  });
+    D2DOverlayResources::HighlighterMask mask{.id = id,
+                                              .points = fh.points,
+                                              .style = Opaque_style(fh.style),
+                                              .rect = *rect,
+                                              .whole = *rect == bounds,
+                                              .bitmap = nullptr,
+                                              .pass = res.highlighter_mask_pass};
+    auto const area = [](core::RectPx r) {
+        return static_cast<int64_t>(r.Width()) * static_cast<int64_t>(r.Height());
+    };
+    int64_t const budget =
+        static_cast<int64_t>(size.width) * static_cast<int64_t>(size.height);
+    int64_t used = area(*rect);
+    int64_t evictable = 0;
+    for (D2DOverlayResources::HighlighterMask const &kept : res.highlighter_masks) {
+        used += area(kept.rect);
+        if (kept.pass != res.highlighter_mask_pass) {
+            evictable += area(kept.rect);
+        }
+    }
+    if (used - evictable > budget) {
+        return;
+    }
+    for (auto it = res.highlighter_masks.begin();
+         used > budget && it != res.highlighter_masks.end();) {
+        if (it->pass == res.highlighter_mask_pass) {
+            ++it;
+            continue;
+        }
+        used -= area(it->rect);
+        it = res.highlighter_masks.erase(it);
+    }
+    D2D1_BITMAP_PROPERTIES props{};
+    props.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
+    props.dpiX = res.Target_dpi();
+    props.dpiY = res.Target_dpi();
+    D2D1_POINT_2U const to = D2D1::Point2U(0, 0);
+    D2D1_RECT_U const from = D2D1::RectU(
+        static_cast<UINT32>(rect->left), static_cast<UINT32>(rect->top),
+        static_cast<UINT32>(rect->right), static_cast<UINT32>(rect->bottom));
+    if (FAILED(
+            res.hwnd_rt->CreateBitmap(D2D1::SizeU(static_cast<UINT32>(rect->Width()),
+                                                  static_cast<UINT32>(rect->Height())),
+                                      nullptr, 0, props, mask.bitmap.GetAddressOf())) ||
+        FAILED(mask.bitmap->CopyFromBitmap(&to, mask_source, &from))) {
+        return;
+    }
+    res.highlighter_masks.push_back(std::move(mask));
 }
 
 // Draws annotations [first, end) to rt using multiply blend for square-tip freehand.
@@ -3148,6 +3270,13 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                 draft.style == fh.style && fh.points.size() >= body_points.size() &&
                 std::equal(body_points.begin(), body_points.end(), fh.points.begin());
 
+            core::PointPx mask_offset = {};
+            D2DOverlayResources::HighlighterMask *cached_mask =
+                reuse_body ? nullptr
+                           : Find_highlighter_mask(res, ann.id, fh, highlighter_bounds,
+                                                   mask_offset);
+            bool store_mask = false;
+
             Microsoft::WRL::ComPtr<ID2D1Bitmap> stroke_bmp;
             {
                 GREENFLAME_PROFILE_SCOPE(
@@ -3159,16 +3288,25 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                         IID_PPV_ARGS(&scratch_dc)))) {
                     scratch_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_MAX);
                     std::span<const core::PointPx> rest = fh.points;
-                    if (reuse_body) {
-                        Draw_full_bitmap_1to1(scratch_dc.Get(),
-                                              res.draft_stroke_body_bitmap.Get());
-                        // From the last body point, so the rest joins the body.
-                        rest = rest.subspan(body_points.size() - 1);
+                    // A cached mask is copied in after EndDraw: a copy, not a draw,
+                    // keeps the pixels exact.
+                    if (cached_mask == nullptr) {
+                        if (reuse_body) {
+                            Draw_full_bitmap_1to1(scratch_dc.Get(),
+                                                  res.draft_stroke_body_bitmap.Get());
+                            // From the last body point, so the rest joins the body.
+                            rest = rest.subspan(body_points.size() - 1);
+                        }
+                        bool const drawn = Draw_square_stroke_mask_pieces(
+                            scratch_dc.Get(), res, rest, Opaque_style(fh.style));
+                        // The body's pieces differ from a redraw's: keep only redraws,
+                        // and only whole ones (a partial mask would stay partial).
+                        store_mask = drawn && !reuse_body;
                     }
-                    Draw_square_stroke_mask_pieces(scratch_dc.Get(), res, rest,
-                                                   Opaque_style(fh.style));
                     scratch_dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
                 } else {
+                    // This mask carries the opacity: no cached opaque mask.
+                    cached_mask = nullptr;
                     Draw_freehand_points(res.draft_stroke_rt.Get(), res, fh.points,
                                          fh.style, fh.freehand_tip_shape);
                 }
@@ -3177,6 +3315,23 @@ void Draw_annotations_to_rt(ID2D1RenderTarget *rt, D2DOverlayResources &res,
                     FAILED(res.draft_stroke_rt->GetBitmap(
                         stroke_bmp.ReleaseAndGetAddressOf()))) {
                     stroke_bmp.Reset();
+                } else if (cached_mask != nullptr) {
+                    D2D1_POINT_2U const to = D2D1::Point2U(
+                        static_cast<UINT32>(cached_mask->rect.left + mask_offset.x),
+                        static_cast<UINT32>(cached_mask->rect.top + mask_offset.y));
+                    if (FAILED(stroke_bmp->CopyFromBitmap(
+                            &to, cached_mask->bitmap.Get(), nullptr))) {
+                        stroke_bmp.Reset();
+                    } else {
+                        cached_mask->pass = res.highlighter_mask_pass;
+                        ++res.edit_stats.highlighter_mask_hits;
+                        if (mask_offset.x != 0 || mask_offset.y != 0) {
+                            ++res.edit_stats.highlighter_mask_moved_hits;
+                        }
+                    }
+                } else if (store_mask) {
+                    Store_highlighter_mask(res, ann.id, fh, highlighter_bounds,
+                                           stroke_bmp.Get());
                 }
             }
 
@@ -3253,6 +3408,7 @@ void Rebuild_annotations_bitmap(D2DOverlayResources &res,
     // the previous stroke's first pixel before an empty frame clears the draft.
     res.freehand_draft.live_base_valid = false;
     res.freehand_draft.active = false;
+    ++res.highlighter_mask_pass;
     res.annotations_rt->BeginDraw();
     res.annotations_rt->Clear(D2D1::ColorF(0.f, 0.f, 0.f, 0.f));
     Draw_annotations_to_rt(res.annotations_rt.Get(), res, annotations, patches, skip_id,
@@ -3397,6 +3553,7 @@ void Draw_annotations_for_edit(D2DOverlayResources &res, D2DPaintInput const &in
     res.freehand_draft.live_base_valid = false;
     res.freehand_draft.active = false;
     res.annotations_valid = false;
+    ++res.highlighter_mask_pass;
     bool const cached = res.edit_cache.valid && res.annotations_bitmap &&
                         res.edit_cache.below_count == below_count;
     if (cached) {

@@ -34,7 +34,8 @@ class IOverlayEvents {
                                             std::optional<HWND> window,
                                             HBITMAP thumbnail,
                                             std::wstring_view saved_path,
-                                            bool file_copied_to_clipboard) = 0;
+                                            bool file_copied_to_clipboard,
+                                            bool file_copy_failed) = 0;
     // Called when one or more language tags in spell_check_languages are not
     // supported by the Windows spell checking API on this machine.
     virtual void On_spell_check_languages_unsupported(std::wstring_view warning) = 0;
@@ -132,12 +133,15 @@ class OverlayWindow final {
     [[nodiscard]] core::RectPx Selection_visible_screen_rect() const;
     void Save_directly_and_close(bool copy_saved_file_to_clipboard);
     void Save_as_and_close(bool copy_saved_file_to_clipboard);
+    // A modal warning box over the overlay. The caller decides whether the overlay
+    // closes afterwards.
+    void Show_warning_box(wchar_t const *message);
     void Copy_to_clipboard_and_close();
     void Pin_to_desktop_and_close();
     [[nodiscard]] bool Build_selection_capture(GdiCaptureResult &out) const;
     [[nodiscard]] bool Build_rendered_selection_capture(GdiCaptureResult &out) const;
     void Notify_save_and_close(GdiCaptureResult &cropped, std::wstring_view saved_path,
-                               bool file_copied_to_clipboard);
+                               bool file_copied_to_clipboard, bool file_copy_failed);
 
     LRESULT On_paint(HWND hwnd);
     LRESULT On_destroy();

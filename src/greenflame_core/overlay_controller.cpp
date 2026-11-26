@@ -69,14 +69,6 @@ Resolve_virtual_desktop_client_bounds(RectPx virtual_desktop_bounds,
     return RectPx::From_ltrb(left, top, left + width, top + height);
 }
 
-[[nodiscard]] bool Text_annotation_has_text(TextAnnotation const &annotation) noexcept {
-    for (TextRun const &run : annotation.runs) {
-        if (!run.text.empty()) {
-            return true;
-        }
-    }
-    return false;
-}
 } // namespace
 
 // ---------------------------------------------------------------------------

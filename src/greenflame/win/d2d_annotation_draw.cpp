@@ -20,11 +20,12 @@ template <typename T>
     return annotation.premultiplied_bgra.size() >= required_size;
 }
 
-void Draw_line(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-               core::LineAnnotation const &line) {
+[[nodiscard]] bool Draw_line(ID2D1RenderTarget *render_target,
+                             D2DAnnotationDrawContext context,
+                             core::LineAnnotation const &line) {
     if (render_target == nullptr || context.solid_brush == nullptr ||
         context.flat_cap_style == nullptr || context.factory == nullptr) {
-        return;
+        return false;
     }
 
     context.solid_brush->SetColor(Colorref_to_d2d(
@@ -34,7 +35,7 @@ void Draw_line(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext contex
     if (!line.arrow_head) {
         render_target->DrawLine(Pt(line.start), Pt(line.end), context.solid_brush,
                                 stroke_width, context.flat_cap_style);
-        return;
+        return true;
     }
 
     float const dx = static_cast<float>(line.end.x - line.start.x);
@@ -43,7 +44,7 @@ void Draw_line(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext contex
     if (length < 1.f) {
         render_target->DrawLine(Pt(line.start), Pt(line.end), context.solid_brush,
                                 stroke_width, context.flat_cap_style);
-        return;
+        return true;
     }
 
     float const ux = dx / length;
@@ -74,25 +75,29 @@ void Draw_line(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext contex
 
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> arrow;
     if (FAILED(context.factory->CreatePathGeometry(arrow.GetAddressOf()))) {
-        return;
+        return false;
     }
     Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
     if (FAILED(arrow->Open(sink.GetAddressOf()))) {
-        return;
+        return false;
     }
     sink->BeginFigure(tip, D2D1_FIGURE_BEGIN_FILLED);
     sink->AddLine(bottom_left);
     sink->AddLine(bottom_right);
     sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-    sink->Close();
+    if (FAILED(sink->Close())) {
+        return false;
+    }
     render_target->FillGeometry(arrow.Get(), context.solid_brush);
+    return true;
 }
 
-void Draw_rectangle(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                    core::RectangleAnnotation const &rect) {
+[[nodiscard]] bool Draw_rectangle(ID2D1RenderTarget *render_target,
+                                  D2DAnnotationDrawContext context,
+                                  core::RectangleAnnotation const &rect) {
     if (render_target == nullptr || context.solid_brush == nullptr ||
         context.flat_cap_style == nullptr) {
-        return;
+        return false;
     }
 
     context.solid_brush->SetColor(Colorref_to_d2d(
@@ -100,7 +105,7 @@ void Draw_rectangle(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
     D2D1_RECT_F const rect_f = Rect(rect.outer_bounds);
     if (rect.filled) {
         render_target->FillRectangle(rect_f, context.solid_brush);
-        return;
+        return true;
     }
 
     float const half_width = static_cast<float>(rect.style.width_px) * 0.5f;
@@ -109,19 +114,21 @@ void Draw_rectangle(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
                     rect_f.right - half_width, rect_f.bottom - half_width);
     if (inset.left >= inset.right || inset.top >= inset.bottom) {
         render_target->FillRectangle(rect_f, context.solid_brush);
-        return;
+        return true;
     }
 
     render_target->DrawRectangle(inset, context.solid_brush,
                                  static_cast<float>(rect.style.width_px),
                                  context.flat_cap_style);
+    return true;
 }
 
-void Draw_ellipse(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                  core::EllipseAnnotation const &ellipse) {
+[[nodiscard]] bool Draw_ellipse(ID2D1RenderTarget *render_target,
+                                D2DAnnotationDrawContext context,
+                                core::EllipseAnnotation const &ellipse) {
     if (render_target == nullptr || context.solid_brush == nullptr ||
         context.flat_cap_style == nullptr) {
-        return;
+        return false;
     }
 
     context.solid_brush->SetColor(
@@ -136,7 +143,7 @@ void Draw_ellipse(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext con
 
     if (ellipse.filled) {
         render_target->FillEllipse(shape, context.solid_brush);
-        return;
+        return true;
     }
 
     float const stroke_width = static_cast<float>(ellipse.style.width_px);
@@ -144,19 +151,28 @@ void Draw_ellipse(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext con
     float const inset_ry = ry - stroke_width * 0.5f;
     if (inset_rx <= 0.0f || inset_ry <= 0.0f) {
         render_target->FillEllipse(shape, context.solid_brush);
-        return;
+        return true;
     }
 
     render_target->DrawEllipse(D2D1::Ellipse(shape.point, inset_rx, inset_ry),
                                context.solid_brush, stroke_width,
                                context.flat_cap_style);
+    return true;
 }
 
-void Draw_text(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-               uint64_t annotation_id, core::TextAnnotation const &annotation) {
+[[nodiscard]] bool Draw_text(ID2D1RenderTarget *render_target,
+                             D2DAnnotationDrawContext context, uint64_t annotation_id,
+                             core::TextAnnotation const &annotation) {
+    // Rasterize leaves the buffer empty both for text that draws nothing and for a
+    // raster that failed: only the first is fine. A raster that is present is drawn.
+    if (annotation.premultiplied_bgra.empty() &&
+        (annotation.visual_bounds.Is_empty() ||
+         !core::Text_annotation_has_text(annotation))) {
+        return true;
+    }
     if (render_target == nullptr || context.text_bitmaps == nullptr ||
         !Bitmap_data_is_valid(annotation)) {
-        return;
+        return false;
     }
 
     auto it = context.text_bitmaps->find(annotation_id);
@@ -176,21 +192,30 @@ void Draw_text(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext contex
             static_cast<UINT32>(annotation.bitmap_row_bytes), props,
             bitmap.GetAddressOf());
         if (FAILED(hr) || !bitmap) {
-            return;
+            return false;
         }
         it = context.text_bitmaps->emplace(annotation_id, std::move(bitmap)).first;
     }
 
     render_target->DrawBitmap(it->second.Get(), Rect(annotation.visual_bounds), 1.f,
                               D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    return true;
 }
 
-void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                    uint64_t annotation_id,
-                    core::ObfuscateAnnotation const &annotation) {
+[[nodiscard]] bool Draw_obfuscate(ID2D1RenderTarget *render_target,
+                                  D2DAnnotationDrawContext context,
+                                  uint64_t annotation_id,
+                                  core::ObfuscateAnnotation const &annotation) {
+    // A dynamic obfuscate has no raster here: the capture path builds its layer itself.
+    if (annotation.premultiplied_bgra.empty()) {
+        return true;
+    }
     if (render_target == nullptr || context.obfuscate_bitmaps == nullptr ||
         !Bitmap_data_is_valid(annotation)) {
-        return;
+        if (context.obfuscate_draw_failed != nullptr) {
+            *context.obfuscate_draw_failed = true;
+        }
+        return false;
     }
 
     core::RectPx const bounds = annotation.bounds.Normalized();
@@ -218,7 +243,7 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
             if (context.obfuscate_draw_failed != nullptr) {
                 *context.obfuscate_draw_failed = true;
             }
-            return;
+            return false;
         }
         if (context.obfuscate_uploads != nullptr) {
             ++context.obfuscate_uploads->count;
@@ -232,13 +257,18 @@ void Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext c
 
     render_target->DrawBitmap(it->second.bitmap.Get(), Rect(bounds), 1.f,
                               D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    return true;
 }
 
-void Draw_bubble(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                 uint64_t annotation_id, core::BubbleAnnotation const &annotation) {
+[[nodiscard]] bool Draw_bubble(ID2D1RenderTarget *render_target,
+                               D2DAnnotationDrawContext context, uint64_t annotation_id,
+                               core::BubbleAnnotation const &annotation) {
+    if (annotation.premultiplied_bgra.empty() && annotation.diameter_px <= 0) {
+        return true; // nothing to draw
+    }
     if (render_target == nullptr || context.bubble_bitmaps == nullptr ||
         !Bitmap_data_is_valid(annotation)) {
-        return;
+        return false;
     }
 
     int32_t const radius = annotation.diameter_px / 2;
@@ -264,13 +294,14 @@ void Draw_bubble(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext cont
             static_cast<UINT32>(annotation.bitmap_row_bytes), props,
             bitmap.GetAddressOf());
         if (FAILED(hr) || !bitmap) {
-            return;
+            return false;
         }
         it = context.bubble_bitmaps->emplace(annotation_id, std::move(bitmap)).first;
     }
 
     render_target->DrawBitmap(it->second.Get(), Rect(bounds), 1.f,
                               D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR);
+    return true;
 }
 
 } // namespace
@@ -339,7 +370,7 @@ void D2DAnnotationRenderResources::Clear_cached_bitmaps() noexcept {
     bubble_bitmaps.clear();
 }
 
-void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
+bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               D2DAnnotationDrawContext context,
                               std::span<const core::PointPx> points,
                               core::StrokeStyle style,
@@ -347,9 +378,11 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
     GREENFLAME_PROFILE_FUNCTION();
 
     if (render_target == nullptr || context.factory == nullptr ||
-        context.solid_brush == nullptr || context.round_cap_style == nullptr ||
-        points.empty()) {
-        return;
+        context.solid_brush == nullptr || context.round_cap_style == nullptr) {
+        return false;
+    }
+    if (points.empty()) {
+        return true;
     }
 
     context.solid_brush->SetColor(Colorref_to_d2d(
@@ -370,17 +403,17 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                 D2D1::Ellipse(D2D1::Point2F(cx, cy), half_extent, half_extent),
                 context.solid_brush);
         }
-        return;
+        return true;
     }
 
     if (tip_shape == core::FreehandTipShape::Square) {
         Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
         if (FAILED(context.factory->CreatePathGeometry(path.GetAddressOf()))) {
-            return;
+            return false;
         }
         Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
         if (FAILED(path->Open(sink.GetAddressOf()))) {
-            return;
+            return false;
         }
         sink->SetFillMode(D2D1_FILL_MODE_WINDING);
 
@@ -413,62 +446,71 @@ void Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
             }
             sink->EndFigure(D2D1_FIGURE_END_CLOSED);
         }
-        sink->Close();
+        if (FAILED(sink->Close())) {
+            return false;
+        }
         render_target->FillGeometry(path.Get(), context.solid_brush);
-        return;
+        return true;
     }
 
     Microsoft::WRL::ComPtr<ID2D1PathGeometry> path;
     if (FAILED(context.factory->CreatePathGeometry(path.GetAddressOf()))) {
-        return;
+        return false;
     }
     Microsoft::WRL::ComPtr<ID2D1GeometrySink> sink;
     if (FAILED(path->Open(sink.GetAddressOf()))) {
-        return;
+        return false;
     }
     sink->BeginFigure(Pt(points[0]), D2D1_FIGURE_BEGIN_HOLLOW);
     for (size_t index = 1; index < points.size(); ++index) {
         sink->AddLine(Pt(points[index]));
     }
     sink->EndFigure(D2D1_FIGURE_END_OPEN);
-    sink->Close();
+    if (FAILED(sink->Close())) {
+        return false;
+    }
 
     render_target->DrawGeometry(path.Get(), context.solid_brush,
                                 static_cast<float>(style.width_px),
                                 context.round_cap_style);
+    return true;
 }
 
-void Draw_d2d_annotation(ID2D1RenderTarget *render_target,
+bool Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                          D2DAnnotationDrawContext context,
                          core::Annotation const &annotation) {
     GREENFLAME_PROFILE_FUNCTION();
 
+    bool drawn = true;
     std::visit(core::Overloaded{
                    [&](core::FreehandStrokeAnnotation const &freehand) {
-                       Draw_d2d_freehand_points(render_target, context, freehand.points,
-                                                freehand.style,
-                                                freehand.freehand_tip_shape);
+                       drawn = Draw_d2d_freehand_points(render_target, context,
+                                                        freehand.points, freehand.style,
+                                                        freehand.freehand_tip_shape);
                    },
                    [&](core::LineAnnotation const &line) {
-                       Draw_line(render_target, context, line);
+                       drawn = Draw_line(render_target, context, line);
                    },
                    [&](core::RectangleAnnotation const &rect) {
-                       Draw_rectangle(render_target, context, rect);
+                       drawn = Draw_rectangle(render_target, context, rect);
                    },
                    [&](core::EllipseAnnotation const &ellipse) {
-                       Draw_ellipse(render_target, context, ellipse);
+                       drawn = Draw_ellipse(render_target, context, ellipse);
                    },
                    [&](core::ObfuscateAnnotation const &obfuscate) {
-                       Draw_obfuscate(render_target, context, annotation.id, obfuscate);
+                       drawn = Draw_obfuscate(render_target, context, annotation.id,
+                                              obfuscate);
                    },
                    [&](core::TextAnnotation const &text) {
-                       Draw_text(render_target, context, annotation.id, text);
+                       drawn = Draw_text(render_target, context, annotation.id, text);
                    },
                    [&](core::BubbleAnnotation const &bubble) {
-                       Draw_bubble(render_target, context, annotation.id, bubble);
+                       drawn =
+                           Draw_bubble(render_target, context, annotation.id, bubble);
                    },
                },
                annotation.data);
+    return drawn;
 }
 
 } // namespace greenflame

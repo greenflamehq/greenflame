@@ -70,4 +70,13 @@ std::wstring Build_saved_selection_balloon_message(std::wstring_view saved_path,
     return message;
 }
 
+std::wstring
+Build_saved_selection_path_copy_failed_message(std::wstring_view saved_path) {
+    std::wstring message = kSavedPrefix;
+    std::wstring const filename = Filename_from_path(saved_path);
+    message += filename.empty() ? std::wstring(kSavedFallbackFilename) : filename;
+    message += L", but its path could not be copied to the clipboard.";
+    return message;
+}
+
 } // namespace greenflame::core

@@ -1771,6 +1771,54 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - The visible annotations appear at the correct offset inside the full exported image.
   - After a manual move or resize, the selection falls back to ordinary region semantics and subsequent save/copy/pin use only the reshaped visible region.
 
+### GF-MAN-OUT-007 - Copy Fails Loudly When The Clipboard Is Held
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Hold the clipboard open from another process (for example a small script that
+     calls `OpenClipboard` and does not close it).
+  2. Create a selection with an annotation and press `Ctrl + C`.
+  3. Repeat with a tray copy hotkey (`Ctrl + Prt Scrn`).
+- Expected:
+  - A warning box ("Failed to copy the selection to the clipboard.") shows, and the
+    overlay closes after it is dismissed.
+  - No "copied" balloon appears.
+  - The tray hotkey copy shows a warning balloon even with balloons turned off.
+
+### GF-MAN-OUT-008 - Save Fails Loudly When The Folder Is Unwritable
+
+- Priority: `P1`
+- Run on: `ENV-A`
+- Steps:
+  1. Make the default save folder unwritable (read-only folder or a deny-write ACL).
+  2. Create a selection and press `Ctrl + S`.
+  3. Repeat with `Ctrl + Shift + S` and choose a file in the same folder.
+- Expected:
+  - A warning box ("Failed to save the selection.") shows for each attempt.
+  - `Ctrl + S` closes the overlay after the box; `Ctrl + Shift + S` leaves the
+    overlay open so another place can be chosen.
+  - No "Saved" balloon appears and no zero-byte or partial file is left behind.
+  - The overwrite check below needs a write that fails partway, which a read-only
+    folder does not give: put a large image on a small, nearly full volume (a small
+    VHD, or a USB stick topped up with a filler file), then Save As over that image
+    with a capture too big for the free space. The old file must be intact and no
+    `gfXXXX.tmp` file may be left in the folder.
+
+### GF-MAN-OUT-009 - Path Copy Failure After A Successful Save
+
+- Priority: `P2`
+- Run on: `ENV-A`
+- Steps:
+  1. Turn balloons off in the config.
+  2. Hold the clipboard open from another process.
+  3. Create a selection and press `Ctrl + Alt + S`, then repeat with
+     `Ctrl + Shift + Alt + S`.
+- Expected:
+  - The image is saved.
+  - A warning balloon says the file was saved but its path could not be copied, even
+    with balloons off.
+
 ## Config And Persistence
 
 ### GF-MAN-TOAST-001 - Close Button and Escape Dismissal

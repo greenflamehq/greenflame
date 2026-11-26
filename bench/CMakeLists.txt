@@ -396,6 +396,23 @@ if(BUILD_TESTING)
     set(greenflame_edit_args_resize --obfuscations 1 --resize)
     set(greenflame_edit_args_obfuscate --obfuscations 1 --edit-kind obfuscate)
     set(greenflame_edit_args_highlighter --obfuscations 1 --edit-kind highlighter)
+    # Highlighters this long keep their mask: a moved one, and one above the edit, are
+    # copied from it, not drawn from their points. --verify-edit fails unless that
+    # happened, and unless each frame matches one with every mask drawn from points.
+    set(greenflame_edit_args_highlighter_long
+        --obfuscations 1 --edit-kind highlighter --stroke-points 256)
+    set(greenflame_edit_args_strokes_above
+        --obfuscations 1 --strokes-above --stroke-points 256)
+    # Four highlighters above whose masks need more than the desktop's area: the two
+    # that fit on single-1080 must both hit on every frame, not evict each other.
+    set(greenflame_edit_args_highlighters_above
+        --strokes-above --all-highlighters --stroke-points 256 --mask-hits-per-frame 2)
+    # A moved mask is reused only when no part of it is off the desktop: dragged
+    # off the left edge, and starting there and dragged fully back on.
+    set(greenflame_edit_args_highlighter_off_edge
+        --edit-kind highlighter --stroke-points 256 --off-edge left)
+    set(greenflame_edit_args_highlighter_from_off_edge
+        --edit-kind highlighter --stroke-points 256 --off-edge left --reverse-drag)
     set(greenflame_edit_args_lifted --obfuscations 1 --lifted)
     set(greenflame_edit_args_stale --stale-frozen)
     set(greenflame_edit_args_click --obfuscations 1 --click-first)
@@ -414,8 +431,10 @@ if(BUILD_TESTING)
     # blit per monitor) also run split for a moved rectangle, a moved obfuscate and
     # the click replay; the other cases do not depend on the targets.
     set(greenflame_edit_split_cases rect obfuscate click)
-    foreach(greenflame_edit_case rect below multi resize obfuscate highlighter lifted
-            stale click click_moved click_moved_plain click_moved_obfuscate stacked)
+    foreach(greenflame_edit_case rect below multi resize obfuscate highlighter
+            highlighter_long strokes_above highlighters_above highlighter_off_edge
+            highlighter_from_off_edge lifted stale click click_moved
+            click_moved_plain click_moved_obfuscate stacked)
         set(greenflame_edit_targets_list span)
         if(greenflame_edit_case IN_LIST greenflame_edit_split_cases)
             list(APPEND greenflame_edit_targets_list split)
