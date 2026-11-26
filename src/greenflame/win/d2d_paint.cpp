@@ -3140,7 +3140,9 @@ void Store_highlighter_mask(D2DOverlayResources &res, uint64_t id,
                                               .points = fh.points,
                                               .style = Opaque_style(fh.style),
                                               .rect = *rect,
-                                              .whole = *rect == bounds};
+                                              .whole = *rect == bounds,
+                                              .bitmap = nullptr,
+                                              .pass = res.highlighter_mask_pass};
     auto const area = [](core::RectPx r) {
         return static_cast<int64_t>(r.Width()) * static_cast<int64_t>(r.Height());
     };
@@ -3166,7 +3168,6 @@ void Store_highlighter_mask(D2DOverlayResources &res, uint64_t id,
         used -= area(it->rect);
         it = res.highlighter_masks.erase(it);
     }
-    mask.pass = res.highlighter_mask_pass;
     D2D1_BITMAP_PROPERTIES props{};
     props.pixelFormat.format = DXGI_FORMAT_B8G8R8A8_UNORM;
     props.pixelFormat.alphaMode = D2D1_ALPHA_MODE_PREMULTIPLIED;
