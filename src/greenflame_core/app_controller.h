@@ -14,6 +14,9 @@ struct AppConfig;
 struct SelectionSavedResult final {
     std::wstring balloon_message = {};
     std::wstring file_path = {};
+    // True when the balloon reports a problem and must show whatever the balloons
+    // setting says.
+    bool is_warning = false;
 };
 
 struct ClipboardCopyResult final {
@@ -51,7 +54,8 @@ class AppController final {
                                      std::optional<HWND> window);
     [[nodiscard]] SelectionSavedResult
     On_selection_saved_to_file(core::RectPx screen_rect, std::optional<HWND> window,
-                               std::wstring_view saved_path, bool file_copied);
+                               std::wstring_view saved_path, bool file_copied,
+                               bool file_copy_failed = false);
     [[nodiscard]] core::OverlayHelpContent Build_overlay_help_content() const;
     [[nodiscard]] CliResult Run_cli_capture_mode(core::CliOptions const &cli_options);
 

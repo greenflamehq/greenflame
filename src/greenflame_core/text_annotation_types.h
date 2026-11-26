@@ -120,4 +120,18 @@ struct TextAnnotation final {
     bool operator==(TextAnnotation const &) const noexcept = default;
 };
 
+// True when any run has text. A text annotation with none draws nothing.
+[[nodiscard]] inline bool Text_runs_have_text(std::span<const TextRun> runs) noexcept {
+    for (TextRun const &run : runs) {
+        if (!run.text.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] inline bool Text_annotation_has_text(TextAnnotation const &a) noexcept {
+    return Text_runs_have_text(a.runs);
+}
+
 } // namespace greenflame::core

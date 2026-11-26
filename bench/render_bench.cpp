@@ -2816,45 +2816,71 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     return frame_summary.p95_ms;
 }
 
-// Text and bubble annotations whose bitmap data is inconsistent (the buffer is shorter
-// than its size says) cannot be drawn: Save and Copy must fail on them, not drop them.
+// Text and bubble annotations that cannot be drawn (a buffer shorter than its size
+// says, or no buffer although there is content: Rasterize clears it on any failure)
+// must fail Save and Copy, not vanish from the output. Ones with nothing to draw (no
+// text, a zero diameter) must still succeed.
 bool Check_undrawable_bitmaps_fail_capture() {
+    constexpr int32_t kSidePx = 8;
+    constexpr int32_t kCapturePx = 16;
     core::TextAnnotation text{};
-    text.visual_bounds = core::RectPx::From_ltrb(2, 2, 10, 10);
-    text.bitmap_width_px = 8;
-    text.bitmap_height_px = 8;
-    text.bitmap_row_bytes = 8 * kBytesPerPixel;
-    text.premultiplied_bgra = std::vector<uint8_t>(kBytesPerPixel, 255);
+    text.visual_bounds = core::RectPx::From_ltrb(2, 2, 2 + kSidePx, 2 + kSidePx);
+    text.runs = {core::TextRun{.text = L"x", .flags = {}}};
+    text.bitmap_width_px = kSidePx;
+    text.bitmap_height_px = kSidePx;
+    text.bitmap_row_bytes = kSidePx * kBytesPerPixel;
     core::BubbleAnnotation bubble{};
-    bubble.center = core::PointPx{8, 8};
-    bubble.diameter_px = 8;
-    bubble.bitmap_width_px = 8;
-    bubble.bitmap_height_px = 8;
-    bubble.bitmap_row_bytes = 8 * kBytesPerPixel;
-    bubble.premultiplied_bgra = std::vector<uint8_t>(kBytesPerPixel, 255);
-    std::array<core::Annotation, 2> const annotations = {
-        core::Annotation{.id = 1, .data = text},
-        core::Annotation{.id = 2, .data = bubble}};
-    bool all_failed = true;
-    for (core::Annotation const &annotation : annotations) {
+    bubble.center = core::PointPx{kSidePx, kSidePx};
+    bubble.diameter_px = kSidePx;
+    bubble.bitmap_width_px = kSidePx;
+    bubble.bitmap_height_px = kSidePx;
+    bubble.bitmap_row_bytes = kSidePx * kBytesPerPixel;
+
+    struct Case final {
+        std::string_view label;
+        core::Annotation annotation;
+        bool expect_rendered;
+    };
+    std::vector<Case> cases;
+    // A short buffer.
+    core::TextAnnotation short_text = text;
+    short_text.premultiplied_bgra = std::vector<uint8_t>(kBytesPerPixel, 255);
+    cases.push_back({"text with a short buffer", {.id = 1, .data = short_text}, false});
+    core::BubbleAnnotation short_bubble = bubble;
+    short_bubble.premultiplied_bgra = std::vector<uint8_t>(kBytesPerPixel, 255);
+    cases.push_back(
+        {"bubble with a short buffer", {.id = 2, .data = short_bubble}, false});
+    // The raster failed: content but no buffer.
+    cases.push_back(
+        {"text with content and no buffer", {.id = 3, .data = text}, false});
+    cases.push_back(
+        {"bubble with a diameter and no buffer", {.id = 4, .data = bubble}, false});
+    // Nothing to draw.
+    core::TextAnnotation no_text = text;
+    no_text.runs.clear();
+    cases.push_back({"text with no text", {.id = 5, .data = no_text}, true});
+    core::BubbleAnnotation no_bubble = bubble;
+    no_bubble.diameter_px = 0;
+    cases.push_back({"bubble with no diameter", {.id = 6, .data = no_bubble}, true});
+
+    bool all_as_expected = true;
+    for (Case const &test_case : cases) {
         GdiCaptureResult capture{};
-        capture.width = 16;
-        capture.height = 16;
-        capture.bitmap = Make_noise_bitmap(16, 16, kNoiseSeed);
+        capture.width = kCapturePx;
+        capture.height = kCapturePx;
+        capture.bitmap = Make_noise_bitmap(kCapturePx, kCapturePx, kNoiseSeed);
         bool const rendered =
             capture.bitmap != nullptr &&
             Render_annotations_into_capture(
-                capture, std::span<const core::Annotation>(&annotation, 1),
-                core::RectPx::From_ltrb(0, 0, 16, 16));
+                capture, std::span<const core::Annotation>(&test_case.annotation, 1),
+                core::RectPx::From_ltrb(0, 0, kCapturePx, kCapturePx));
         capture.Free();
-        Print("draw-failure: undrawable {} bitmap {}\n",
-              std::holds_alternative<core::TextAnnotation>(annotation.data) ? "text"
-                                                                            : "bubble",
-              rendered ? "succeeded WITHOUT drawing it"
-                       : "failed (Save and Copy fail)");
-        all_failed = all_failed && !rendered;
+        bool const as_expected = rendered == test_case.expect_rendered;
+        Print("draw-failure: {}: {} ({})\n", test_case.label,
+              rendered ? "succeeded" : "failed", as_expected ? "ok" : "WRONG");
+        all_as_expected = all_as_expected && as_expected;
     }
-    return all_failed;
+    return all_as_expected;
 }
 
 // --expect-draw-failure: an obfuscate whose raster is wider than the device can

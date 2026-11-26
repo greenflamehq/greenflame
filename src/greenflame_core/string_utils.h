@@ -13,4 +13,8 @@ namespace greenflame::core {
 Build_saved_selection_balloon_message(std::wstring_view saved_path,
                                       bool file_copied_to_clipboard);
 
+// For a save whose file-path copy to the clipboard failed.
+[[nodiscard]] std::wstring
+Build_saved_selection_path_copy_failed_message(std::wstring_view saved_path);
+
 } // namespace greenflame::core

@@ -163,8 +163,11 @@ template <typename T>
 [[nodiscard]] bool Draw_text(ID2D1RenderTarget *render_target,
                              D2DAnnotationDrawContext context, uint64_t annotation_id,
                              core::TextAnnotation const &annotation) {
-    if (annotation.premultiplied_bgra.empty()) {
-        return true; // nothing to draw
+    // Rasterize leaves the buffer empty both for text that draws nothing and for a
+    // raster that failed: only the first is fine.
+    if (annotation.visual_bounds.Is_empty() ||
+        !core::Text_annotation_has_text(annotation)) {
+        return true;
     }
     if (render_target == nullptr || context.text_bitmaps == nullptr ||
         !Bitmap_data_is_valid(annotation)) {
@@ -259,7 +262,7 @@ template <typename T>
 [[nodiscard]] bool Draw_bubble(ID2D1RenderTarget *render_target,
                                D2DAnnotationDrawContext context, uint64_t annotation_id,
                                core::BubbleAnnotation const &annotation) {
-    if (annotation.premultiplied_bgra.empty()) {
+    if (annotation.diameter_px <= 0) {
         return true; // nothing to draw
     }
     if (render_target == nullptr || context.bubble_bitmaps == nullptr ||

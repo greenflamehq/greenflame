@@ -301,6 +301,83 @@ TEST(app_controller,
     EXPECT_TRUE(result.success);
 }
 
+TEST(app_controller, copy_window_reports_an_error_when_every_copy_fails) {
+    ControllerFixture fixture;
+    HWND const hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x1113));
+    RectPx const target = RectPx::From_ltrb(10, 20, 310, 220);
+    RectPx const foreground = RectPx::From_ltrb(40, 50, 340, 250);
+    RectPx const fallback = RectPx::From_ltrb(100, 120, 220, 240);
+
+    EXPECT_CALL(fixture.windows, Get_window_rect(hwnd)).WillOnce(Return(target));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(target, false))
+        .WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_foreground_window_rect(hwnd))
+        .WillOnce(Return(foreground));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(foreground, false))
+        .WillOnce(Return(false));
+    EXPECT_CALL(fixture.display, Get_cursor_pos_px())
+        .WillOnce(Return(PointPx{150, 160}));
+    EXPECT_CALL(fixture.windows, Get_window_rect_under_cursor(_, nullptr))
+        .WillOnce(Return(fallback));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(fallback, false))
+        .WillOnce(Return(false));
+
+    ClipboardCopyResult const result =
+        fixture.controller.On_copy_window_to_clipboard_requested(hwnd);
+    EXPECT_FALSE(result.success);
+    EXPECT_THAT(result.balloon_message, HasSubstr(L"Failed to copy"));
+}
+
+TEST(app_controller, copy_last_window_reports_an_error_when_clipboard_copy_fails) {
+    ControllerFixture fixture;
+    HWND const hwnd = reinterpret_cast<HWND>(static_cast<uintptr_t>(0x2223));
+    RectPx const saved = RectPx::From_ltrb(5, 6, 105, 106);
+    std::ignore = fixture.controller.On_selection_copied_to_clipboard(saved, hwnd);
+
+    EXPECT_CALL(fixture.windows, Is_window_valid(hwnd)).WillOnce(Return(true));
+    EXPECT_CALL(fixture.windows, Is_window_minimized(hwnd)).WillOnce(Return(false));
+    EXPECT_CALL(fixture.windows, Get_window_rect(hwnd)).WillOnce(Return(saved));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(saved, false))
+        .WillOnce(Return(false));
+
+    ClipboardCopyResult const result =
+        fixture.controller.On_copy_last_window_to_clipboard_requested();
+    EXPECT_FALSE(result.success);
+    EXPECT_THAT(result.balloon_message, HasSubstr(L"Failed to copy"));
+}
+
+TEST(app_controller, copy_monitor_reports_an_error_when_clipboard_copy_fails) {
+    ControllerFixture fixture;
+    MonitorWithBounds monitor{};
+    monitor.bounds = RectPx::From_ltrb(0, 0, 100, 100);
+
+    EXPECT_CALL(fixture.display, Get_monitors_with_bounds())
+        .WillOnce(Return(std::vector<MonitorWithBounds>{monitor}));
+    EXPECT_CALL(fixture.display, Get_cursor_pos_px()).WillOnce(Return(PointPx{50, 50}));
+    EXPECT_CALL(fixture.capture, Copy_rect_to_clipboard(monitor.bounds, false))
+        .WillOnce(Return(false));
+
+    ClipboardCopyResult const result =
+        fixture.controller.On_copy_monitor_to_clipboard_requested();
+    EXPECT_FALSE(result.success);
+    EXPECT_THAT(result.balloon_message, HasSubstr(L"Failed to copy"));
+}
+
+TEST(app_controller, saved_selection_warns_when_the_path_copy_failed) {
+    ControllerFixture fixture;
+    RectPx const rect = RectPx::From_ltrb(0, 0, 100, 100);
+
+    SelectionSavedResult const saved = fixture.controller.On_selection_saved_to_file(
+        rect, std::nullopt, L"C:\\shots\\saved.png", false, true);
+    EXPECT_TRUE(saved.is_warning);
+    EXPECT_THAT(saved.balloon_message, HasSubstr(L"saved.png"));
+    EXPECT_THAT(saved.balloon_message, HasSubstr(L"could not be copied"));
+
+    SelectionSavedResult const plain = fixture.controller.On_selection_saved_to_file(
+        rect, std::nullopt, L"C:\\shots\\saved.png", false, false);
+    EXPECT_FALSE(plain.is_warning);
+}
+
 TEST(app_controller, copy_last_region_without_state_returns_warning) {
     ControllerFixture fixture;
 
@@ -417,7 +494,8 @@ TEST(app_controller, copy_monitor_uses_cursor_monitor_bounds) {
     EXPECT_TRUE(result.success);
 }
 
-TEST(app_controller, copy_monitor_returns_empty_when_cursor_is_outside_all_monitors) {
+TEST(app_controller,
+     copy_monitor_reports_an_error_when_cursor_is_outside_all_monitors) {
     ControllerFixture fixture;
     MonitorWithBounds monitor{};
     monitor.bounds = RectPx::From_ltrb(0, 0, 100, 100);

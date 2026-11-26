@@ -42,15 +42,6 @@ struct ScopedCoInit final {
                          : static_cast<int32_t>(value - kRoundToNearestOffsetPx);
 }
 
-[[nodiscard]] bool Text_runs_have_text(std::span<const core::TextRun> runs) noexcept {
-    for (core::TextRun const &run : runs) {
-        if (!run.text.empty()) {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] int32_t
 Flattened_text_length(std::span<const core::TextRun> runs) noexcept {
     int32_t length = 0;
@@ -550,7 +541,7 @@ int32_t D2DTextLayoutEngine::Move_vertical(core::TextDraftBuffer const &buf,
 }
 
 bool D2DTextLayoutEngine::Prepare_for_cli(core::TextAnnotation &annotation) {
-    if (dwrite_factory_ == nullptr || !Text_runs_have_text(annotation.runs)) {
+    if (dwrite_factory_ == nullptr || !core::Text_runs_have_text(annotation.runs)) {
         return false;
     }
 
@@ -583,7 +574,8 @@ void D2DTextLayoutEngine::Rasterize(core::TextAnnotation &annotation) {
     annotation.premultiplied_bgra.clear();
 
     if (d2d_factory_ == nullptr || dwrite_factory_ == nullptr ||
-        annotation.visual_bounds.Is_empty() || !Text_runs_have_text(annotation.runs)) {
+        annotation.visual_bounds.Is_empty() ||
+        !core::Text_runs_have_text(annotation.runs)) {
         return;
     }
 

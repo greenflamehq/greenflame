@@ -344,10 +344,17 @@ void GreenflameApp::On_selection_saved_to_file(core::RectPx screen_rect,
                                                std::optional<HWND> window,
                                                HBITMAP thumbnail,
                                                std::wstring_view saved_path,
-                                               bool file_copied_to_clipboard) {
+                                               bool file_copied_to_clipboard,
+                                               bool file_copy_failed) {
     SelectionSavedResult const result = app_controller_.On_selection_saved_to_file(
-        screen_rect, window, saved_path, file_copied_to_clipboard);
-    if (config_.show_balloons) {
+        screen_rect, window, saved_path, file_copied_to_clipboard, file_copy_failed);
+    if (result.is_warning) {
+        // The save worked but its path did not reach the clipboard: say so even with
+        // balloons off.
+        tray_window_.Show_balloon(TrayBalloonIcon::Warning,
+                                  result.balloon_message.c_str(), thumbnail,
+                                  result.file_path);
+    } else if (config_.show_balloons) {
         tray_window_.Show_balloon(TrayBalloonIcon::Info, result.balloon_message.c_str(),
                                   thumbnail, result.file_path);
     } else if (thumbnail != nullptr) {

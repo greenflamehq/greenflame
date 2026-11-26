@@ -323,7 +323,9 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   obfuscate in the output equals the clear capture under it.
 - `--expect-draw-failure`: paints an obfuscate one pixel wider than the device's
   largest bitmap and succeeds only if the paint reports `DrawFailed` and the
-  software renderer (Save and Copy) fails or draws it. `ctest` runs it on WARP.
+  software renderer (Save and Copy) fails or draws it. It also renders a text and a
+  bubble annotation whose pixel buffer is too short or empty with real content, and
+  requires Save and Copy's renderer to fail on each. `ctest` runs it on WARP.
 - `--draft-source` (obfuscate): the draft's raster is built every frame from the
   screenshot and the `--annotated` strokes under it, through the overlay's builder.
 - `--points-per-frame N` (default 1): freehand points added per frame, as coalesced

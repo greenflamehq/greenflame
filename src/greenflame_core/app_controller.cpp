@@ -451,8 +451,13 @@ AppController::On_selection_copied_to_clipboard(core::RectPx screen_rect,
 
 SelectionSavedResult AppController::On_selection_saved_to_file(
     core::RectPx screen_rect, std::optional<HWND> window, std::wstring_view saved_path,
-    bool file_copied) {
+    bool file_copied, bool file_copy_failed) {
     Store_last_capture(screen_rect, window);
+    if (file_copy_failed) {
+        return SelectionSavedResult{
+            core::Build_saved_selection_path_copy_failed_message(saved_path),
+            std::wstring(saved_path), true};
+    }
     return SelectionSavedResult{
         core::Build_saved_selection_balloon_message(saved_path, file_copied),
         std::wstring(saved_path)};

@@ -47,6 +47,12 @@ TEST(string_utils, Build_saved_selection_balloon_message_SavedOnly) {
               L"Saved: capture.png.");
 }
 
+TEST(string_utils, Build_saved_selection_path_copy_failed_message_NamesTheFile) {
+    EXPECT_EQ(
+        Build_saved_selection_path_copy_failed_message(L"C:\\shots\\capture.png"),
+        L"Saved: capture.png, but its path could not be copied to the clipboard.");
+}
+
 TEST(string_utils, Build_saved_selection_balloon_message_SavedAndCopied) {
     EXPECT_EQ(Build_saved_selection_balloon_message(L"C:\\shots\\capture.png", true),
               L"Saved: capture.png (file copied to clipboard).");

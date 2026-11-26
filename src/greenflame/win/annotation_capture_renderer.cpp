@@ -290,7 +290,8 @@ bool AnnotationCaptureRenderer::Render(GdiCaptureResult &capture,
                     Build_dynamic_obfuscate_layer(pixels, capture.width, capture.height,
                                                   row_bytes, *obfuscate, target_bounds);
                 if (!layer.has_value()) {
-                    continue;
+                    // The region would be saved unblurred.
+                    return false;
                 }
 
                 core::Blend_premultiplied_bitmap_onto_opaque_pixels(
@@ -310,7 +311,7 @@ bool AnnotationCaptureRenderer::Render(GdiCaptureResult &capture,
             hr = scratch_rt->EndDraw();
             if (FAILED(hr) || obfuscate_draw_failed || !drawn) {
                 // An obfuscate missing from the output would leave its pixels clear,
-                // and a stroke that could not be built must not vanish from Save and
+                // and no annotation that could not be drawn may vanish from Save and
                 // Copy without an error.
                 return false;
             }
