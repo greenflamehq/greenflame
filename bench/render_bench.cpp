@@ -2849,8 +2849,9 @@ bool Check_undrawable_bitmaps_fail_capture() {
         capture.Free();
         Print("draw-failure: undrawable {} bitmap {}\n",
               std::holds_alternative<core::TextAnnotation>(annotation.data) ? "text"
-                                                                             : "bubble",
-              rendered ? "succeeded WITHOUT drawing it" : "failed (Save and Copy fail)");
+                                                                            : "bubble",
+              rendered ? "succeeded WITHOUT drawing it"
+                       : "failed (Save and Copy fail)");
         all_failed = all_failed && !rendered;
     }
     return all_failed;

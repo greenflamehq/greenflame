@@ -4576,9 +4576,8 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
     }
 
     GdiCaptureResult cropped{};
-    bool const copied_to_clipboard =
-        Build_rendered_selection_capture(cropped) &&
-        Copy_capture_to_clipboard(cropped, primary_hwnd_);
+    bool const copied_to_clipboard = Build_rendered_selection_capture(cropped) &&
+                                     Copy_capture_to_clipboard(cropped, primary_hwnd_);
     cropped.Free();
     if (!copied_to_clipboard) {
         // Never close silently with nothing on the clipboard.

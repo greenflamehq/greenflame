@@ -20,8 +20,9 @@ template <typename T>
     return annotation.premultiplied_bgra.size() >= required_size;
 }
 
-[[nodiscard]] bool Draw_line(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-               core::LineAnnotation const &line) {
+[[nodiscard]] bool Draw_line(ID2D1RenderTarget *render_target,
+                             D2DAnnotationDrawContext context,
+                             core::LineAnnotation const &line) {
     if (render_target == nullptr || context.solid_brush == nullptr ||
         context.flat_cap_style == nullptr || context.factory == nullptr) {
         return false;
@@ -91,8 +92,9 @@ template <typename T>
     return true;
 }
 
-[[nodiscard]] bool Draw_rectangle(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                    core::RectangleAnnotation const &rect) {
+[[nodiscard]] bool Draw_rectangle(ID2D1RenderTarget *render_target,
+                                  D2DAnnotationDrawContext context,
+                                  core::RectangleAnnotation const &rect) {
     if (render_target == nullptr || context.solid_brush == nullptr ||
         context.flat_cap_style == nullptr) {
         return false;
@@ -121,8 +123,9 @@ template <typename T>
     return true;
 }
 
-[[nodiscard]] bool Draw_ellipse(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                  core::EllipseAnnotation const &ellipse) {
+[[nodiscard]] bool Draw_ellipse(ID2D1RenderTarget *render_target,
+                                D2DAnnotationDrawContext context,
+                                core::EllipseAnnotation const &ellipse) {
     if (render_target == nullptr || context.solid_brush == nullptr ||
         context.flat_cap_style == nullptr) {
         return false;
@@ -157,8 +160,9 @@ template <typename T>
     return true;
 }
 
-[[nodiscard]] bool Draw_text(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-               uint64_t annotation_id, core::TextAnnotation const &annotation) {
+[[nodiscard]] bool Draw_text(ID2D1RenderTarget *render_target,
+                             D2DAnnotationDrawContext context, uint64_t annotation_id,
+                             core::TextAnnotation const &annotation) {
     if (annotation.premultiplied_bgra.empty()) {
         return true; // nothing to draw
     }
@@ -194,9 +198,10 @@ template <typename T>
     return true;
 }
 
-[[nodiscard]] bool Draw_obfuscate(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                    uint64_t annotation_id,
-                    core::ObfuscateAnnotation const &annotation) {
+[[nodiscard]] bool Draw_obfuscate(ID2D1RenderTarget *render_target,
+                                  D2DAnnotationDrawContext context,
+                                  uint64_t annotation_id,
+                                  core::ObfuscateAnnotation const &annotation) {
     // A dynamic obfuscate has no raster here: the capture path builds its layer itself.
     if (annotation.premultiplied_bgra.empty()) {
         return true;
@@ -251,8 +256,9 @@ template <typename T>
     return true;
 }
 
-[[nodiscard]] bool Draw_bubble(ID2D1RenderTarget *render_target, D2DAnnotationDrawContext context,
-                 uint64_t annotation_id, core::BubbleAnnotation const &annotation) {
+[[nodiscard]] bool Draw_bubble(ID2D1RenderTarget *render_target,
+                               D2DAnnotationDrawContext context, uint64_t annotation_id,
+                               core::BubbleAnnotation const &annotation) {
     if (annotation.premultiplied_bgra.empty()) {
         return true; // nothing to draw
     }
@@ -495,7 +501,8 @@ bool Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                        drawn = Draw_text(render_target, context, annotation.id, text);
                    },
                    [&](core::BubbleAnnotation const &bubble) {
-                       drawn = Draw_bubble(render_target, context, annotation.id, bubble);
+                       drawn =
+                           Draw_bubble(render_target, context, annotation.id, bubble);
                    },
                },
                annotation.data);
