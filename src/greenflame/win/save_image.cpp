@@ -174,8 +174,8 @@ bool Save_capture_to_file(GdiCaptureResult const &capture, wchar_t const *path,
     // GetTempFileNameW needs the directory within MAX_PATH - 14 (the exe is not long
     // path aware). ponytail: a target in a longer directory is written directly, as
     // before; long-path support would lift this.
-    constexpr size_t kMaxTempDirectoryChars = MAX_PATH - 14;
-    if (directory.size() > kMaxTempDirectoryChars) {
+    constexpr size_t max_temp_directory_chars = MAX_PATH - 14;
+    if (directory.size() > max_temp_directory_chars) {
         return write(path);
     }
     std::array<wchar_t, MAX_PATH> temp_path{};

@@ -2821,20 +2821,20 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
 // must fail Save and Copy, not vanish from the output. Ones with nothing to draw (no
 // text, a zero diameter) must still succeed.
 bool Check_undrawable_bitmaps_fail_capture() {
-    constexpr int32_t kSidePx = 8;
-    constexpr int32_t kCapturePx = 16;
+    constexpr int32_t side_px = 8;
+    constexpr int32_t capture_px = 16;
     core::TextAnnotation text{};
-    text.visual_bounds = core::RectPx::From_ltrb(2, 2, 2 + kSidePx, 2 + kSidePx);
+    text.visual_bounds = core::RectPx::From_ltrb(2, 2, 2 + side_px, 2 + side_px);
     text.runs = {core::TextRun{.text = L"x", .flags = {}}};
-    text.bitmap_width_px = kSidePx;
-    text.bitmap_height_px = kSidePx;
-    text.bitmap_row_bytes = kSidePx * kBytesPerPixel;
+    text.bitmap_width_px = side_px;
+    text.bitmap_height_px = side_px;
+    text.bitmap_row_bytes = side_px * kBytesPerPixel;
     core::BubbleAnnotation bubble{};
-    bubble.center = core::PointPx{kSidePx, kSidePx};
-    bubble.diameter_px = kSidePx;
-    bubble.bitmap_width_px = kSidePx;
-    bubble.bitmap_height_px = kSidePx;
-    bubble.bitmap_row_bytes = kSidePx * kBytesPerPixel;
+    bubble.center = core::PointPx{side_px, side_px};
+    bubble.diameter_px = side_px;
+    bubble.bitmap_width_px = side_px;
+    bubble.bitmap_height_px = side_px;
+    bubble.bitmap_row_bytes = side_px * kBytesPerPixel;
 
     struct Case final {
         std::string_view label;
@@ -2866,14 +2866,14 @@ bool Check_undrawable_bitmaps_fail_capture() {
     bool all_as_expected = true;
     for (Case const &test_case : cases) {
         GdiCaptureResult capture{};
-        capture.width = kCapturePx;
-        capture.height = kCapturePx;
-        capture.bitmap = Make_noise_bitmap(kCapturePx, kCapturePx, kNoiseSeed);
+        capture.width = capture_px;
+        capture.height = capture_px;
+        capture.bitmap = Make_noise_bitmap(capture_px, capture_px, kNoiseSeed);
         bool const rendered =
             capture.bitmap != nullptr &&
             Render_annotations_into_capture(
                 capture, std::span<const core::Annotation>(&test_case.annotation, 1),
-                core::RectPx::From_ltrb(0, 0, kCapturePx, kCapturePx));
+                core::RectPx::From_ltrb(0, 0, capture_px, capture_px));
         capture.Free();
         bool const as_expected = rendered == test_case.expect_rendered;
         Print("draw-failure: {}: {} ({})\n", test_case.label,
