@@ -133,7 +133,8 @@ class OverlayWindow final {
     [[nodiscard]] core::RectPx Selection_visible_screen_rect() const;
     void Save_directly_and_close(bool copy_saved_file_to_clipboard);
     void Save_as_and_close(bool copy_saved_file_to_clipboard);
-    // A modal warning box; the caller closes the overlay after it returns.
+    // A modal warning box over the overlay. The caller decides whether the overlay
+    // closes afterwards.
     void Show_warning_box(wchar_t const *message);
     void Copy_to_clipboard_and_close();
     void Pin_to_desktop_and_close();

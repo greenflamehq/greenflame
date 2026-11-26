@@ -36,8 +36,8 @@ struct CoInitGuard {
     CoInitGuard &operator=(const CoInitGuard &) = delete;
 };
 
-bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
-                          REFGUID container_format) {
+bool Encode_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
+                            REFGUID container_format) {
     if (!capture.Is_valid() || !path) return false;
 
     HRESULT hr = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
@@ -105,6 +105,21 @@ bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
 
     hr = encoder->Commit();
     return SUCCEEDED(hr);
+}
+
+// Encodes to a temporary file beside the target and moves it over the target only when
+// the whole encode succeeded, so a failure never truncates or removes an existing file.
+bool Save_capture_via_wic(GdiCaptureResult const &capture, wchar_t const *path,
+                          REFGUID container_format) {
+    if (!capture.Is_valid() || !path) return false;
+    std::wstring const temp_path = std::wstring(path) + L".greenflame-tmp";
+    if (!Encode_capture_via_wic(capture, temp_path.c_str(), container_format) ||
+        !MoveFileExW(temp_path.c_str(), path,
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        (void)DeleteFileW(temp_path.c_str());
+        return false;
+    }
+    return true;
 }
 
 [[nodiscard]] std::wstring Build_suffixed_path(std::wstring_view path,

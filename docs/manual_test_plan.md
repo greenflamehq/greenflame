@@ -1798,7 +1798,9 @@ unless a real end-to-end bug escapes into the Win32 shell:
   - A warning box ("Failed to save the selection.") shows for each attempt.
   - `Ctrl + S` closes the overlay after the box; `Ctrl + Shift + S` leaves the
     overlay open so another place can be chosen.
-  - No "Saved" balloon appears and no zero-byte file is left behind.
+  - No "Saved" balloon appears and no zero-byte or partial file is left behind.
+  - Saving over an existing file (Save As, choose it and confirm the overwrite) in a
+    folder that rejects the write leaves the old file intact.
 
 ### GF-MAN-OUT-009 - Path Copy Failure After A Successful Save
 

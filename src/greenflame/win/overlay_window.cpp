@@ -4612,9 +4612,7 @@ void OverlayWindow::Pin_to_desktop_and_close() {
 
     GdiCaptureResult cropped{};
     if (!Build_rendered_selection_capture(cropped)) {
-        ModalScope const modal(*this);
-        MessageBoxW(primary_hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
-                    MB_OK | MB_ICONWARNING);
+        Show_warning_box(kPinToDesktopFailedMessage);
         return;
     }
 
@@ -4626,9 +4624,7 @@ void OverlayWindow::Pin_to_desktop_and_close() {
     }
 
     cropped.Free();
-    ModalScope const modal(*this);
-    MessageBoxW(primary_hwnd_, kPinToDesktopFailedMessage, L"Greenflame",
-                MB_OK | MB_ICONWARNING);
+    Show_warning_box(kPinToDesktopFailedMessage);
 }
 
 LRESULT OverlayWindow::On_paint(HWND hwnd) {
