@@ -77,6 +77,8 @@ constexpr UINT kOverlayFailCloseMessage = WM_APP + 1;
 constexpr int32_t kSelectedAnnotationMarqueePhaseStepPx = 1;
 constexpr wchar_t kPinToDesktopFailedMessage[] =
     L"Failed to pin the selection to the desktop.";
+constexpr wchar_t kCopyToClipboardFailedMessage[] =
+    L"Failed to copy the selection to the clipboard.";
 
 constexpr int kThumbnailMaxWidth = 320;
 constexpr int kThumbnailMaxHeight = 120;
@@ -4574,14 +4576,20 @@ void OverlayWindow::Copy_to_clipboard_and_close() {
     }
 
     GdiCaptureResult cropped{};
-    if (!Build_rendered_selection_capture(cropped)) {
+    bool const copied_to_clipboard =
+        Build_rendered_selection_capture(cropped) &&
+        Copy_capture_to_clipboard(cropped, primary_hwnd_);
+    cropped.Free();
+    if (!copied_to_clipboard) {
+        // Never close silently with nothing on the clipboard.
+        ModalScope const modal(*this);
+        MessageBoxW(primary_hwnd_, kCopyToClipboardFailedMessage, L"Greenflame",
+                    MB_OK | MB_ICONWARNING);
         Destroy();
         return;
     }
-    bool const copied_to_clipboard = Copy_capture_to_clipboard(cropped, primary_hwnd_);
-    cropped.Free();
 
-    if (copied_to_clipboard && events_) {
+    if (events_) {
         events_->On_selection_copied_to_clipboard(Selection_screen_rect(),
                                                   controller_.State().selection_window);
     }

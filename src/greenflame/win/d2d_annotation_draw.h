@@ -59,7 +59,9 @@ bool Draw_d2d_freehand_points(ID2D1RenderTarget *render_target,
                               core::StrokeStyle style,
                               core::FreehandTipShape tip_shape);
 
-// False when a freehand stroke could not be drawn whole (Draw_d2d_freehand_points).
+// False when the annotation could not be drawn whole: missing resources, a geometry or
+// bitmap that could not be created, inconsistent bitmap data. Save and Copy must fail on
+// it; on-screen paint may ignore it.
 bool Draw_d2d_annotation(ID2D1RenderTarget *render_target,
                          D2DAnnotationDrawContext context,
                          core::Annotation const &annotation);

@@ -2816,6 +2816,46 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
     return frame_summary.p95_ms;
 }
 
+// Text and bubble annotations whose bitmap data is inconsistent (the buffer is shorter
+// than its size says) cannot be drawn: Save and Copy must fail on them, not drop them.
+bool Check_undrawable_bitmaps_fail_capture() {
+    core::TextAnnotation text{};
+    text.visual_bounds = core::RectPx::From_ltrb(2, 2, 10, 10);
+    text.bitmap_width_px = 8;
+    text.bitmap_height_px = 8;
+    text.bitmap_row_bytes = 8 * kBytesPerPixel;
+    text.premultiplied_bgra = std::vector<uint8_t>(kBytesPerPixel, 255);
+    core::BubbleAnnotation bubble{};
+    bubble.center = core::PointPx{8, 8};
+    bubble.diameter_px = 8;
+    bubble.bitmap_width_px = 8;
+    bubble.bitmap_height_px = 8;
+    bubble.bitmap_row_bytes = 8 * kBytesPerPixel;
+    bubble.premultiplied_bgra = std::vector<uint8_t>(kBytesPerPixel, 255);
+    std::array<core::Annotation, 2> const annotations = {
+        core::Annotation{.id = 1, .data = text},
+        core::Annotation{.id = 2, .data = bubble}};
+    bool all_failed = true;
+    for (core::Annotation const &annotation : annotations) {
+        GdiCaptureResult capture{};
+        capture.width = 16;
+        capture.height = 16;
+        capture.bitmap = Make_noise_bitmap(16, 16, kNoiseSeed);
+        bool const rendered =
+            capture.bitmap != nullptr &&
+            Render_annotations_into_capture(
+                capture, std::span<const core::Annotation>(&annotation, 1),
+                core::RectPx::From_ltrb(0, 0, 16, 16));
+        capture.Free();
+        Print("draw-failure: undrawable {} bitmap {}\n",
+              std::holds_alternative<core::TextAnnotation>(annotation.data) ? "text"
+                                                                             : "bubble",
+              rendered ? "succeeded WITHOUT drawing it" : "failed (Save and Copy fail)");
+        all_failed = all_failed && !rendered;
+    }
+    return all_failed;
+}
+
 // --expect-draw-failure: an obfuscate whose raster is wider than the device can
 // upload must make the paint report D2DFrameStatus::DrawFailed (the overlay then
 // fails closed) instead of showing what it covers. Save and Copy's software renderer
@@ -2879,8 +2919,10 @@ int Run_draw_failure_check(D2DOverlayResources &res, int width, int height) {
     Print("draw-failure: software renderer {}\n",
           !rendered ? "failed (Save and Copy fail)"
                     : (drawn ? "drew it" : "succeeded WITHOUT drawing it"));
-    return reported && (!rendered || drawn) ? static_cast<int>(BenchExit::Ok)
-                                            : static_cast<int>(BenchExit::PaintFailed);
+    bool const bitmaps_fail = Check_undrawable_bitmaps_fail_capture();
+    return reported && (!rendered || drawn) && bitmaps_fail
+               ? static_cast<int>(BenchExit::Ok)
+               : static_cast<int>(BenchExit::PaintFailed);
 }
 
 int Run_render_bench(Args const &args) {
