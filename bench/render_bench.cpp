@@ -239,6 +239,7 @@ struct Args final {
     bool stale_frozen = false;         // --stale-frozen
     bool resize = false;               // --resize
     bool obfuscate_below = false;      // --obfuscate-below
+    bool strokes_above = false;        // --strokes-above
     bool multi = false;                // --multi
     bool edit_dynamic = false;         // --edit-dynamic
     bool verify_edit = false;          // --verify-edit
@@ -299,7 +300,10 @@ void Print_usage() {
         "obfuscates there, under the draft\n"
         "  --obfuscate-below            move: the obfuscates sit below the moved "
         "annotation\n"
-        "  --stroke-points N            points per --annotated stroke (default 64)\n"
+        "  --stroke-points N            points per --annotated stroke and per moved "
+        "brush or highlighter (default 64)\n"
+        "  --strokes-above              move: the --annotated strokes sit above the "
+        "moved annotation\n"
         "  --edit-dynamic               move: edit frames take the full annotation "
         "rebuild and the dynamic path\n"
         "  --verify-edit                move: draw every frame again with "
@@ -597,6 +601,8 @@ std::optional<Args> Parse_args(std::span<char *const> argv) {
             args.multi = true;
         } else if (key == "--obfuscate-below") {
             args.obfuscate_below = true;
+        } else if (key == "--strokes-above") {
+            args.strokes_above = true;
         } else if (key == "--obfuscations") {
             std::optional<int> const v = next_int(0);
             if (!v) return std::nullopt;
@@ -1430,8 +1436,9 @@ void Fill_stand_in_raster(int32_t width, int32_t height, int32_t &out_width,
 }
 
 // The annotation --edit-kind moves, filling box. Obfuscates get their raster later.
-std::optional<core::Annotation> Make_edit_annotation(std::string_view kind,
-                                                     core::RectPx box, uint64_t id) {
+std::optional<core::Annotation>
+Make_edit_annotation(std::string_view kind, core::RectPx box, uint64_t id,
+                     int freehand_points = kEditZigzagPoints) {
     core::StrokeStyle const style{.width_px = kEditStrokeWidthPx, .color = kEditColor};
     core::Annotation annotation{.id = id};
     if (kind == "rect" || kind == "filled-rect") {
@@ -1456,10 +1463,10 @@ std::optional<core::Annotation> Make_edit_annotation(std::string_view kind,
                         : style;
         stroke.freehand_tip_shape = highlighter ? core::FreehandTipShape::Square
                                                 : core::FreehandTipShape::Round;
-        for (int32_t i = 0; i < kEditZigzagPoints; ++i) {
+        for (int32_t i = 0; i < freehand_points; ++i) {
             int32_t const x =
                 box.left + static_cast<int32_t>(static_cast<int64_t>(box.Width()) * i /
-                                                (kEditZigzagPoints - 1));
+                                                (freehand_points - 1));
             stroke.points.push_back({x, i % 2 == 0 ? box.top : box.bottom});
         }
         annotation.data = stroke;
@@ -1557,8 +1564,13 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
     if (scene.source == nullptr) {
         return std::nullopt;
     }
+    std::vector<core::Annotation> strokes;
     if (args.annotated) {
-        scene.doc = Make_bench_annotations(width, height, args.stroke_points);
+        strokes = Make_bench_annotations(width, height, args.stroke_points);
+        if (!args.strokes_above) {
+            scene.doc = std::move(strokes);
+            strokes.clear();
+        }
     }
     core::RectPx const sel = Inset_selection(width, height);
     int32_t const mid_y = (sel.top + sel.bottom) / 2;
@@ -1588,7 +1600,7 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
             sel.left + kEditMarginPx, mid_y - kEditBoxHeightPx / 2,
             sel.left + kEditMarginPx + kEditBoxWidthPx, mid_y + kEditBoxHeightPx / 2);
         std::optional<core::Annotation> first =
-            Make_edit_annotation(args.edit_kind, box, next_id++);
+            Make_edit_annotation(args.edit_kind, box, next_id++, args.stroke_points);
         if (!first.has_value()) {
             Print("unknown --edit-kind {}\n", args.edit_kind);
             return std::nullopt;
@@ -1658,6 +1670,7 @@ std::optional<EditScene> Make_edit_scene(std::string_view scenario, int width,
     if (args.raster_above) {
         append(load, false);
     }
+    append(strokes, false);
     for (size_t i = 0; i < scene.doc.size(); ++i) {
         if (!Commit_obfuscate(scene.doc, i, *scene.source)) {
             Print("move: could not build an obfuscate source\n");
@@ -1920,7 +1933,9 @@ std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
         }
     }
     bool const was_fast = res.edit_fast_paths;
+    bool const was_mask_cache = res.highlighter_mask_cache;
     res.edit_fast_paths = false;
+    res.highlighter_mask_cache = false;
     size_t const uploads_before = res.obfuscate_uploads.count;
     bool ok = Paint_d2d_frame(res, input, width, height, nullptr,
                               kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
@@ -1929,6 +1944,7 @@ std::optional<size_t> Verify_edit_frame(D2DOverlayResources &res,
     ok = ok && Paint_d2d_frame(res, input, width, height, nullptr,
                                kFrameWaitTimeoutMs) == D2DFrameStatus::Ok;
     res.edit_fast_paths = was_fast;
+    res.highlighter_mask_cache = was_mask_cache;
     if (!ok) {
         return std::nullopt;
     }
@@ -2251,6 +2267,7 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         }
     }
     ctx.res->edit_fast_paths = !args.edit_dynamic;
+    ctx.res->highlighter_mask_cache = !args.edit_dynamic;
     if (args.stale_frozen && edit.has_value() && scenario == "move") {
         // Valid and built for the selection, but from the annotations moved halfway,
         // as a frozen rebuild in the middle of an edit leaves it. Edit frames must not
@@ -2484,16 +2501,27 @@ std::optional<double> Run_scenario(RunContext &ctx, std::string_view scenario,
         size_t const patch_builds = patch_stats.builds - patch_stats_before.builds;
         size_t const patch_hits = patch_stats.hits - patch_stats_before.hits;
         Print("verify-edit: {} changed-area frames, {} below-cache hits, {} patch "
-              "builds, {} patch cache hits, {} obfuscate reuploads\n",
+              "builds, {} patch cache hits, {} obfuscate reuploads, {} highlighter "
+              "mask hits ({} moved)\n",
               stats.region_frames, stats.below_cache_hits, patch_builds, patch_hits,
-              verify_reuploads);
+              verify_reuploads, stats.highlighter_mask_hits,
+              stats.highlighter_mask_moved_hits);
+        // A long highlighter drawn above the edit must reuse its mask, and a moved
+        // one its mask moved.
+        bool const long_strokes = static_cast<size_t>(args.stroke_points) >=
+                                  D2DOverlayResources::kHighlighterMaskMinPoints;
+        bool const mask_expected = long_strokes && args.annotated && args.strokes_above;
+        bool const moved_mask_expected =
+            long_strokes && args.edit_kind == "highlighter";
         // Every frame with patches builds them again (as a repaint with no input):
         // that must keep them, and the redraw must upload nothing.
         if (scenario == "move" &&
             ((region_expected && stats.region_frames == 0) ||
              (!region_expected && stats.region_frames > 0) ||
-             (args.annotated && stats.below_cache_hits == 0) ||
-             (patch_builds > 0 && patch_hits == 0) || verify_reuploads > 0)) {
+             (args.annotated && !args.strokes_above && stats.below_cache_hits == 0) ||
+             (patch_builds > 0 && patch_hits == 0) || verify_reuploads > 0 ||
+             (mask_expected && stats.highlighter_mask_hits == 0) ||
+             (moved_mask_expected && stats.highlighter_mask_moved_hits == 0))) {
             Print("verify-edit: the edit fast paths did not run as expected\n");
             return std::nullopt;
         }

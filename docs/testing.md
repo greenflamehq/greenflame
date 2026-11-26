@@ -254,12 +254,18 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
   - `--resize`: drag the right edge of a box annotation instead of the body.
   - `--obfuscations K`: K committed obfuscates across the middle row, above the moved
     annotation (`--obfuscate-below`: below it).
-  - `--stroke-points N` (default 64): points per `--annotated` stroke.
+  - `--stroke-points N` (default 64): points per `--annotated` stroke, and per moved
+    brush or highlighter.
+  - `--strokes-above`: the `--annotated` strokes sit above the moved annotation, so
+    every edit frame draws them.
   - `--edit-dynamic`: edit frames take the full annotation rebuild and the dynamic
-    path. `--verify-edit`: every frame is drawn again that way and the run fails
+    path, and every highlighter mask is drawn from its points. `--verify-edit`: every frame is drawn again that way and the run fails
     unless the two match at tolerance 0. It also fails unless the edit fast paths
     ran: the changed-area path on some frame (on none with `--lifted` or
-    `--stale-frozen`) and, with `--annotated`, the below-edit cache. Each move
+    `--stale-frozen`) and, with `--annotated`, the below-edit cache (not with
+    `--strokes-above`). With at least 256 `--stroke-points` and a moved highlighter
+    or `--strokes-above`, a highlighter must also have been copied from its cached
+    mask; the redraw draws every mask from its points. Each move
     frame also gets the privacy check: every obfuscate is rebuilt from scratch with
     no cache, and each preview patch, and each obfuscate with no patch, must equal
     its rebuild. Then the patch cache runs again on the unchanged frame and must
@@ -267,7 +273,8 @@ virtual desktop, or with `--split-monitors` into one offscreen bitmap per monito
     raster, and a second redraw with every upload dropped is the one compared.
     `ctest` runs it on WARP, in one target on `single-1080`, for a rectangle,
     obfuscates below, a multi-selection, a resize, a moved obfuscate, a
-    highlighter, `--lifted`, `--stale-frozen`, `--click-first` and `--click-moved`
+    highlighter, a 256-point moved highlighter, 256-point strokes above a
+    rectangle, `--lifted`, `--stale-frozen`, `--click-first` and `--click-moved`
     (a rectangle with and without an obfuscation, and a moved obfuscate), and
     `--stacked`; and one per
     monitor on `jocelyn-desk` for the rectangle, the moved obfuscate and
