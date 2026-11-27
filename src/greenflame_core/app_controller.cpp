@@ -21,7 +21,7 @@ constexpr wchar_t kLastWindowMinimizedMessage[] =
 constexpr wchar_t kCliObfuscateRiskPathUnknown[] =
     L"(config file path could not be determined)";
 
-[[nodiscard]] greenflame::ClipboardCopyResult ClipboardCopyFailed() {
+[[nodiscard]] greenflame::ClipboardCopyResult Clipboard_copy_failed() {
     return {kClipboardCopyFailedMessage, false};
 }
 
@@ -373,21 +373,21 @@ AppController::On_copy_window_to_clipboard_requested(HWND target_window) {
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
 
-    return ClipboardCopyFailed();
+    return Clipboard_copy_failed();
 }
 
 ClipboardCopyResult AppController::On_copy_monitor_to_clipboard_requested() {
     std::vector<core::MonitorWithBounds> const monitors =
         display_queries_.Get_monitors_with_bounds();
     if (monitors.empty()) {
-        return ClipboardCopyFailed();
+        return Clipboard_copy_failed();
     }
 
     core::PointPx const cursor = display_queries_.Get_cursor_pos_px();
     std::optional<size_t> const index =
         core::Index_of_monitor_containing(cursor, monitors);
     if (!index.has_value()) {
-        return ClipboardCopyFailed();
+        return Clipboard_copy_failed();
     }
 
     core::RectPx const rect = monitors[*index].bounds;
@@ -395,7 +395,7 @@ ClipboardCopyResult AppController::On_copy_monitor_to_clipboard_requested() {
         Store_last_capture(rect, std::nullopt);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
-    return ClipboardCopyFailed();
+    return Clipboard_copy_failed();
 }
 
 ClipboardCopyResult AppController::On_copy_desktop_to_clipboard_requested() {
@@ -404,7 +404,7 @@ ClipboardCopyResult AppController::On_copy_desktop_to_clipboard_requested() {
         Store_last_capture(rect, std::nullopt);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
-    return ClipboardCopyFailed();
+    return Clipboard_copy_failed();
 }
 
 ClipboardCopyResult AppController::On_copy_last_region_to_clipboard_requested() {
@@ -415,7 +415,7 @@ ClipboardCopyResult AppController::On_copy_last_region_to_clipboard_requested() 
                                                 config_.include_cursor)) {
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
-    return ClipboardCopyFailed();
+    return Clipboard_copy_failed();
 }
 
 ClipboardCopyResult AppController::On_copy_last_window_to_clipboard_requested() {
@@ -439,7 +439,7 @@ ClipboardCopyResult AppController::On_copy_last_window_to_clipboard_requested() 
         Store_last_capture(*rect, hwnd);
         return ClipboardCopyResult{kClipboardCopiedBalloonMessage, true};
     }
-    return ClipboardCopyFailed();
+    return Clipboard_copy_failed();
 }
 
 ClipboardCopyResult
