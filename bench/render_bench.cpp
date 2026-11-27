@@ -2856,12 +2856,15 @@ bool Check_undrawable_bitmaps_fail_capture() {
     cases.push_back(
         {"bubble with a diameter and no buffer", {.id = 4, .data = bubble}, false});
     // Nothing to draw.
+    constexpr uint64_t no_text_id = 5;
+    constexpr uint64_t no_bubble_id = 6;
     core::TextAnnotation no_text = text;
     no_text.runs.clear();
-    cases.push_back({"text with no text", {.id = 5, .data = no_text}, true});
+    cases.push_back({"text with no text", {.id = no_text_id, .data = no_text}, true});
     core::BubbleAnnotation no_bubble = bubble;
     no_bubble.diameter_px = 0;
-    cases.push_back({"bubble with no diameter", {.id = 6, .data = no_bubble}, true});
+    cases.push_back(
+        {"bubble with no diameter", {.id = no_bubble_id, .data = no_bubble}, true});
 
     bool all_as_expected = true;
     for (Case const &test_case : cases) {
